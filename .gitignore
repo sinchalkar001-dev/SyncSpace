@@ -29,3 +29,8 @@ desktop.ini
 
 # Local verification screenshots
 shots/
+
+# Screen recordings dropped in for debugging
+*.mp4
+*.mov
+*.webm
