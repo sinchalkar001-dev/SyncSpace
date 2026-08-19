@@ -1441,8 +1441,12 @@ a {
   cursor: crosshair;
 }
 
+/* A ring the size of the eraser's actual reach, so its bite is visible. */
 .board--erase {
-  cursor: cell;
+  cursor:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><circle cx='16' cy='16' r='14' fill='rgba(242,160,63,0.14)' stroke='%23f2a03f' stroke-width='1.5'/></svg>")
+      16 16,
+    cell;
 }
 
 .board--locked {

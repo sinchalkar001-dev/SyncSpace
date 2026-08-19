@@ -15,6 +15,18 @@ import { CanvasControls } from './CanvasControls.jsx'
 import { TextComposer } from './TextComposer.jsx'
 
 const MIN_POINT_DISTANCE = 2
+
+// The eraser reaches this far, in screen pixels. A bare point test makes thin
+// strokes almost impossible to hit while dragging, which reads as "the eraser
+// does not work". Screen units on purpose, so the reach feels the same at any
+// zoom level.
+const ERASER_RADIUS = 14
+const ERASER_SAMPLES = [[0, 0]].concat(
+  [0, 1, 2, 3, 4, 5, 6, 7].map((step) => {
+    const angle = (step * Math.PI) / 4
+    return [Math.round(Math.cos(angle) * ERASER_RADIUS), Math.round(Math.sin(angle) * ERASER_RADIUS)]
+  })
+)
 const SHORTCUTS = { v: 'select', p: 'pen', r: 'rect', o: 'ellipse', t: 'text', e: 'eraser' }
 
 /** Converts a screen pointer position into document coordinates. */
@@ -107,12 +119,16 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       const pointer = stage.getPointerPosition()
       if (!pointer) return
 
-      const node = stage.getIntersection(pointer)
-      const id = typeof node?.id === 'function' ? node.id() : null
-      if (!id) return
+      const hits = new Set()
+      for (const [dx, dy] of ERASER_SAMPLES) {
+        const node = stage.getIntersection({ x: pointer.x + dx, y: pointer.y + dy })
+        const id = typeof node?.id === 'function' ? node.id() : null
+        if (id) hits.add(id)
+      }
+      if (hits.size === 0) return
 
-      removeShape(shapes, id)
-      setSelectedId((current) => (current === id ? null : current))
+      hits.forEach((id) => removeShape(shapes, id))
+      setSelectedId((current) => (hits.has(current) ? null : current))
     },
     [shapes]
   )

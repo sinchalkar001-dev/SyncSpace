@@ -109,7 +109,7 @@ than one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
 | --- | --- |
 | Tools | `V` select · `P` pen · `R` rectangle · `O` ellipse · `T` text · `E` eraser |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) |
-| Erase | Pick the eraser and drag across the canvas — it removes everything the stroke crosses |
+| Erase | Pick the eraser and drag — it clears everything within about 14px of the pointer, so thin strokes do not need pixel-perfect aim |
 | Delete selection | `Delete` or `Backspace` |
 | Zoom | Wheel, anchored at the pointer · reset from the zoom pill |
 | Pan | Drag with the select tool |
