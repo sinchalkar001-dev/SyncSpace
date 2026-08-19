@@ -36,18 +36,32 @@ const PEOPLE = {
 const ok = (body) => ({ ok: true, status: 200, json: () => Promise.resolve(body) })
 
 let deleteCalls
+let patchCalls
 
 function mockApi(overrides = {}) {
   deleteCalls = []
+  patchCalls = []
   vi.spyOn(globalThis, 'fetch').mockImplementation((url, init = {}) => {
     const method = init.method || 'GET'
     const path = String(url)
 
     if (path.endsWith('/auth/me')) return Promise.resolve(ok({ user: USER }))
     if (path.endsWith('/rooms') && method === 'GET') {
-      return Promise.resolve(ok({ rooms: [ROOM] }))
+      return Promise.resolve(ok({ rooms: [overrides.room || ROOM] }))
     }
     if (path.endsWith('/people')) return Promise.resolve(ok(PEOPLE))
+    if (method === 'PATCH') {
+      const patch = JSON.parse(init.body)
+      patchCalls.push(patch)
+      if (overrides.patchFails) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: { code: 'not_owner', message: 'Not the owner' } }),
+        })
+      }
+      return Promise.resolve(ok({ room: { ...(overrides.room || ROOM), ...patch } }))
+    }
     if (method === 'DELETE') {
       deleteCalls.push(path)
       if (overrides.deleteFails) {
@@ -173,5 +187,72 @@ describe('dashboard room management', () => {
     expect(within(dialog).getByText(/3 visits/)).toBeInTheDocument()
     expect(within(dialog).getByText('guest')).toBeInTheDocument()
     expect(within(dialog).getByText('owner')).toBeInTheDocument()
+  })
+
+  it('offers rename and a visibility switch in the menu', async () => {
+    mockApi()
+    renderDashboard()
+    await screen.findByText('Bakchodi')
+
+    await openMenu()
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument()
+    // The room is private, so the menu offers the opposite action.
+    expect(screen.getByRole('menuitem', { name: 'Make public' })).toBeInTheDocument()
+  })
+
+  it('flips visibility and updates the pill', async () => {
+    mockApi()
+    renderDashboard()
+    await screen.findByText('Bakchodi')
+    expect(screen.getByText('Private')).toBeInTheDocument()
+
+    await openMenu()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Make public' }))
+
+    await waitFor(() => expect(screen.getByText('Public')).toBeInTheDocument())
+    expect(patchCalls).toEqual([{ isPublic: true }])
+  })
+
+  it('restores the previous visibility if the server refuses', async () => {
+    mockApi({ patchFails: true })
+    renderDashboard()
+    await screen.findByText('Bakchodi')
+
+    await openMenu()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Make public' }))
+
+    expect(await screen.findByText('Not the owner')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Private')).toBeInTheDocument())
+  })
+
+  it('renames a room from the menu', async () => {
+    mockApi()
+    renderDashboard()
+    await screen.findByText('Bakchodi')
+
+    await openMenu()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const input = within(dialog).getByLabelText('Room name')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Candidate screen')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save name' }))
+
+    await waitFor(() => expect(screen.getByText('Candidate screen')).toBeInTheDocument())
+    expect(patchCalls).toEqual([{ name: 'Candidate screen' }])
+  })
+
+  it('leads an unnamed room with its code so two are never identical', async () => {
+    const unnamed = { ...ROOM, name: 'Untitled room' }
+    mockApi({ room: unnamed })
+    renderDashboard()
+
+    expect(await screen.findByText('FmXAf3dE')).toBeInTheDocument()
+    expect(screen.getByText('Unnamed')).toBeInTheDocument()
+    expect(screen.queryByText('Untitled room')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Manage FmXAf3dE/ }))
+    expect(screen.getByRole('menuitem', { name: 'Name this room' })).toBeInTheDocument()
   })
 })

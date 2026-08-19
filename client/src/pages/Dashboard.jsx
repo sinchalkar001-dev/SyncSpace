@@ -6,6 +6,7 @@ import { useToast } from '../components/ui/useToast.js'
 import { UserMenu } from '../components/UserMenu.jsx'
 import { RoomCard } from '../components/RoomCard.jsx'
 import { RoomPeopleDialog } from '../components/RoomPeopleDialog.jsx'
+import { RenameRoomDialog } from '../components/RenameRoomDialog.jsx'
 import { ConfirmDialog } from '../components/ui/Modal.jsx'
 import { Spinner } from '../components/ui/Spinner.jsx'
 
@@ -22,6 +23,7 @@ export default function Dashboard() {
 
   const [peopleRoom, setPeopleRoom] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [renameTarget, setRenameTarget] = useState(null)
 
   const load = useCallback((signal) => {
     setState('loading')
@@ -62,6 +64,45 @@ export default function Dashboard() {
     const trimmed = code.trim()
     if (trimmed) navigate('/room/' + encodeURIComponent(trimmed))
   }
+
+  const patchRoom = useCallback((roomId, changes) => {
+    setRooms((current) =>
+      current.map((room) => (room.roomId === roomId ? { ...room, ...changes } : room))
+    )
+  }, [])
+
+  const onToggleVisibility = useCallback(
+    async (room) => {
+      const isPublic = !room.isPublic
+      patchRoom(room.roomId, { isPublic })
+      try {
+        await api.updateRoom(room.roomId, { isPublic })
+        toast.success(
+          isPublic ? 'Anyone with the link can now join' : 'Room is private again'
+        )
+      } catch (error) {
+        patchRoom(room.roomId, { isPublic: room.isPublic })
+        toast.error(error.message)
+      }
+    },
+    [patchRoom, toast]
+  )
+
+  const onRenameSubmit = useCallback(
+    async (name) => {
+      const target = renameTarget
+      if (!target) return
+      try {
+        const { room } = await api.updateRoom(target.roomId, { name })
+        patchRoom(target.roomId, room)
+        toast.success('Renamed to ' + room.name)
+      } catch (error) {
+        toast.error(error.message)
+        throw error
+      }
+    },
+    [renameTarget, patchRoom, toast]
+  )
 
   const onConfirmDelete = useCallback(async () => {
     const target = deleteTarget
@@ -162,12 +203,15 @@ export default function Dashboard() {
 
           {state === 'ready' && rooms.length > 0 && (
             <ul className="roomlist">
-              {rooms.map((room) => (
+              {rooms.map((room, index) => (
                 <RoomCard
                   key={room.roomId}
                   room={room}
+                  index={index}
                   onOpen={() => navigate('/room/' + room.roomId)}
                   onShowPeople={() => setPeopleRoom(room)}
+                  onRename={() => setRenameTarget(room)}
+                  onToggleVisibility={() => onToggleVisibility(room)}
                   onDelete={() => setDeleteTarget(room)}
                 />
               ))}
@@ -175,6 +219,13 @@ export default function Dashboard() {
           )}
         </section>
       </main>
+
+      <RenameRoomDialog
+        room={renameTarget}
+        open={Boolean(renameTarget)}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={onRenameSubmit}
+      />
 
       <RoomPeopleDialog
         room={peopleRoom}
