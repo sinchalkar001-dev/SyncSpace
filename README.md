@@ -4,8 +4,7 @@ Real-time collaborative whiteboard and code editor. Two people open the same roo
 shared canvas while editing a shared code buffer — concurrent edits merge through CRDTs rather than
 last-write-wins.
 
-Frontend and backend are both in place. Rooms sync live, survive a server restart, and can be
-replayed from an append-only log.
+Rooms sync live, survive a server restart, and can be replayed from an append-only log.
 
 ## Stack
 
@@ -23,8 +22,6 @@ npm run dev:server    # http://localhost:4000
 npm run dev:client    # http://localhost:5173
 ```
 
-Open the client, create a room, and paste the URL into a second window.
-
 **MongoDB.** The server expects `mongodb://127.0.0.1:27017/syncspace`. Three ways to get one:
 
 | Situation | Command |
@@ -36,7 +33,22 @@ Open the client, create a room, and paste the URL into a second window.
 `dev:memory` boots the server against a throwaway in-memory MongoDB. Everything written is lost on
 exit — it is for trying things out, not for keeping work.
 
-Other scripts: `npm test`, `npm run lint`, `npm run build`.
+Other scripts: `npm test`, `npm run lint`, `npm run build`, `npm run test:e2e`.
+
+## Accounts and access
+
+Two ways in, both first-class:
+
+- **Signed in** — register or sign in, get a JWT, and keep a dashboard of your rooms. Rooms you
+  create are private and invite-only.
+- **Guest** — open a room link and pick a display name. Guests reach public rooms only.
+
+Guest access is deliberate: the interview scenario in the brief needs a candidate to join from a
+link without signing up. The server enforces the same rule the UI shows, and refuses to boot in
+production with `ALLOW_ANONYMOUS=true`.
+
+Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
+the token, drops you back to a guest identity, and reconnects the room with the new credentials.
 
 ## How it fits together
 
@@ -48,9 +60,8 @@ One HTTP server carries three surfaces:
 | `/collab` | WebSocket | Hocuspocus — Yjs sync and awareness |
 | `/socket.io` | WebSocket | Room lifecycle: join, leave, chat |
 
-Upgrades are routed by pathname in [server/src/index.js](server/src/index.js); Socket.io keeps its
-own listener and Hocuspocus gets everything on `/collab`. In development Vite proxies all three, so
-the client uses same-origin relative paths.
+Upgrades are routed by pathname in [server/src/index.js](server/src/index.js). In development Vite
+proxies all three, so the client uses same-origin relative paths.
 
 ### Document model
 
@@ -65,6 +76,10 @@ One `Y.Doc` per room. The server relays and persists; it never owns state.
 Shapes are `Y.Map`s rather than plain objects so two people editing different properties of the same
 shape merge cleanly. Awareness carries `user` and `cursor` and is never persisted.
 
+Undo is scoped to the whiteboard and, by tracking only the default transaction origin, to **your own
+edits** — Ctrl+Z never rolls back a collaborator's work. Monaco keeps its own stack for the code
+pane.
+
 ### Persistence
 
 Two tiers, in [server/src/collab/persistence.js](server/src/collab/persistence.js):
@@ -73,21 +88,30 @@ Two tiers, in [server/src/collab/persistence.js](server/src/collab/persistence.j
 - **DocUpdate** — an append-only log, one row per update. Powers replay, and covers anything written
   since the last snapshot if the process dies.
 
-Loading applies the snapshot, then replays log entries recorded after it. Mutating `DocUpdate` is
-blocked in [the schema](server/src/models/DocUpdate.js), not merely by convention.
+Mutating `DocUpdate` is blocked in [the schema](server/src/models/DocUpdate.js), not merely by
+convention. The per-room sequence counter is in-process, which is correct for a single node; more
+than one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
 
-The per-room sequence counter is in-process, which is correct for a single node. Running more than
-one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
+## Editing
 
-### Auth
+| Action | How |
+| --- | --- |
+| Tools | `V` select · `P` pen · `R` rectangle · `O` ellipse · `T` text · `E` eraser |
+| Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) |
+| Delete selection | `Delete` or `Backspace` |
+| Zoom | Wheel, anchored at the pointer · reset from the zoom pill |
+| Pan | Drag with the select tool |
 
-`POST /api/auth/register` and `/login` return a JWT. The token is passed to Hocuspocus and Socket.io,
-which verify it in `onAuthenticate` and a connection middleware.
+Tools live in a floating vertical rail on the canvas, with colour, width, and destructive actions
+behind popovers, and zoom in a pill at the bottom left. That keeps the rail a fixed 48px wide
+whatever the pane width — the earlier single horizontal bar overflowed and clipped its own buttons
+as soon as the split moved.
 
-Rooms opened by URL are created on demand and are **public**, so ad-hoc sessions work without an
-account. Rooms created through `POST /api/rooms` are **private** and invite-only. Guests are admitted
-only while `ALLOW_ANONYMOUS=true`; the env schema refuses to boot in production with it enabled, or
-without a 32-character `JWT_SECRET`.
+Text is typed inline on the canvas where you clicked. Destructive actions use a real dialog, so
+nothing in the app depends on `window.prompt` or `window.confirm`.
+
+Editing while disconnected is allowed on purpose: Yjs queues local changes and merges them on
+reconnect. The header shows connection state and a toast reports drops and recoveries.
 
 ## API
 
@@ -107,11 +131,13 @@ without a 32-character `JWT_SECRET`.
 
 ```
 client/src
-├── lib/          collab.js (Y.Doc + provider), monacoSetup.js, identity.js, socket.js, env.js
-├── hooks/        useCollabSession, useAwareness, useShapes, useElementSize, useRoomSocket
+├── api/          client.js — fetch wrapper, token, error normalisation
+├── auth/         AuthProvider, useAuth, token storage
+├── lib/          collab.js (Y.Doc + provider + undo), monacoSetup, identity, socket, validation
+├── hooks/        useCollabSession, useAwareness, useShapes, useUndo, useElementSize, useRoomSocket
 ├── store/        uiStore.js — tool, colour, width, zoom, split ratio
-├── components/   Whiteboard/, Editor/, SplitPane, PresenceBar, ConnectionStatus
-└── pages/        Home (create/join), Room (split view)
+├── components/   Whiteboard/ (ToolRail, CanvasControls, TextComposer), Editor/, ui/, UserMenu
+└── pages/        Home, Login, Register, Dashboard, Room, NotFound
 
 server/src
 ├── config/       env.js (zod-validated), logger.js
@@ -127,21 +153,43 @@ server/src
 ## Tests
 
 ```bash
-npm test        # 53 tests
+npm test                      # server, 53 tests
+npm test --workspace client   # client, 31 tests
+npm run test:e2e              # browser, two real tabs, 3 tests
 ```
 
-Backed by a real in-memory MongoDB, not mocks. Covers env validation, the REST API and its access
-control, replay reconstruction, append-only enforcement, Socket.io room lifecycle, and — in
-[server/test/collab.test.js](server/test/collab.test.js) — two live clients proving edits propagate
-both ways, that simultaneous writes to the same offset converge without loss, and that a room
-reloads from MongoDB after every client leaves.
+The server suite runs against a real in-memory MongoDB, not mocks: env validation, the REST API and
+its access control, replay reconstruction, append-only enforcement, Socket.io room lifecycle, and —
+in [server/test/collab.test.js](server/test/collab.test.js) — two live clients proving edits
+propagate both ways, that simultaneous writes to the same offset converge without loss, and that a
+room reloads from MongoDB after every client leaves.
 
-## Known gaps
+The client suite covers the API wrapper, session restore and sign-out, the toast system, the account
+menu, the UI store's clamping, and registration validation.
 
-- **Replay UI** — the backend endpoints exist; the client scrubber does not.
-- **Update log cost** — one insert per Yjs update, so a fast typist writes a lot of rows. Batching or
-  a TTL is the next step; `PERSIST_UPDATE_LOG=false` disables it (and replay with it).
-- **Text placement** uses `window.prompt`. An inline canvas input would be better.
+The Playwright suite in [e2e/sync.spec.js](e2e/sync.spec.js) drives two real browser tabs against
+the running stack: both must see each other in presence, code typed in one must appear in the other
+and back again, a rectangle drawn in one must change the other's canvas pixels, and the tool rail
+must not overflow at 1440, 1100, or 900px wide. It needs a MongoDB; start one of the three ways
+above first.
+
+## What "production ready" would still take
+
+The app is solid for a demo or an internal tool. Before putting it in front of untrusted users:
+
+- **Token storage.** The JWT sits in `localStorage`, which any injected script can read. Moving to an
+  httpOnly, SameSite cookie plus a short-lived access token and refresh rotation is the real fix, and
+  it changes how the WebSocket handshake authenticates.
+- **No refresh tokens.** Sessions last `JWT_EXPIRES_IN` (7d default) and cannot be revoked before
+  they expire. There is no logout-everywhere and no server-side session list.
+- **Transport.** Serve over HTTPS/WSS behind a proxy, set HSTS, and tighten the helmet CSP — the
+  defaults here are permissive enough for Vite's dev server.
+- **Observability.** pino logs to stdout with no aggregation, tracing, or alerting, and the error
+  boundary logs to the console instead of a reporter.
+- **Update-log growth.** One insert per Yjs update, so a fast typist writes a lot of rows. Batching,
+  compaction, or a TTL is needed before this runs long-term; `PERSIST_UPDATE_LOG=false` disables it
+  (and replay with it).
+- **Single node.** See the sequence-counter note above.
+- **Replay UI.** The endpoints exist; the scrubber does not.
 - **Monaco bundle** is 3.3 MB (857 kB gzipped) because every language ships. Trim the language set
   when size matters.
-- **Single node only** — see the sequence-counter note above.

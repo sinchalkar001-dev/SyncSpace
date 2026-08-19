@@ -8,7 +8,7 @@ import { createCollabSession } from '../lib/collab.js'
  * pushed through awareness by a separate effect so renaming yourself does not
  * tear down the socket.
  */
-export function useCollabSession(roomId, user) {
+export function useCollabSession(roomId, user, token) {
   const [session, setSession] = useState(null)
   const [status, setStatus] = useState('connecting')
   const [synced, setSynced] = useState(false)
@@ -17,7 +17,7 @@ export function useCollabSession(roomId, user) {
   useEffect(() => {
     if (!roomId) return undefined
 
-    const active = createCollabSession({ roomId, user })
+    const active = createCollabSession({ roomId, user, token })
     setSession(active)
     setStatus('connecting')
     setSynced(false)
@@ -43,8 +43,9 @@ export function useCollabSession(roomId, user) {
       setSynced(false)
     }
     // `user` is intentionally excluded: see the awareness effect below.
+    // `token` is included so signing in or out reconnects with new credentials.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId])
+  }, [roomId, token])
 
   useEffect(() => {
     if (!session) return
