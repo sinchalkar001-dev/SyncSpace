@@ -65,6 +65,8 @@ export const api = {
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
   roomPeople: (roomId, signal) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/people', { signal }),
+  updateRoom: (roomId, patch) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'PATCH', body: patch }),
   deleteRoom: (roomId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' }),
 }

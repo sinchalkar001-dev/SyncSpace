@@ -24,7 +24,7 @@ export function RemoteCursors({ peers, scale }) {
           scaleY={inverse}
           listening={false}
         >
-          <Path data={POINTER_PATH} fill={peer.user.color} stroke="#0b1120" strokeWidth={1} />
+          <Path data={POINTER_PATH} fill={peer.user.color} stroke="#0d1211" strokeWidth={1} />
           <Rect x={14} y={12} width={width} height={20} cornerRadius={4} fill={peer.user.color} />
           <Text
             x={14}
@@ -34,7 +34,7 @@ export function RemoteCursors({ peers, scale }) {
             text={label}
             fontSize={11}
             fontFamily="'Inter', system-ui, sans-serif"
-            fill="#0b1120"
+            fill="#0d1211"
             align="center"
             verticalAlign="middle"
           />
