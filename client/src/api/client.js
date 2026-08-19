@@ -63,4 +63,8 @@ export const api = {
   listRooms: (signal) => apiFetch('/rooms', { signal }),
   createRoom: (body) => apiFetch('/rooms', { method: 'POST', body }),
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
+  roomPeople: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/people', { signal }),
+  deleteRoom: (roomId) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' }),
 }
