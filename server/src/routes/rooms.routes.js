@@ -2,7 +2,15 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
 import { optionalAuth, requireAuth } from '../middleware/auth.js'
-import { canAccess, createRoom, getRoom, inviteMember, listRoomsForUser } from '../services/room.service.js'
+import {
+  canAccess,
+  createRoom,
+  deleteRoom,
+  getRoom,
+  inviteMember,
+  listPeople,
+  listRoomsForUser,
+} from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
 import { env } from '../config/env.js'
 import { badRequest, forbidden } from '../errors.js'
@@ -54,6 +62,35 @@ roomsRouter.get('/:roomId', optionalAuth, async (req, res, next) => {
   try {
     const room = await loadAccessibleRoom(req)
     res.json({ room: room.toPublic() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * The roster is more sensitive than the room itself: an owned room shows it
+ * only to its owner and members. Ownerless ad-hoc rooms stay open to any
+ * signed-in visitor, since nobody can claim them.
+ */
+async function loadRosterRoom(req) {
+  const room = await getRoom(req.params.roomId)
+  const allowed = room.owner ? room.hasMember(req.user.id) : canAccess(room, req.user.id)
+  if (!allowed) throw forbidden('You do not have access to this room', 'room_forbidden')
+  return room
+}
+
+roomsRouter.get('/:roomId/people', requireAuth, async (req, res, next) => {
+  try {
+    await loadRosterRoom(req)
+    res.json(await listPeople(req.params.roomId))
+  } catch (err) {
+    next(err)
+  }
+})
+
+roomsRouter.delete('/:roomId', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await deleteRoom({ roomId: req.params.roomId, actorId: req.user.id }))
   } catch (err) {
     next(err)
   }

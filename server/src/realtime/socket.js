@@ -1,7 +1,7 @@
 import { Server as SocketServer } from 'socket.io'
 import { z } from 'zod'
 import { verifyToken } from '../services/auth.service.js'
-import { canAccess, ensureRoom } from '../services/room.service.js'
+import { canAccess, ensureRoom, recordParticipant } from '../services/room.service.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 
@@ -84,6 +84,7 @@ export function createSocketServer(httpServer) {
 
       socket.data.roomId = roomId
       await socket.join(roomId)
+      await recordParticipant({ roomId, user: socket.data.user })
 
       socket.to(roomId).emit('room:joined', { user: socket.data.user, socketId: socket.id })
       io.to(roomId).emit('room:presence', { roomId, members: await roster(io, roomId) })
