@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { createApp } from './app.js'
 import { createHocuspocus } from './collab/hocuspocus.js'
+import { setHocuspocus } from './collab/registry.js'
 import { createSocketServer } from './realtime/socket.js'
 import { connectDatabase, disconnectDatabase } from './db/connect.js'
 import { env } from './config/env.js'
@@ -22,6 +23,7 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
   const app = createApp()
   const httpServer = http.createServer(app)
   const hocuspocus = createHocuspocus()
+  setHocuspocus(hocuspocus)
   const io = createSocketServer(httpServer)
   const wss = new WebSocketServer({ noServer: true })
 
@@ -60,6 +62,7 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
       logger.info('shutting down')
       io.close()
       await hocuspocus.destroy()
+      setHocuspocus(null)
       wss.close()
       await new Promise((resolve) => httpServer.close(resolve))
       if (connectDb) await disconnectDatabase()

@@ -1,7 +1,7 @@
 import { Hocuspocus } from '@hocuspocus/server'
 import { MongoPersistence } from './persistence.js'
 import { verifyToken } from '../services/auth.service.js'
-import { canAccess, ensureRoom } from '../services/room.service.js'
+import { canAccess, ensureRoom, recordParticipant } from '../services/room.service.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 
@@ -35,7 +35,13 @@ export function createHocuspocus() {
         throw new Error('You do not have access to this room')
       }
 
-      return { user: { id: payload.sub, name: payload.name, anonymous: false } }
+      const user = { id: payload.sub, name: payload.name, anonymous: false }
+
+      // Guests are recorded on socket join instead, where their chosen
+      // display name is known; here it would only ever be "Guest".
+      await recordParticipant({ roomId: documentName, user })
+
+      return { user }
     },
 
     async onConnect({ documentName }) {

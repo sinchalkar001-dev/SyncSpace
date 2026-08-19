@@ -50,6 +50,11 @@ production with `ALLOW_ANONYMOUS=true`.
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
 
+Each room on the dashboard has its own menu. **People** shows the owner and invited members
+alongside everyone who has actually opened the room — guests included, since they are recorded by
+visit rather than by invitation. **Delete room** is owner-only and asks first; it removes the
+whiteboard, the code, the snapshot and the whole update log, and hangs up anyone still connected.
+
 ## How it fits together
 
 One HTTP server carries three surfaces:
@@ -124,6 +129,8 @@ reconnect. The header shows connection state and a toast reports drops and recov
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
 | `POST` | `/api/rooms/:roomId/invite` | Owner only |
+| `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
+| `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
 | `GET` | `/api/rooms/:roomId/replay` | Timeline metadata |
 | `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
 

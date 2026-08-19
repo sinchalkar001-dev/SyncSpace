@@ -524,30 +524,40 @@ a {
   list-style: none;
 }
 
-.roomlist__item {
+.roomcard {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  padding: 14px 16px;
+  align-items: stretch;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  text-align: left;
-  cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
 }
 
-.roomlist__item:hover {
+.roomcard:hover {
   background: var(--surface-2);
   border-color: #2a3a58;
 }
 
-.roomlist__name {
+.roomcard__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 12px 0 0 12px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.roomcard__name {
   font-weight: 600;
 }
 
-.roomlist__meta {
+.roomcard__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
@@ -555,8 +565,135 @@ a {
   font-size: 12px;
 }
 
-.roomlist__meta code {
+.roomcard__meta code {
   font-family: 'JetBrains Mono', Consolas, monospace;
+  color: var(--text-dim);
+}
+
+.roomcard__menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: 10px;
+}
+
+.roomcard__more {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.roomcard__more:hover,
+.roomcard__more[aria-expanded='true'] {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* Menus anchored to a card open below it, aligned to its right edge.
+   Doubled class beats the base .popover rule, which is defined later. */
+.popover.popover--anchored {
+  left: auto;
+  right: 0;
+  top: calc(100% + 6px);
+}
+
+/* ---------- people dialog ---------- */
+
+.people {
+  display: grid;
+  gap: 22px;
+  max-height: 52vh;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.people__heading {
+  margin: 0 0 10px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.people__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.people__list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.people__empty {
+  display: block;
+  background: transparent;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.people__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #04121f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.people__avatar--muted {
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.people__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+}
+
+.people__who span {
+  font-size: 11.5px;
+}
+
+.people__tag {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.people__placeholder {
+  display: grid;
+  place-items: center;
+  padding: 28px 0;
   color: var(--text-dim);
 }
 
@@ -771,6 +908,7 @@ a {
   margin: 0;
   color: var(--text-dim);
   line-height: 1.55;
+  margin-bottom: 18px;
 }
 
 .modal__actions {

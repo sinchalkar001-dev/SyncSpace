@@ -4,7 +4,8 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist', 'node_modules'] },
+  // .vite is the dep-optimisation cache; it holds bundled vendor code.
+  { ignores: ['dist', 'node_modules', '.vite', 'coverage', 'test-results'] },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
