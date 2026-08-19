@@ -3,6 +3,7 @@ import { Ellipse, Line, Rect, Text } from 'react-konva'
 /** Renders one shared shape. Geometry always comes from the Yjs document. */
 export function ShapeNode({ shape, draggable, isSelected, onPointerDown, onDragEnd }) {
   const common = {
+    id: shape.id,
     x: shape.x || 0,
     y: shape.y || 0,
     draggable,

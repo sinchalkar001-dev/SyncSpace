@@ -1049,16 +1049,41 @@ a {
   cursor: pointer;
 }
 
+.room__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Same identity colour the room wears on the dashboard. */
+.room__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.room__name {
+  max-width: 32ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+}
+
 .room__code {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
+  padding: 4px 9px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 140ms var(--ease), border-color 140ms var(--ease);
 }
 
 .room__code:hover .room__copy {
@@ -1070,25 +1095,18 @@ a {
   border-color: var(--border);
 }
 
-.room__code-label {
-  color: var(--text-faint);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-}
-
 .room__code code {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
   letter-spacing: 0.02em;
-  color: var(--text);
+  color: var(--text-dim);
 }
 
 .room__copy {
   color: var(--accent);
   font-size: 11px;
-  opacity: 0.72;
-  transition: opacity 120ms ease;
+  opacity: 0;
+  transition: opacity 140ms var(--ease);
 }
 
 .room__right {
@@ -1421,6 +1439,10 @@ a {
 
 .board--draw {
   cursor: crosshair;
+}
+
+.board--erase {
+  cursor: cell;
 }
 
 .board--locked {

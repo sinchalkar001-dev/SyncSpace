@@ -31,6 +31,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const [selectedId, setSelectedId] = useState(null)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const drawingRef = useRef(false)
+  const erasingRef = useRef(false)
 
   const tool = useUIStore((s) => s.tool)
   const setTool = useUIStore((s) => s.setTool)
@@ -48,6 +49,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
   const commitDraft = useCallback(() => {
     drawingRef.current = false
+    erasingRef.current = false
     setDraft((current) => {
       if (!current || !shapes) return null
       const base = {
@@ -96,6 +98,25 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
     })
   }, [shapes, user.id])
 
+  /**
+   * Removes whatever sits under the pointer. Konva hit-tests the top node at
+   * a screen point, and each node carries its shape id.
+   */
+  const eraseAtPointer = useCallback(
+    (stage) => {
+      const pointer = stage.getPointerPosition()
+      if (!pointer) return
+
+      const node = stage.getIntersection(pointer)
+      const id = typeof node?.id === 'function' ? node.id() : null
+      if (!id) return
+
+      removeShape(shapes, id)
+      setSelectedId((current) => (current === id ? null : current))
+    },
+    [shapes]
+  )
+
   const handlePointerDown = useCallback(
     (event) => {
       const stage = event.target.getStage()
@@ -114,7 +135,13 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         if (event.target === stage) setSelectedId(null)
         return
       }
-      if (tool === 'eraser') return
+      // Erasing is a drag, not just a click: press starts it and every move
+      // while held removes what it passes over.
+      if (tool === 'eraser') {
+        erasingRef.current = true
+        eraseAtPointer(stage)
+        return
+      }
 
       if (tool === 'text') {
         const pointer = stage.getPointerPosition()
@@ -141,7 +168,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         setDraft({ ...common, type: 'ellipse', x: point.x, y: point.y, radiusX: 0, radiusY: 0 })
       }
     },
-    [tool, strokeColor, strokeWidth, fontSize, textDraft, commitText, readOnly]
+    [tool, strokeColor, strokeWidth, fontSize, textDraft, commitText, readOnly, eraseAtPointer]
   )
 
   const handlePointerMove = useCallback(
@@ -151,6 +178,11 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       if (!point) return
 
       publishCursor({ x: point.x, y: point.y })
+
+      if (erasingRef.current) {
+        eraseAtPointer(stage)
+        return
+      }
       if (!drawingRef.current) return
 
       setDraft((current) => {
@@ -182,24 +214,18 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         }
       })
     },
-    [publishCursor]
+    [publishCursor, eraseAtPointer]
   )
 
   const handleShapePointerDown = useCallback(
     (event, shape) => {
       if (readOnly) return
-      if (tool === 'eraser') {
-        event.cancelBubble = true
-        removeShape(shapes, shape.id)
-        if (selectedId === shape.id) setSelectedId(null)
-        return
-      }
       if (tool === 'select') {
         event.cancelBubble = true
         setSelectedId(shape.id)
       }
     },
-    [tool, shapes, selectedId, readOnly]
+    [tool, readOnly]
   )
 
   const handleShapeDragEnd = useCallback((id, patch) => updateShape(shapes, id, patch), [shapes])
@@ -273,13 +299,19 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   // A pointer released outside the canvas must still close the stroke.
   useEffect(() => {
     const onUp = () => {
+      erasingRef.current = false
       if (drawingRef.current) commitDraft()
     }
     window.addEventListener('pointerup', onUp)
     return () => window.removeEventListener('pointerup', onUp)
   }, [commitDraft])
 
-  const boardClass = ['board', isDrawingTool && !readOnly ? 'board--draw' : '', readOnly ? 'board--locked' : '']
+  const boardClass = [
+    'board',
+    isDrawingTool && !readOnly ? 'board--draw' : '',
+    tool === 'eraser' && !readOnly ? 'board--erase' : '',
+    readOnly ? 'board--locked' : '',
+  ]
     .filter(Boolean)
     .join(' ')
 
