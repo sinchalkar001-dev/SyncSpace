@@ -93,3 +93,52 @@ test('the tool rail never overflows its pane', async ({ page }) => {
       .toBe(0)
   }
 })
+
+test('the eraser removes every shape a drag passes over', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByText('Connected')).toBeVisible()
+  await page.waitForTimeout(1200)
+
+  const board = page.locator('.board')
+  const box = await board.boundingBox()
+  // Clip past the rail and the zoom pill: both live inside .board, and their
+  // active-tool highlight changes between shots.
+  const clip = {
+    x: box.x + 140,
+    y: box.y + 20,
+    width: box.width - 180,
+    height: box.height - 130,
+  }
+  const tool = (label) => page.locator('.rail button[aria-label="' + label + '"]')
+
+  const empty = await page.screenshot({ clip })
+
+  // Three rectangles in a row.
+  await tool('Rectangle').click()
+  for (const [x1, y1, x2, y2] of [
+    [180, 170, 380, 330],
+    [430, 170, 630, 330],
+    [680, 170, 880, 330],
+  ]) {
+    await page.mouse.move(box.x + x1, box.y + y1)
+    await page.mouse.down()
+    await page.mouse.move(box.x + x2, box.y + y2, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(250)
+  }
+
+  const drawn = await page.screenshot({ clip })
+  expect(Buffer.compare(empty, drawn), 'rectangles were drawn').not.toBe(0)
+
+  // One eraser stroke straight through all three - not three separate clicks.
+  await tool('Eraser').click()
+  await page.mouse.move(box.x + 140, box.y + 250)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 940, box.y + 250, { steps: 45 })
+  await page.mouse.up()
+
+  await expect(async () => {
+    const after = await page.screenshot({ clip })
+    expect(Buffer.compare(empty, after), 'board is clear again').toBe(0)
+  }).toPass({ timeout: 12000 })
+})

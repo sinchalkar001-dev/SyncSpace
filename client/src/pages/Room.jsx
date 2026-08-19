@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { api } from '../api/client.js'
+import { colorFor } from '../lib/identity.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useAwareness } from '../hooks/useAwareness.js'
@@ -20,6 +22,7 @@ export default function Room() {
   const toast = useToast()
 
   const [copied, setCopied] = useState(false)
+  const [room, setRoom] = useState(null)
   const copyTimer = useRef(null)
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
@@ -39,6 +42,17 @@ export default function Room() {
   }, [status, toast])
 
   useEffect(() => () => clearTimeout(copyTimer.current), [])
+
+  // Room metadata is a nicety, not a gate: the canvas opens either way.
+  useEffect(() => {
+    if (!roomId) return undefined
+    const controller = new AbortController()
+    api
+      .getRoom(roomId, controller.signal)
+      .then((payload) => setRoom(payload.room))
+      .catch(() => setRoom(null))
+    return () => controller.abort()
+  }, [roomId])
 
   const onCopy = useCallback(async () => {
     try {
@@ -96,11 +110,15 @@ export default function Room() {
           <span className="brand-mark">SS</span>
         </button>
 
-        <button type="button" className="room__code" onClick={onCopy} title="Copy room link">
-          <span className="room__code-label">Room</span>
-          <code>{roomId}</code>
-          <span className="room__copy">{copied ? 'Copied' : 'Copy link'}</span>
-        </button>
+        <div className="room__identity">
+          <span className="room__dot" style={{ background: colorFor(roomId) }} aria-hidden="true" />
+          <span className="room__name">{room?.name || 'Untitled room'}</span>
+          {room && !room.isPublic && <span className="pill">Private</span>}
+          <button type="button" className="room__code" onClick={onCopy} title="Copy room link">
+            <code>{roomId}</code>
+            <span className="room__copy">{copied ? 'Copied' : 'Copy link'}</span>
+          </button>
+        </div>
 
         <div className="room__right">
           <PresenceBar self={self} peers={peers} />
