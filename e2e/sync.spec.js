@@ -142,3 +142,44 @@ test('the eraser removes every shape a drag passes over', async ({ page }) => {
     expect(Buffer.compare(empty, after), 'board is clear again').toBe(0)
   }).toPass({ timeout: 12000 })
 })
+
+test('the eraser reaches a thin stroke without pixel-perfect aim', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByText('Connected')).toBeVisible()
+  await page.waitForTimeout(1200)
+
+  const box = await page.locator('.board').boundingBox()
+  const clip = {
+    x: box.x + 140,
+    y: box.y + 20,
+    width: box.width - 180,
+    height: box.height - 130,
+  }
+  const tool = (label) => page.locator('.rail button[aria-label="' + label + '"]')
+
+  const empty = await page.screenshot({ clip })
+
+  // A thin horizontal freehand stroke.
+  await tool('Freehand').click()
+  await page.mouse.move(box.x + 300, box.y + 300)
+  await page.mouse.down()
+  for (let i = 0; i <= 40; i += 1) await page.mouse.move(box.x + 300 + i * 10, box.y + 300)
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+
+  const drawn = await page.screenshot({ clip })
+  expect(Buffer.compare(empty, drawn), 'stroke was drawn').not.toBe(0)
+
+  // Drag deliberately BESIDE the stroke, not along it - nobody traces a 3px
+  // line to the pixel.
+  await tool('Eraser').click()
+  await page.mouse.move(box.x + 340, box.y + 308)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 660, box.y + 308, { steps: 30 })
+  await page.mouse.up()
+
+  await expect(async () => {
+    const after = await page.screenshot({ clip })
+    expect(Buffer.compare(empty, after), 'stroke was erased').toBe(0)
+  }).toPass({ timeout: 12000 })
+})
