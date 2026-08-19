@@ -35,12 +35,12 @@ monaco.editor.defineTheme('syncspace-dark', {
   inherit: true,
   rules: [],
   colors: {
-    'editor.background': '#0b1120',
-    'editor.lineHighlightBackground': '#131c31',
-    'editorLineNumber.foreground': '#3f4c68',
-    'editorLineNumber.activeForeground': '#93a4c4',
-    'editorGutter.background': '#0b1120',
-    'editorIndentGuide.background1': '#1c2740',
+    'editor.background': '#151b19',
+    'editor.lineHighlightBackground': '#1d2523',
+    'editorLineNumber.foreground': '#4a5954',
+    'editorLineNumber.activeForeground': '#97a69f',
+    'editorGutter.background': '#151b19',
+    'editorIndentGuide.background1': '#252f2c',
   },
 })
 

@@ -10,7 +10,7 @@ export function ShapeNode({ shape, draggable, isSelected, onPointerDown, onDragE
     onDragEnd: (event) => onDragEnd(shape.id, { x: event.target.x(), y: event.target.y() }),
     stroke: shape.stroke,
     strokeWidth: shape.strokeWidth,
-    shadowColor: '#38bdf8',
+    shadowColor: '#f2a03f',
     shadowBlur: isSelected ? 14 : 0,
     shadowOpacity: isSelected ? 0.9 : 0,
   }
