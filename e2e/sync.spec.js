@@ -183,3 +183,39 @@ test('the eraser reaches a thin stroke without pixel-perfect aim', async ({ page
     expect(Buffer.compare(empty, after), 'stroke was erased').toBe(0)
   }).toPass({ timeout: 12000 })
 })
+
+test('one stroke is one shape, so a single erase clears it', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByText('Connected')).toBeVisible()
+  await page.waitForTimeout(1200)
+
+  const box = await page.locator('.board').boundingBox()
+  const clip = {
+    x: box.x + 140,
+    y: box.y + 20,
+    width: box.width - 180,
+    height: box.height - 130,
+  }
+  const tool = (label) => page.locator('.rail button[aria-label="' + label + '"]')
+
+  const empty = await page.screenshot({ clip })
+
+  await tool('Freehand').click()
+  await page.mouse.move(box.x + 320, box.y + 300)
+  await page.mouse.down()
+  for (let i = 0; i <= 30; i += 1) await page.mouse.move(box.x + 320 + i * 12, box.y + 300)
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+
+  expect(Buffer.compare(empty, await page.screenshot({ clip })), 'stroke drawn').not.toBe(0)
+
+  // A single click erases a single shape. If the stroke were committed twice
+  // - two identical shapes stacked - the twin would survive this click.
+  await tool('Eraser').click()
+  await page.mouse.click(box.x + 500, box.y + 300)
+
+  await expect(async () => {
+    const after = await page.screenshot({ clip })
+    expect(Buffer.compare(empty, after), 'no duplicate stroke left behind').toBe(0)
+  }).toPass({ timeout: 12000 })
+})
