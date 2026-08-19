@@ -1,5 +1,10 @@
 import { nanoid } from '../utils/id.js'
 import { Room } from '../models/Room.js'
+import { Snapshot } from '../models/Snapshot.js'
+import { DocUpdate } from '../models/DocUpdate.js'
+import { Participant } from '../models/Participant.js'
+import { getHocuspocus } from '../collab/registry.js'
+import { logger } from '../config/logger.js'
 import { forbidden, notFound } from '../errors.js'
 
 /**
@@ -54,4 +59,85 @@ export async function listRoomsForUser(userId) {
   return Room.find({ $or: [{ owner: userId }, { 'members.user': userId }] })
     .sort({ lastActivityAt: -1 })
     .limit(50)
+}
+
+/**
+ * Notes that someone opened a room. Idempotent per visitor, so a person who
+ * rejoins updates their row rather than adding another.
+ */
+export async function recordParticipant({ roomId, user }) {
+  if (!roomId || !user) return null
+
+  const name = String(user.name || 'Guest').slice(0, 64)
+  const userKey = user.id ? 'user:' + user.id : 'guest:' + name
+  const now = new Date()
+
+  return Participant.findOneAndUpdate(
+    { roomId, userKey },
+    {
+      $set: { name, guest: !user.id, user: user.id || null, lastSeenAt: now },
+      $setOnInsert: { roomId, userKey, firstSeenAt: now },
+      $inc: { visits: 1 },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  )
+}
+
+/** Owner, invited members, and everyone who has actually opened the room. */
+export async function listPeople(roomId) {
+  const room = await getRoom(roomId)
+  await room.populate([
+    { path: 'owner', select: 'name email' },
+    { path: 'members.user', select: 'name email' },
+  ])
+
+  const participants = await Participant.find({ roomId }).sort({ lastSeenAt: -1 }).limit(100)
+
+  return {
+    owner: room.owner
+      ? { id: room.owner._id.toString(), name: room.owner.name, email: room.owner.email }
+      : null,
+    members: room.members
+      .filter((member) => member.user)
+      .map((member) => ({
+        id: member.user._id.toString(),
+        name: member.user.name,
+        email: member.user.email,
+        role: member.role,
+      })),
+    participants: participants.map((participant) => participant.toPublic()),
+  }
+}
+
+/**
+ * Removes a room and everything belonging to it.
+ *
+ * The update log is append-only at the model layer, which is what protects
+ * history from being rewritten. Discarding a room outright is a different
+ * operation from tampering with it, so this one purge goes through the driver
+ * deliberately, bypassing that guard.
+ */
+export async function deleteRoom({ roomId, actorId }) {
+  const room = await getRoom(roomId)
+
+  if (!room.owner || String(room.owner) !== String(actorId)) {
+    throw forbidden('Only the room owner can delete this room', 'not_owner')
+  }
+
+  // Hang up anyone still in the room so they stop writing to it.
+  try {
+    getHocuspocus()?.closeConnections(roomId)
+  } catch (error) {
+    logger.warn({ err: error, room: roomId }, 'could not close collab connections on delete')
+  }
+
+  const [updates] = await Promise.all([
+    DocUpdate.collection.deleteMany({ roomId }),
+    Snapshot.deleteOne({ roomId }),
+    Participant.deleteMany({ roomId }),
+  ])
+  await Room.deleteOne({ roomId })
+
+  logger.info({ room: roomId, updates: updates.deletedCount }, 'room deleted')
+  return { roomId, deletedUpdates: updates.deletedCount }
 }

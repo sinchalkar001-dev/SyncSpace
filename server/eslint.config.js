@@ -2,7 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 
 export default [
-  { ignores: ['node_modules', 'coverage'] },
+  { ignores: ['node_modules', 'coverage', '.vite', 'test-results'] },
   {
     files: ['**/*.js'],
     languageOptions: {

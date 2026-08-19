@@ -4,17 +4,10 @@ import { api } from '../api/client.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useToast } from '../components/ui/useToast.js'
 import { UserMenu } from '../components/UserMenu.jsx'
+import { RoomCard } from '../components/RoomCard.jsx'
+import { RoomPeopleDialog } from '../components/RoomPeopleDialog.jsx'
+import { ConfirmDialog } from '../components/ui/Modal.jsx'
 import { Spinner } from '../components/ui/Spinner.jsx'
-
-function formatWhen(value) {
-  if (!value) return 'never'
-  const then = new Date(value)
-  const minutes = Math.round((Date.now() - then.getTime()) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return minutes + 'm ago'
-  if (minutes < 1440) return Math.round(minutes / 60) + 'h ago'
-  return then.toLocaleDateString()
-}
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -26,6 +19,9 @@ export default function Dashboard() {
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [creating, setCreating] = useState(false)
+
+  const [peopleRoom, setPeopleRoom] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
 
   const load = useCallback((signal) => {
     setState('loading')
@@ -66,6 +62,21 @@ export default function Dashboard() {
     const trimmed = code.trim()
     if (trimmed) navigate('/room/' + encodeURIComponent(trimmed))
   }
+
+  const onConfirmDelete = useCallback(async () => {
+    const target = deleteTarget
+    if (!target) return
+
+    // Drop it from the list first; put it back if the server disagrees.
+    setRooms((current) => current.filter((room) => room.roomId !== target.roomId))
+    try {
+      await api.deleteRoom(target.roomId)
+      toast.success('Deleted ' + target.name)
+    } catch (error) {
+      setRooms((current) => [target, ...current])
+      toast.error(error.message)
+    }
+  }, [deleteTarget, toast])
 
   return (
     <div className="shell">
@@ -152,26 +163,34 @@ export default function Dashboard() {
           {state === 'ready' && rooms.length > 0 && (
             <ul className="roomlist">
               {rooms.map((room) => (
-                <li key={room.roomId}>
-                  <button
-                    type="button"
-                    className="roomlist__item"
-                    onClick={() => navigate('/room/' + room.roomId)}
-                  >
-                    <span className="roomlist__name">{room.name}</span>
-                    <span className="roomlist__meta">
-                      <code>{room.roomId}</code>
-                      <span>{room.isPublic ? 'Public' : 'Private'}</span>
-                      <span>{room.memberCount} member{room.memberCount === 1 ? '' : 's'}</span>
-                      <span>Active {formatWhen(room.lastActivityAt)}</span>
-                    </span>
-                  </button>
-                </li>
+                <RoomCard
+                  key={room.roomId}
+                  room={room}
+                  onOpen={() => navigate('/room/' + room.roomId)}
+                  onShowPeople={() => setPeopleRoom(room)}
+                  onDelete={() => setDeleteTarget(room)}
+                />
               ))}
             </ul>
           )}
         </section>
       </main>
+
+      <RoomPeopleDialog
+        room={peopleRoom}
+        open={Boolean(peopleRoom)}
+        onClose={() => setPeopleRoom(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={deleteTarget ? 'Delete ' + deleteTarget.name + '?' : 'Delete room?'}
+        description="The whiteboard, the code, and the whole session history go with it. This cannot be undone."
+        confirmLabel="Delete room"
+        destructive
+        onConfirm={onConfirmDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
