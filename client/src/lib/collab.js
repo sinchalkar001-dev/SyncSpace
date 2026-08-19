@@ -12,6 +12,7 @@ import { COLLAB_URL } from './env.js'
  */
 export function createCollabSession({ roomId, user, token }) {
   const doc = new Y.Doc()
+  const shapes = doc.getArray('shapes')
 
   const provider = new HocuspocusProvider({
     url: COLLAB_URL,
@@ -24,13 +25,20 @@ export function createCollabSession({ roomId, user, token }) {
 
   provider.setAwarenessField('user', user)
 
+  // Undo is scoped to the whiteboard and, by tracking only the default origin,
+  // to this user's own edits — remote changes arrive tagged with the provider
+  // and are never rolled back by your Ctrl+Z. Monaco keeps its own stack.
+  const undoManager = new Y.UndoManager(shapes, { captureTimeout: 400 })
+
   return {
     doc,
     provider,
-    shapes: doc.getArray('shapes'),
+    shapes,
+    undoManager,
     code: doc.getText('code'),
     meta: doc.getMap('meta'),
     destroy() {
+      undoManager.destroy()
       provider.destroy()
       doc.destroy()
     },

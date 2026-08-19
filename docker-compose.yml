@@ -1,0 +1,30 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: syncspace-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Only needed once the collab server runs on more than one node:
+  # @hocuspocus/extension-redis + @socket.io/redis-adapter.
+  redis:
+    image: redis:7-alpine
+    container_name: syncspace-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+
+volumes:
+  mongo-data:
+  redis-data:

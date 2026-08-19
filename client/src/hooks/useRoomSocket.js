@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { createRoomSocket } from '../lib/socket.js'
 
-// Room lifecycle rides on Socket.io, which only exists once the backend is up.
-// Until then this stays off so the client does not sit in a reconnect loop.
-const ENABLED = import.meta.env.VITE_ENABLE_ROOM_SOCKET === 'true'
+// On by default now that the backend serves /socket.io. Set the flag to
+// 'false' to run the client against a collab-only server.
+const ENABLED = import.meta.env.VITE_ENABLE_ROOM_SOCKET !== 'false'
 
 /** Joins the Socket.io room channel used for presence events, chat and invites. */
 export function useRoomSocket(roomId, user) {

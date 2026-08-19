@@ -1,0 +1,76 @@
+import 'dotenv/config'
+import { z } from 'zod'
+
+const booleanish = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
+
+const csv = z
+  .string()
+  .transform((value) => value.split(',').map((part) => part.trim()).filter(Boolean))
+
+const schema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().positive().default(4000),
+    HOST: z.string().default('0.0.0.0'),
+
+    MONGODB_URI: z.string().min(1).default('mongodb://127.0.0.1:27017/syncspace'),
+
+    JWT_SECRET: z.string().min(32).optional(),
+    JWT_EXPIRES_IN: z.string().default('7d'),
+
+    CORS_ORIGIN: csv.default('http://localhost:5173'),
+    LOG_LEVEL: z
+      .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+      .default('info'),
+
+    // Guests may open rooms without an account. Convenient in development,
+    // refused outright in production.
+    ALLOW_ANONYMOUS: booleanish.default('true'),
+
+    // Append every Yjs update to an immutable log. Required by the replay
+    // feature; costs one insert per update, so it can be switched off.
+    PERSIST_UPDATE_LOG: booleanish.default('true'),
+    PERSIST_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(2000),
+    PERSIST_MAX_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(10000),
+
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+  })
+  .superRefine((value, ctx) => {
+    if (value.NODE_ENV !== 'production') return
+
+    if (!value.JWT_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message: 'JWT_SECRET is required in production (32+ characters)',
+      })
+    }
+    if (value.ALLOW_ANONYMOUS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ALLOW_ANONYMOUS'],
+        message: 'ALLOW_ANONYMOUS must be false in production',
+      })
+    }
+  })
+
+const DEV_SECRET = 'syncspace-development-secret-do-not-use-in-production'
+
+/** Parses and validates process.env. Throws with a readable report on failure. */
+export function loadEnv(source = process.env) {
+  const parsed = schema.safeParse(source)
+
+  if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => '  - ' + issue.path.join('.') + ': ' + issue.message)
+      .join('\n')
+    throw new Error('Invalid environment configuration:\n' + details)
+  }
+
+  return { ...parsed.data, JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET }
+}
+
+export const env = loadEnv()
+export const isProduction = env.NODE_ENV === 'production'
+export const isTest = env.NODE_ENV === 'test'
