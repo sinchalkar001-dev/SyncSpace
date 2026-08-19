@@ -38,12 +38,30 @@ function worldPointer(stage) {
 
 export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnly = false }) {
   const [containerRef, size] = useElementSize()
-  const [draft, setDraft] = useState(null)
-  const [textDraft, setTextDraft] = useState(null)
+  const [draft, setDraftState] = useState(null)
+  const [textDraft, setTextDraftState] = useState(null)
+  // Mirrors of the two drafts. Committing a shape is a side effect, and side
+  // effects must not live inside a setState updater: React invokes updaters
+  // twice under StrictMode, which committed every shape twice - two identical
+  // shapes stacked exactly on top of each other.
+  const draftRef = useRef(null)
+  const textDraftRef = useRef(null)
   const [selectedId, setSelectedId] = useState(null)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const drawingRef = useRef(false)
   const erasingRef = useRef(false)
+
+  const setDraft = useCallback((next) => {
+    const value = typeof next === 'function' ? next(draftRef.current) : next
+    draftRef.current = value
+    setDraftState(value)
+  }, [])
+
+  const setTextDraft = useCallback((next) => {
+    const value = typeof next === 'function' ? next(textDraftRef.current) : next
+    textDraftRef.current = value
+    setTextDraftState(value)
+  }, [])
 
   const tool = useUIStore((s) => s.tool)
   const setTool = useUIStore((s) => s.setTool)
@@ -62,53 +80,54 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const commitDraft = useCallback(() => {
     drawingRef.current = false
     erasingRef.current = false
-    setDraft((current) => {
-      if (!current || !shapes) return null
-      const base = {
-        id: nanoid(8),
-        stroke: current.stroke,
-        strokeWidth: current.strokeWidth,
-        author: user.id,
-        x: current.x,
-        y: current.y,
-      }
 
-      if (current.type === 'line' && current.points.length >= 4) {
-        pushShape(shapes, { ...base, type: 'line', x: 0, y: 0, points: current.points })
-      } else if (current.type === 'rect' && current.width > 2 && current.height > 2) {
-        pushShape(shapes, { ...base, type: 'rect', width: current.width, height: current.height })
-      } else if (current.type === 'ellipse' && current.radiusX > 2 && current.radiusY > 2) {
-        pushShape(shapes, {
-          ...base,
-          type: 'ellipse',
-          radiusX: current.radiusX,
-          radiusY: current.radiusY,
-        })
-      }
-      return null
-    })
-  }, [shapes, user.id])
+    const current = draftRef.current
+    setDraft(null)
+    if (!current || !shapes) return
+
+    const base = {
+      id: nanoid(8),
+      stroke: current.stroke,
+      strokeWidth: current.strokeWidth,
+      author: user.id,
+      x: current.x,
+      y: current.y,
+    }
+
+    if (current.type === 'line' && current.points.length >= 4) {
+      pushShape(shapes, { ...base, type: 'line', x: 0, y: 0, points: current.points })
+    } else if (current.type === 'rect' && current.width > 2 && current.height > 2) {
+      pushShape(shapes, { ...base, type: 'rect', width: current.width, height: current.height })
+    } else if (current.type === 'ellipse' && current.radiusX > 2 && current.radiusY > 2) {
+      pushShape(shapes, {
+        ...base,
+        type: 'ellipse',
+        radiusX: current.radiusX,
+        radiusY: current.radiusY,
+      })
+    }
+  }, [shapes, user.id, setDraft])
 
   const commitText = useCallback(() => {
-    setTextDraft((current) => {
-      if (!current) return null
-      const value = current.value.trim()
-      if (value) {
-        pushShape(shapes, {
-          id: nanoid(8),
-          type: 'text',
-          x: current.worldX,
-          y: current.worldY,
-          text: value,
-          fontSize: current.fontSize,
-          stroke: current.stroke,
-          strokeWidth: 0,
-          author: user.id,
-        })
-      }
-      return null
+    const current = textDraftRef.current
+    setTextDraft(null)
+    if (!current) return
+
+    const value = current.value.trim()
+    if (!value) return
+
+    pushShape(shapes, {
+      id: nanoid(8),
+      type: 'text',
+      x: current.worldX,
+      y: current.worldY,
+      text: value,
+      fontSize: current.fontSize,
+      stroke: current.stroke,
+      strokeWidth: 0,
+      author: user.id,
     })
-  }, [shapes, user.id])
+  }, [shapes, user.id, setTextDraft])
 
   /**
    * Removes whatever sits under the pointer. Konva hit-tests the top node at
@@ -147,6 +166,10 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
       if (readOnly) return
 
+      // Only the primary button acts. A right- or middle-click used to fall
+      // through and start a shape that no drag ever finished.
+      if ((event.evt?.button ?? 0) !== 0) return
+
       if (tool === 'select') {
         if (event.target === stage) setSelectedId(null)
         return
@@ -184,7 +207,18 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         setDraft({ ...common, type: 'ellipse', x: point.x, y: point.y, radiusX: 0, radiusY: 0 })
       }
     },
-    [tool, strokeColor, strokeWidth, fontSize, textDraft, commitText, readOnly, eraseAtPointer]
+    [
+      tool,
+      strokeColor,
+      strokeWidth,
+      fontSize,
+      textDraft,
+      commitText,
+      readOnly,
+      eraseAtPointer,
+      setDraft,
+      setTextDraft,
+    ]
   )
 
   const handlePointerMove = useCallback(
@@ -230,7 +264,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         }
       })
     },
-    [publishCursor, eraseAtPointer]
+    [publishCursor, eraseAtPointer, setDraft]
   )
 
   const handleShapePointerDown = useCallback(
@@ -337,6 +371,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         className={boardClass}
         ref={containerRef}
         tabIndex={0}
+        onContextMenu={(event) => event.preventDefault()}
         onKeyDown={handleKeyDown}
         role="application"
         aria-label="Collaborative canvas"
@@ -360,6 +395,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
             x={viewport.x}
             y={viewport.y}
             draggable={tool === 'select'}
+            onContextMenu={(event) => event.evt.preventDefault()}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={commitDraft}
