@@ -25,6 +25,7 @@ desktop.ini
 .vscode/*
 !.vscode/extensions.json
 .idea/
+.hintrc
 
 # Local verification screenshots
 shots/
