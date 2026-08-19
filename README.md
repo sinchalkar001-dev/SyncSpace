@@ -50,9 +50,15 @@ production with `ALLOW_ANONYMOUS=true`.
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
 
+A room created without a name leads with its code and an `Unnamed` chip rather than a shared
+"Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
+stable identity stripe derived from its code.
+
 Each room on the dashboard has its own menu. **People** shows the owner and invited members
 alongside everyone who has actually opened the room — guests included, since they are recorded by
-visit rather than by invitation. **Delete room** is owner-only and asks first; it removes the
+visit rather than by invitation. **Rename** names a room, or renames one created without a name. **Make public / Make private**
+flips visibility in place — going private also closes every live connection, so anyone who just lost
+access has to re-authenticate. **Delete room** is owner-only and asks first; it removes the
 whiteboard, the code, the snapshot and the whole update log, and hangs up anyone still connected.
 
 ## How it fits together
@@ -128,6 +134,7 @@ reconnect. The header shows connection state and a toast reports drops and recov
 | `POST` | `/api/rooms` | Creates a private room |
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
+| `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
 | `POST` | `/api/rooms/:roomId/invite` | Owner only |
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |

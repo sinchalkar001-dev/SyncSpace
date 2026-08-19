@@ -97,6 +97,99 @@ describe('deleting a room', () => {
   })
 })
 
+describe('renaming and visibility', () => {
+  it('requires authentication', async () => {
+    expect((await request(app).patch('/api/rooms/anything').send({ name: 'x' })).status).toBe(401)
+  })
+
+  it('renames a room', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token, 'Untitled room')
+
+    const res = await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(owner.token))
+      .send({ name: 'Candidate screen' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.room.name).toBe('Candidate screen')
+    expect((await Room.findOne({ roomId })).name).toBe('Candidate screen')
+  })
+
+  it('flips a room between private and public', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+    expect((await Room.findOne({ roomId })).isPublic).toBe(false)
+
+    await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(owner.token))
+      .send({ isPublic: true })
+      .expect(200)
+    expect((await Room.findOne({ roomId })).isPublic).toBe(true)
+
+    await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(owner.token))
+      .send({ isPublic: false })
+      .expect(200)
+    expect((await Room.findOne({ roomId })).isPublic).toBe(false)
+  })
+
+  it('opens a public room to a stranger and closes it again', async () => {
+    const owner = (await register(OWNER)).body
+    const other = (await register(OTHER)).body
+    const roomId = await makeRoom(owner.token)
+
+    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
+
+    await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(owner.token))
+      .send({ isPublic: true })
+      .expect(200)
+
+    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(200)
+
+    await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(owner.token))
+      .send({ isPublic: false })
+      .expect(200)
+
+    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
+  })
+
+  it('refuses anyone who is not the owner', async () => {
+    const owner = (await register(OWNER)).body
+    const other = (await register(OTHER)).body
+    const roomId = await makeRoom(owner.token, 'Mine')
+
+    const res = await request(app)
+      .patch('/api/rooms/' + roomId)
+      .set(auth(other.token))
+      .send({ name: 'Hijacked' })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('not_owner')
+    expect((await Room.findOne({ roomId })).name).toBe('Mine')
+  })
+
+  it('rejects an empty name and an empty patch', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+
+    expect(
+      (await request(app).patch('/api/rooms/' + roomId).set(auth(owner.token)).send({ name: '   ' }))
+        .status
+    ).toBe(400)
+
+    expect(
+      (await request(app).patch('/api/rooms/' + roomId).set(auth(owner.token)).send({})).status
+    ).toBe(400)
+  })
+})
+
 describe('room roster', () => {
   it('requires authentication', async () => {
     expect((await request(app).get('/api/rooms/anything/people')).status).toBe(401)

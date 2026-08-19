@@ -47,7 +47,7 @@ function remoteSelectionCss(peers) {
         '  border-left: 2px solid ' + color + '; }',
         head + '::after { content: ' + label + '; position: absolute; top: -1.35em; left: -2px;',
         '  padding: 0 4px; font-size: 10px; line-height: 1.35em; white-space: nowrap;',
-        '  border-radius: 3px 3px 3px 0; color: #0b1120; background-color: ' + color + ';',
+        '  border-radius: 3px 3px 3px 0; color: #0d1211; background-color: ' + color + ';',
         '  pointer-events: none; }',
       ].join('\n')
     })

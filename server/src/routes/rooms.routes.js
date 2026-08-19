@@ -10,6 +10,7 @@ import {
   inviteMember,
   listPeople,
   listRoomsForUser,
+  updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
 import { env } from '../config/env.js'
@@ -19,6 +20,15 @@ const createSchema = z.object({
   name: z.string().trim().max(80).optional(),
   isPublic: z.boolean().optional(),
 })
+
+const updateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    isPublic: z.boolean().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.isPublic !== undefined, {
+    message: 'provide a name or isPublic',
+  })
 
 const inviteSchema = z.object({
   userId: z.string().regex(/^[a-f\d]{24}$/i, 'must be a user id'),
@@ -83,6 +93,19 @@ roomsRouter.get('/:roomId/people', requireAuth, async (req, res, next) => {
   try {
     await loadRosterRoom(req)
     res.json(await listPeople(req.params.roomId))
+  } catch (err) {
+    next(err)
+  }
+})
+
+roomsRouter.patch('/:roomId', requireAuth, validate(updateSchema), async (req, res, next) => {
+  try {
+    const room = await updateRoom({
+      roomId: req.params.roomId,
+      actorId: req.user.id,
+      patch: req.body,
+    })
+    res.json({ room: room.toPublic() })
   } catch (err) {
     next(err)
   }

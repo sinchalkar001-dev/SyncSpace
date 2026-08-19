@@ -1,22 +1,34 @@
 :root {
-  --bg: #070b14;
-  --surface: #0b1120;
-  --surface-2: #111a2e;
-  --surface-3: #17223a;
-  --border: #1e293b;
-  --border-soft: #172033;
-  --text: #e2e8f0;
-  --text-dim: #94a3b8;
-  --text-faint: #64748b;
-  --accent: #38bdf8;
-  --accent-soft: rgba(56, 189, 248, 0.16);
-  --danger: #f87171;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --bar-h: 52px;
+  /* Drafting film: graphite carries a green bias so the ground reads as a
+     technical surface rather than the default blue-slate dashboard. */
+  --bg: #0d1211;
+  --surface: #151b19;
+  --surface-2: #1d2523;
+  --surface-3: #27302d;
+  --border: #2b3733;
+  --border-soft: #202826;
+  --text: #e7ece8;
+  --text-dim: #97a69f;
+  --text-faint: #66756f;
+
+  /* The accent is the ink you draw with - the canvas pen, not a stock blue. */
+  --accent: #f2a03f;
+  --accent-soft: rgba(242, 160, 63, 0.15);
+  --accent-ink: #1a1206;
+
+  --danger: #f07a6e;
+  --ok: #5fd08a;
+  --warn: #e9c25c;
+
+  --font-display: 'Archivo', 'Archivo Expanded', system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', Consolas, monospace;
+
+  --bar-h: 56px;
   --radius: 10px;
-  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
-  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 26px 64px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.42);
+  --ease: cubic-bezier(0.22, 0.68, 0.31, 1);
 
   color-scheme: dark;
 }
@@ -35,7 +47,7 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
@@ -123,8 +135,8 @@ textarea {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(140deg, var(--accent), #6366f1);
-  color: #04121f;
+  background: linear-gradient(140deg, var(--accent), #c2521f);
+  color: var(--accent-ink);
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.02em;
@@ -156,7 +168,7 @@ textarea {
 
 .btn:hover:not(:disabled) {
   background: var(--surface-3);
-  border-color: #2a3a58;
+  border-color: var(--surface-3);
 }
 
 .btn:disabled {
@@ -167,13 +179,13 @@ textarea {
 .btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #04121f;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: #5cc9fa;
-  border-color: #5cc9fa;
+  background: #ffb45c;
+  border-color: #ffb45c;
 }
 
 .btn--block {
@@ -182,12 +194,12 @@ textarea {
 
 .btn--danger {
   color: var(--danger);
-  border-color: #3d2230;
+  border-color: #3d2825;
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: #2a1620;
-  border-color: #5d2a3c;
+  background: #2a1a18;
+  border-color: #5c3230;
 }
 
 /* ---------- inputs ---------- */
@@ -247,8 +259,8 @@ textarea {
 }
 
 .banner--error {
-  background: #2a1620;
-  border: 1px solid #5d2a3c;
+  background: #2a1a18;
+  border: 1px solid #5c3230;
   color: var(--danger);
 }
 
@@ -302,7 +314,7 @@ textarea {
   padding: 30px;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(11, 17, 32, 0.92);
+  background: rgba(21, 27, 25, 0.93);
   box-shadow: var(--shadow-lg);
 }
 
@@ -412,6 +424,9 @@ a {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  /* The canvas ground, ambient behind the whole surface. */
+  background-image: radial-gradient(circle, rgba(151, 166, 159, 0.075) 1px, transparent 1px);
+  background-size: 26px 26px;
 }
 
 .shell__bar {
@@ -420,7 +435,7 @@ a {
   gap: 16px;
   height: var(--bar-h);
   flex: none;
-  padding: 0 16px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -428,37 +443,53 @@ a {
 .shell__brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-weight: 600;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 112;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.01em;
 }
 
 .shell__right {
   margin-left: auto;
 }
 
+/* The canvas ground, echoed faintly behind the room list. */
 .dashboard {
   width: 100%;
-  max-width: 980px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 34px 20px 60px;
+  padding: 44px 24px 80px;
+}
+
+.dashboard__intro {
+  margin-bottom: 30px;
 }
 
 .dashboard__intro h1 {
-  margin: 0 0 6px;
-  font-size: 24px;
-  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118;
+  font-weight: 700;
+  font-size: clamp(28px, 4vw, 38px);
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  text-wrap: balance;
 }
 
 .dashboard__intro p {
-  margin: 0 0 26px;
+  margin: 0;
+  max-width: 56ch;
   color: var(--text-dim);
+  font-size: 14.5px;
 }
 
 .dashboard__actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 16px;
-  margin-bottom: 36px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-bottom: 44px;
 }
 
 .panel {
@@ -466,11 +497,18 @@ a {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
+  transition: border-color 160ms var(--ease);
+}
+
+.panel:focus-within {
+  border-color: var(--surface-3);
 }
 
 .panel__title {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .panel__hint {
@@ -487,20 +525,33 @@ a {
 .dashboard__rooms-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .dashboard__rooms-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+
+.dashboard__rooms-head .muted {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .placeholder {
   display: grid;
   place-items: center;
   gap: 12px;
-  padding: 44px 20px;
+  padding: 46px 20px;
   border: 1px dashed var(--border);
   border-radius: 14px;
   color: var(--text-faint);
@@ -509,16 +560,19 @@ a {
 
 .placeholder p {
   margin: 0;
+  font-size: 13.5px;
 }
 
 .placeholder--error {
-  border-color: #5d2a3c;
+  border-color: #4a2f2c;
   color: var(--danger);
 }
 
+/* ---------- room cards ---------- */
+
 .roomlist {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -531,12 +585,32 @@ a {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color 180ms var(--ease), background 180ms var(--ease),
+    transform 180ms var(--ease);
+  animation: card-in 380ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
 }
 
 .roomcard:hover {
   background: var(--surface-2);
-  border-color: #2a3a58;
+  border-color: var(--surface-3);
+  transform: translateY(-1px);
+}
+
+/* Identity stripe: a stable colour per room, so two unnamed rooms still
+   read as different places at a glance. */
+.roomcard__stripe {
+  width: 3px;
+  flex: none;
+  border-radius: 12px 0 0 12px;
+  background: var(--identity, var(--accent));
+  opacity: 0.55;
+  transition: opacity 180ms var(--ease), width 180ms var(--ease);
+}
+
+.roomcard:hover .roomcard__stripe {
+  opacity: 1;
+  width: 5px;
 }
 
 .roomcard__main {
@@ -544,30 +618,89 @@ a {
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
+  gap: 9px;
+  padding: 15px 16px;
   border: 0;
-  border-radius: 12px 0 0 12px;
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.roomcard__name {
+.roomcard__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.roomcard__title .roomcard__code {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.roomcard__unnamed {
+  padding: 2px 7px;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .roomcard__meta {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 10px;
   color: var(--text-faint);
   font-size: 12px;
 }
 
-.roomcard__meta code {
-  font-family: 'JetBrains Mono', Consolas, monospace;
+.roomcard__code {
+  font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+.roomcard__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill {
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  transition: background 180ms var(--ease), color 180ms var(--ease),
+    border-color 180ms var(--ease);
+}
+
+.pill--public {
+  border-color: rgba(242, 160, 63, 0.42);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.livedot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(95, 208, 138, 0.6);
+  animation: live-pulse 2.4s ease-out infinite;
 }
 
 .roomcard__menu {
@@ -587,7 +720,7 @@ a {
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
 }
 
 .roomcard__more:hover,
@@ -597,104 +730,33 @@ a {
   color: var(--text);
 }
 
-/* Menus anchored to a card open below it, aligned to its right edge.
-   Doubled class beats the base .popover rule, which is defined later. */
-.popover.popover--anchored {
-  left: auto;
-  right: 0;
-  top: calc(100% + 6px);
+.popover__rule {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border);
 }
 
-/* ---------- people dialog ---------- */
-
-.people {
-  display: grid;
-  gap: 22px;
-  max-height: 52vh;
-  overflow-y: auto;
-  margin-bottom: 4px;
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.people__heading {
-  margin: 0 0 10px;
-  color: var(--text-faint);
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.people__list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.people__list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  background: var(--surface-2);
-}
-
-.people__empty {
-  display: block;
-  background: transparent;
-  padding: 2px 0;
-  font-size: 13px;
-}
-
-.people__avatar {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #04121f;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.people__avatar--muted {
-  background: var(--surface-3);
-  color: var(--text-dim);
-}
-
-.people__who {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-  font-size: 13px;
-}
-
-.people__who span {
-  font-size: 11.5px;
-}
-
-.people__tag {
-  flex: none;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-faint);
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.people__placeholder {
-  display: grid;
-  place-items: center;
-  padding: 28px 0;
-  color: var(--text-dim);
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(95, 208, 138, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(95, 208, 138, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(95, 208, 138, 0);
+  }
 }
 
 /* ---------- user menu ---------- */
@@ -726,7 +788,7 @@ a {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  color: #04121f;
+  color: var(--accent-ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -949,7 +1011,7 @@ a {
   border-radius: 10px;
   background: var(--surface);
   color: var(--danger);
-  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   text-align: left;
 }
@@ -1016,7 +1078,7 @@ a {
 }
 
 .room__code code {
-  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12.5px;
   letter-spacing: 0.02em;
   color: var(--text);
@@ -1120,7 +1182,7 @@ a {
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(13, 20, 36, 0.88);
+  background: rgba(21, 27, 25, 0.9);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow-md);
@@ -1169,7 +1231,7 @@ a {
 
 .rail__btn.is-active {
   background: var(--accent-soft);
-  border-color: rgba(56, 189, 248, 0.45);
+  border-color: rgba(242, 160, 63, 0.45);
   color: var(--accent);
 }
 
@@ -1195,7 +1257,7 @@ a {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(17, 26, 46, 0.97);
+  background: rgba(29, 37, 35, 0.97);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow-lg);
@@ -1291,7 +1353,7 @@ a {
 }
 
 .popover__item--danger:hover {
-  background: #2a1620;
+  background: #2a1a18;
 }
 
 /* ---------- zoom ---------- */
@@ -1307,7 +1369,7 @@ a {
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(13, 20, 36, 0.88);
+  background: rgba(21, 27, 25, 0.9);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow-md);
@@ -1352,8 +1414,8 @@ a {
   flex: 1;
   min-height: 0;
   outline: none;
-  background-color: #080d18;
-  background-image: radial-gradient(circle, #1a2439 1px, transparent 1px);
+  background-color: #0b0f0e;
+  background-image: radial-gradient(circle, #232e2a 1px, transparent 1px);
   background-size: 22px 22px;
 }
 
@@ -1373,7 +1435,7 @@ a {
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: rgba(8, 13, 24, 0.94);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.3;
   resize: none;
   outline: none;
@@ -1415,7 +1477,7 @@ a {
 }
 
 .presence__dot {
-  color: #04121f;
+  color: var(--accent-ink);
 }
 
 .presence__more {

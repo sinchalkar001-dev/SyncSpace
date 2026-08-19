@@ -110,6 +110,37 @@ export async function listPeople(roomId) {
 }
 
 /**
+ * Renames a room or flips its visibility. Owner only.
+ *
+ * Going private closes every live connection so anyone who just lost access
+ * is forced to re-authenticate; members reconnect on their own.
+ */
+export async function updateRoom({ roomId, actorId, patch }) {
+  const room = await getRoom(roomId)
+
+  if (!room.owner || String(room.owner) !== String(actorId)) {
+    throw forbidden('Only the room owner can change this room', 'not_owner')
+  }
+
+  const closing = patch.isPublic === false && room.isPublic === true
+
+  if (patch.name !== undefined) room.name = patch.name
+  if (patch.isPublic !== undefined) room.isPublic = patch.isPublic
+  await room.save()
+
+  if (closing) {
+    try {
+      getHocuspocus()?.closeConnections(roomId)
+    } catch (error) {
+      logger.warn({ err: error, room: roomId }, 'could not close connections after going private')
+    }
+  }
+
+  logger.info({ room: roomId, patch }, 'room updated')
+  return room
+}
+
+/**
  * Removes a room and everything belonging to it.
  *
  * The update log is append-only at the model layer, which is what protects
