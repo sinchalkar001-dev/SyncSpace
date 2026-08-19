@@ -14,16 +14,18 @@ export const USER_COLORS = [
   '#fb7185',
 ]
 
-function colorFor(id) {
+/** Stable colour per id, so the same person is the same colour everywhere. */
+export function colorFor(id) {
+  const key = String(id || '')
   let hash = 0
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash << 5) - hash + id.charCodeAt(i)
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash << 5) - hash + key.charCodeAt(i)
     hash |= 0
   }
   return USER_COLORS[Math.abs(hash) % USER_COLORS.length]
 }
 
-/** Reads the local identity, creating one on first run. */
+/** Reads the local guest identity, creating one on first run. */
 export function loadIdentity() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -35,9 +37,7 @@ export function loadIdentity() {
     // Corrupted or unavailable storage falls through to a fresh identity.
   }
   const id = nanoid(10)
-  const identity = { id, name: `Guest-${id.slice(0, 4)}`, color: colorFor(id) }
-  saveIdentity(identity)
-  return identity
+  return saveIdentity({ id, name: 'Guest-' + id.slice(0, 4), color: colorFor(id), guest: true })
 }
 
 export function saveIdentity(identity) {
@@ -52,4 +52,9 @@ export function saveIdentity(identity) {
 export function renameIdentity(name) {
   const current = loadIdentity()
   return saveIdentity({ ...current, name: name.trim() || current.name })
+}
+
+/** The presence identity for a signed-in account. */
+export function identityFromUser(user) {
+  return { id: user.id, name: user.name, color: colorFor(user.id), guest: false }
 }

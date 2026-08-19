@@ -1,0 +1,95 @@
+import { expect, test } from '@playwright/test'
+
+/** A fresh room per test so state never leaks between runs. */
+const newRoom = () => 'e2e-' + Date.now() + '-' + Math.floor(Math.random() * 1000)
+
+async function openRoom(context, room) {
+  const page = await context.newPage()
+  await page.goto('/room/' + room)
+  await expect(page.getByText('Connected')).toBeVisible()
+  return page
+}
+
+test('two tabs in one room see each other and each other edits', async ({ browser }) => {
+  const room = newRoom()
+
+  // Separate contexts so the two tabs are genuinely separate clients.
+  const alice = await browser.newContext()
+  const bob = await browser.newContext()
+
+  try {
+    const alicePage = await openRoom(alice, room)
+    const bobPage = await openRoom(bob, room)
+
+    // Awareness: both tabs must count two people.
+    await expect(alicePage.getByText('2 people')).toBeVisible()
+    await expect(bobPage.getByText('2 people')).toBeVisible()
+
+    // Code typed in one tab must appear in the other.
+    await alicePage.locator('.editor-host').click()
+    await alicePage.keyboard.type('const shared = true')
+
+    await expect(bobPage.locator('.view-lines')).toContainText('const shared = true')
+
+    // ...and the reverse direction.
+    await bobPage.locator('.editor-host').click()
+    await bobPage.keyboard.press('End')
+    await bobPage.keyboard.type(' // seen by bob')
+
+    await expect(alicePage.locator('.view-lines')).toContainText('// seen by bob')
+  } finally {
+    await alice.close()
+    await bob.close()
+  }
+})
+
+test('a drawing made in one tab reaches the other', async ({ browser }) => {
+  const room = newRoom()
+
+  const alice = await browser.newContext()
+  const bob = await browser.newContext()
+
+  try {
+    const alicePage = await openRoom(alice, room)
+    const bobPage = await openRoom(bob, room)
+
+    // Konva renders to canvas, so compare the rendered pixels rather than DOM.
+    const bobCanvas = bobPage.locator('.board canvas').first()
+    const before = await bobCanvas.screenshot()
+
+    await alicePage.getByRole('button', { name: 'Rectangle' }).click()
+    const box = await alicePage.locator('.board').boundingBox()
+    await alicePage.mouse.move(box.x + 260, box.y + 220)
+    await alicePage.mouse.down()
+    await alicePage.mouse.move(box.x + 520, box.y + 400, { steps: 8 })
+    await alicePage.mouse.up()
+
+    await expect(async () => {
+      const after = await bobCanvas.screenshot()
+      expect(Buffer.compare(before, after)).not.toBe(0)
+    }).toPass({ timeout: 15000 })
+  } finally {
+    await alice.close()
+    await bob.close()
+  }
+})
+
+test('the tool rail never overflows its pane', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByRole('toolbar', { name: 'Drawing tools' })).toBeVisible()
+
+  for (const width of [1440, 1100, 900]) {
+    await page.setViewportSize({ width, height: 800 })
+
+    // Monaco relays out on a polling timer, so the frame right after a resize
+    // can briefly report stale geometry. Poll until it settles rather than
+    // measuring mid-reflow.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => document.body.scrollWidth - document.body.clientWidth),
+        { message: 'horizontal overflow at ' + width + 'px', timeout: 10000 }
+      )
+      .toBe(0)
+  }
+})

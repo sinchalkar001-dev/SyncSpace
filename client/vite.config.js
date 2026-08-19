@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // The backend (Express + Hocuspocus + Socket.io) is expected on one HTTP server.
@@ -27,5 +27,12 @@ export default defineConfig({
       },
     },
     chunkSizeWarningLimit: 1200,
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.test.{js,jsx}'],
+    css: false,
+    restoreMocks: true,
   },
 })

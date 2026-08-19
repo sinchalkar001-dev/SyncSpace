@@ -1,45 +1,100 @@
-import { useCallback, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { loadIdentity, renameIdentity } from '../lib/identity.js'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useAuth } from '../auth/useAuth.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useAwareness } from '../hooks/useAwareness.js'
 import { useRoomSocket } from '../hooks/useRoomSocket.js'
+import { useToast } from '../components/ui/useToast.js'
 import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceBar } from '../components/PresenceBar.jsx'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
+import { UserMenu } from '../components/UserMenu.jsx'
+import { Spinner } from '../components/ui/Spinner.jsx'
 import { Whiteboard } from '../components/Whiteboard/Whiteboard.jsx'
 import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
 
 export default function Room() {
   const { roomId } = useParams()
-  const [identity, setIdentity] = useState(loadIdentity)
-  const [copied, setCopied] = useState(false)
+  const { identity, token, isAuthenticated, isLoading } = useAuth()
+  const navigate = useNavigate()
+  const toast = useToast()
 
-  const { session, status, synced, authError } = useCollabSession(roomId, identity)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef(null)
+
+  const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
   const { peers, self } = useAwareness(session?.provider)
   useRoomSocket(roomId, identity)
 
-  const onRename = useCallback((event) => {
-    setIdentity(renameIdentity(event.target.value))
-  }, [])
+  // A dropped connection is worth telling the user about; a restored one too.
+  const previousStatus = useRef(status)
+  useEffect(() => {
+    if (previousStatus.current === 'connected' && status === 'disconnected') {
+      toast.error('Connection lost — reconnecting. Your edits are queued locally.')
+    }
+    if (previousStatus.current === 'disconnected' && status === 'connected') {
+      toast.success('Back online')
+    }
+    previousStatus.current = status
+  }, [status, toast])
+
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const onCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(window.location.href)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
+      copyTimer.current = setTimeout(() => setCopied(false), 1600)
     } catch {
-      // Clipboard access can be blocked; the room code stays visible regardless.
+      toast.info('Copy failed — the room code is in the address bar')
     }
-  }, [])
+  }, [toast])
+
+  if (isLoading) {
+    return (
+      <div className="route-loading">
+        <Spinner label="Restoring your session" />
+      </div>
+    )
+  }
+
+  if (authError) {
+    return (
+      <main className="gate" role="alert">
+        <div className="gate__card">
+          <h1>You cannot open this room</h1>
+          <p>{authError}</p>
+          <p className="muted">
+            Private rooms are limited to their owner and invited members. Ask for an invite, or sign
+            in with the account that was invited.
+          </p>
+          <div className="gate__actions">
+            {!isAuthenticated && (
+              <Link className="btn btn--primary" to="/login" state={{ from: '/room/' + roomId }}>
+                Sign in
+              </Link>
+            )}
+            <Link className="btn" to={isAuthenticated ? '/dashboard' : '/'}>
+              Back
+            </Link>
+          </div>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <div className="room">
       <header className="room__bar">
-        <Link to="/" className="room__brand">
-          <span className="room__mark">SS</span>
-          SyncSpace
-        </Link>
+        <button
+          type="button"
+          className="room__back"
+          onClick={() => navigate(isAuthenticated ? '/dashboard' : '/')}
+          aria-label="Leave room"
+          title="Leave room"
+        >
+          <span className="brand-mark">SS</span>
+        </button>
 
         <button type="button" className="room__code" onClick={onCopy} title="Copy room link">
           <span className="room__code-label">Room</span>
@@ -49,18 +104,10 @@ export default function Room() {
 
         <div className="room__right">
           <PresenceBar self={self} peers={peers} />
-          <input
-            className="room__name"
-            value={identity.name}
-            onChange={onRename}
-            maxLength={32}
-            aria-label="Your display name"
-          />
           <ConnectionStatus status={status} synced={synced} />
+          <UserMenu compact />
         </div>
       </header>
-
-      {authError && <div className="banner banner--error">{authError}</div>}
 
       {session ? (
         <SplitPane
@@ -68,6 +115,7 @@ export default function Room() {
             <Whiteboard
               shapes={session.shapes}
               provider={session.provider}
+              undoManager={session.undoManager}
               peers={peers}
               user={identity}
             />
@@ -75,7 +123,9 @@ export default function Room() {
           right={<CodeEditor yText={session.code} provider={session.provider} peers={peers} />}
         />
       ) : (
-        <div className="room__loading">Opening room…</div>
+        <div className="route-loading">
+          <Spinner label="Opening room" />
+        </div>
       )}
     </div>
   )

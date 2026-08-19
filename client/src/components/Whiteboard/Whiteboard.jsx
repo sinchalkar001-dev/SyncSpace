@@ -5,10 +5,14 @@ import { clearShapes, pushShape, removeShape, updateShape } from '../../lib/coll
 import { useShapes } from '../../hooks/useShapes.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import { useCursorBroadcast } from '../../hooks/useAwareness.js'
+import { useUndo } from '../../hooks/useUndo.js'
 import { MAX_SCALE, MIN_SCALE, useUIStore } from '../../store/uiStore.js'
+import { ConfirmDialog } from '../ui/Modal.jsx'
 import { ShapeNode } from './ShapeNode.jsx'
 import { RemoteCursors } from './RemoteCursors.jsx'
-import { Toolbar } from './Toolbar.jsx'
+import { ToolRail } from './ToolRail.jsx'
+import { CanvasControls } from './CanvasControls.jsx'
+import { TextComposer } from './TextComposer.jsx'
 
 const MIN_POINT_DISTANCE = 2
 const SHORTCUTS = { v: 'select', p: 'pen', r: 'rect', o: 'ellipse', t: 'text', e: 'eraser' }
@@ -20,10 +24,12 @@ function worldPointer(stage) {
   return stage.getAbsoluteTransform().copy().invert().point(pointer)
 }
 
-export function Whiteboard({ shapes, provider, peers, user }) {
+export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnly = false }) {
   const [containerRef, size] = useElementSize()
   const [draft, setDraft] = useState(null)
+  const [textDraft, setTextDraft] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
+  const [confirmingClear, setConfirmingClear] = useState(false)
   const drawingRef = useRef(false)
 
   const tool = useUIStore((s) => s.tool)
@@ -36,6 +42,7 @@ export function Whiteboard({ shapes, provider, peers, user }) {
 
   const list = useShapes(shapes)
   const { publish: publishCursor, clear: clearCursor } = useCursorBroadcast(provider)
+  const { canUndo, canRedo, undo, redo } = useUndo(undoManager)
 
   const isDrawingTool = tool !== 'select' && tool !== 'eraser'
 
@@ -68,11 +75,40 @@ export function Whiteboard({ shapes, provider, peers, user }) {
     })
   }, [shapes, user.id])
 
+  const commitText = useCallback(() => {
+    setTextDraft((current) => {
+      if (!current) return null
+      const value = current.value.trim()
+      if (value) {
+        pushShape(shapes, {
+          id: nanoid(8),
+          type: 'text',
+          x: current.worldX,
+          y: current.worldY,
+          text: value,
+          fontSize: current.fontSize,
+          stroke: current.stroke,
+          strokeWidth: 0,
+          author: user.id,
+        })
+      }
+      return null
+    })
+  }, [shapes, user.id])
+
   const handlePointerDown = useCallback(
     (event) => {
       const stage = event.target.getStage()
       const point = worldPointer(stage)
       if (!point) return
+
+      // An open composer commits before anything else happens.
+      if (textDraft) {
+        commitText()
+        return
+      }
+
+      if (readOnly) return
 
       if (tool === 'select') {
         if (event.target === stage) setSelectedId(null)
@@ -81,21 +117,16 @@ export function Whiteboard({ shapes, provider, peers, user }) {
       if (tool === 'eraser') return
 
       if (tool === 'text') {
-        const value = window.prompt('Text to place on the board')
-        if (value && value.trim()) {
-          pushShape(shapes, {
-            id: nanoid(8),
-            type: 'text',
-            x: point.x,
-            y: point.y,
-            text: value.trim(),
-            fontSize,
-            stroke: strokeColor,
-            strokeWidth: 0,
-            author: user.id,
-          })
-        }
-        setTool('select')
+        const pointer = stage.getPointerPosition()
+        setTextDraft({
+          screenX: pointer.x,
+          screenY: pointer.y,
+          worldX: point.x,
+          worldY: point.y,
+          value: '',
+          stroke: strokeColor,
+          fontSize,
+        })
         return
       }
 
@@ -110,7 +141,7 @@ export function Whiteboard({ shapes, provider, peers, user }) {
         setDraft({ ...common, type: 'ellipse', x: point.x, y: point.y, radiusX: 0, radiusY: 0 })
       }
     },
-    [tool, shapes, strokeColor, strokeWidth, fontSize, setTool, user.id]
+    [tool, strokeColor, strokeWidth, fontSize, textDraft, commitText, readOnly]
   )
 
   const handlePointerMove = useCallback(
@@ -156,6 +187,7 @@ export function Whiteboard({ shapes, provider, peers, user }) {
 
   const handleShapePointerDown = useCallback(
     (event, shape) => {
+      if (readOnly) return
       if (tool === 'eraser') {
         event.cancelBubble = true
         removeShape(shapes, shape.id)
@@ -167,7 +199,7 @@ export function Whiteboard({ shapes, provider, peers, user }) {
         setSelectedId(shape.id)
       }
     },
-    [tool, shapes, selectedId]
+    [tool, shapes, selectedId, readOnly]
   )
 
   const handleShapeDragEnd = useCallback((id, patch) => updateShape(shapes, id, patch), [shapes])
@@ -206,20 +238,36 @@ export function Whiteboard({ shapes, provider, peers, user }) {
 
   const handleKeyDown = useCallback(
     (event) => {
+      const modifier = event.metaKey || event.ctrlKey
+
+      if (modifier && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        redo()
+        return
+      }
+      if (modifier) return
+
       if (event.key === 'Escape') {
         setSelectedId(null)
         return
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId && !readOnly) {
         event.preventDefault()
         removeShape(shapes, selectedId)
         setSelectedId(null)
         return
       }
+
       const next = SHORTCUTS[event.key.toLowerCase()]
-      if (next && !event.metaKey && !event.ctrlKey) setTool(next)
+      if (next) setTool(next)
     },
-    [selectedId, shapes, setTool]
+    [selectedId, shapes, setTool, undo, redo, readOnly]
   )
 
   // A pointer released outside the canvas must still close the stroke.
@@ -231,19 +279,30 @@ export function Whiteboard({ shapes, provider, peers, user }) {
     return () => window.removeEventListener('pointerup', onUp)
   }, [commitDraft])
 
-  const handleClear = useCallback(() => {
-    if (window.confirm('Clear the board for everyone in this room?')) {
-      clearShapes(shapes)
-      setSelectedId(null)
-    }
-  }, [shapes])
-
-  const boardClass = isDrawingTool ? 'board board--draw' : 'board'
+  const boardClass = ['board', isDrawingTool && !readOnly ? 'board--draw' : '', readOnly ? 'board--locked' : '']
+    .filter(Boolean)
+    .join(' ')
 
   return (
-    <section className="pane pane--board">
-      <Toolbar onClear={handleClear} />
-      <div className={boardClass} ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown}>
+    <section className="pane pane--board" aria-label="Whiteboard">
+      <div
+        className={boardClass}
+        ref={containerRef}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        role="application"
+        aria-label="Collaborative canvas"
+      >
+        <ToolRail
+          onClear={() => setConfirmingClear(true)}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          disabled={readOnly}
+        />
+        <CanvasControls />
+
         {size.width > 0 && size.height > 0 && (
           <Stage
             width={size.width}
@@ -265,7 +324,7 @@ export function Whiteboard({ shapes, provider, peers, user }) {
                 <ShapeNode
                   key={shape.id}
                   shape={shape}
-                  draggable={tool === 'select'}
+                  draggable={tool === 'select' && !readOnly}
                   isSelected={selectedId === shape.id}
                   onPointerDown={handleShapePointerDown}
                   onDragEnd={handleShapeDragEnd}
@@ -286,7 +345,30 @@ export function Whiteboard({ shapes, provider, peers, user }) {
             </Layer>
           </Stage>
         )}
+
+        <TextComposer
+          draft={textDraft}
+          scale={viewport.scale}
+          color={textDraft?.stroke}
+          fontSize={textDraft?.fontSize ?? fontSize}
+          onChange={(value) => setTextDraft((current) => (current ? { ...current, value } : current))}
+          onCommit={commitText}
+          onCancel={() => setTextDraft(null)}
+        />
       </div>
+
+      <ConfirmDialog
+        open={confirmingClear}
+        title="Clear the board?"
+        description="This removes every shape for everyone in the room. It can be undone with Ctrl+Z while you stay on this page."
+        confirmLabel="Clear board"
+        destructive
+        onConfirm={() => {
+          clearShapes(shapes)
+          setSelectedId(null)
+        }}
+        onClose={() => setConfirmingClear(false)}
+      />
     </section>
   )
 }
