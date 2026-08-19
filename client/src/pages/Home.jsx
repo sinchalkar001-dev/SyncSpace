@@ -43,8 +43,7 @@ export default function Home() {
           <div>
             <h1>SyncSpace</h1>
             <p className="landing__tagline">
-              A shared whiteboard and code editor in one room. Every change merges through CRDTs, so
-              nobody overwrites anybody.
+              A shared whiteboard and code editor in one room.
             </p>
           </div>
         </div>
