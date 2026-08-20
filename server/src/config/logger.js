@@ -7,7 +7,7 @@ export const logger = pino({
     ? undefined
     : { target: 'pino/file', options: { destination: 1 } },
   redact: {
-    paths: ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.token'],
+    paths: ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.currentPassword', '*.newPassword', '*.token'],
     remove: true,
   },
 })

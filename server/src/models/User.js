@@ -6,7 +6,15 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     name: { type: String, required: true, trim: true, maxlength: 32 },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform(_doc, ret) {
+        delete ret.passwordHash
+        return ret
+      },
+    },
+  }
 )
 
 userSchema.methods.toPublic = function toPublic() {
