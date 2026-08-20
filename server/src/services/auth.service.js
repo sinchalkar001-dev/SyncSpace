@@ -48,3 +48,16 @@ export async function login({ email, password }) {
 
   return { user: user.toPublic(), token: issueToken(user) }
 }
+
+export async function changePassword(userId, currentPassword, newPassword) {
+  const user = await User.findById(userId)
+  if (!user) throw unauthorized('User not found', 'user_not_found')
+
+  const ok = await verifyPassword(currentPassword, user.passwordHash)
+  if (!ok) throw unauthorized('Current password is incorrect', 'bad_password')
+
+  user.passwordHash = await hashPassword(newPassword)
+  await user.save()
+
+  return { user: user.toPublic() }
+}
