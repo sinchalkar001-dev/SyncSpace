@@ -14,6 +14,7 @@ import {
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
 import { env } from '../config/env.js'
+import { createRateLimiters } from '../middleware/rateLimit.js'
 import { badRequest, forbidden } from '../errors.js'
 
 const createSchema = z.object({
@@ -35,8 +36,6 @@ const inviteSchema = z.object({
   role: z.enum(['editor', 'viewer']).optional(),
 })
 
-export const roomsRouter = Router()
-
 /** Shared guard: the room must exist and be readable by the caller. */
 async function loadAccessibleRoom(req) {
   const room = await getRoom(req.params.roomId)
@@ -45,37 +44,6 @@ async function loadAccessibleRoom(req) {
   }
   return room
 }
-
-roomsRouter.post('/', requireAuth, validate(createSchema), async (req, res, next) => {
-  try {
-    const room = await createRoom({
-      name: req.body.name,
-      ownerId: req.user.id,
-      isPublic: req.body.isPublic ?? false,
-    })
-    res.status(201).json({ room: room.toPublic() })
-  } catch (err) {
-    next(err)
-  }
-})
-
-roomsRouter.get('/', requireAuth, async (req, res, next) => {
-  try {
-    const rooms = await listRoomsForUser(req.user.id)
-    res.json({ rooms: rooms.map((room) => room.toPublic()) })
-  } catch (err) {
-    next(err)
-  }
-})
-
-roomsRouter.get('/:roomId', optionalAuth, async (req, res, next) => {
-  try {
-    const room = await loadAccessibleRoom(req)
-    res.json({ room: room.toPublic() })
-  } catch (err) {
-    next(err)
-  }
-})
 
 /**
  * The roster is more sensitive than the room itself: an owned room shows it
@@ -89,72 +57,116 @@ async function loadRosterRoom(req) {
   return room
 }
 
-roomsRouter.get('/:roomId/people', requireAuth, async (req, res, next) => {
-  try {
-    await loadRosterRoom(req)
-    res.json(await listPeople(req.params.roomId))
-  } catch (err) {
-    next(err)
-  }
-})
+export function createRoomsRouter() {
+  const roomsRouter = Router()
+  const { inviteLimiter } = createRateLimiters()
 
-roomsRouter.patch('/:roomId', requireAuth, validate(updateSchema), async (req, res, next) => {
-  try {
-    const room = await updateRoom({
-      roomId: req.params.roomId,
-      actorId: req.user.id,
-      patch: req.body,
-    })
-    res.json({ room: room.toPublic() })
-  } catch (err) {
-    next(err)
-  }
-})
-
-roomsRouter.delete('/:roomId', requireAuth, async (req, res, next) => {
-  try {
-    res.json(await deleteRoom({ roomId: req.params.roomId, actorId: req.user.id }))
-  } catch (err) {
-    next(err)
-  }
-})
-
-roomsRouter.post('/:roomId/invite', requireAuth, validate(inviteSchema), async (req, res, next) => {
-  try {
-    const room = await inviteMember({
-      roomId: req.params.roomId,
-      actorId: req.user.id,
-      userId: req.body.userId,
-      role: req.body.role,
-    })
-    res.json({ room: room.toPublic() })
-  } catch (err) {
-    next(err)
-  }
-})
-
-roomsRouter.get('/:roomId/replay', optionalAuth, async (req, res, next) => {
-  try {
-    await loadAccessibleRoom(req)
-    if (!env.PERSIST_UPDATE_LOG) {
-      throw badRequest('Replay is disabled (PERSIST_UPDATE_LOG=false)', 'replay_disabled')
+  roomsRouter.post('/', requireAuth, validate(createSchema), async (req, res, next) => {
+    try {
+      const room = await createRoom({
+        name: req.body.name,
+        ownerId: req.user.id,
+        isPublic: req.body.isPublic ?? false,
+      })
+      res.status(201).json({ room: room.toPublic() })
+    } catch (err) {
+      next(err)
     }
-    res.json({ timeline: await listTimeline(req.params.roomId, { limit: req.query.limit }) })
-  } catch (err) {
-    next(err)
-  }
-})
+  })
 
-/** Binary Yjs state as of `seq`, ready for Y.applyUpdate on the client. */
-roomsRouter.get('/:roomId/replay/:seq', optionalAuth, async (req, res, next) => {
-  try {
-    await loadAccessibleRoom(req)
-    const { state, applied } = await stateAt(req.params.roomId, req.params.seq)
+  roomsRouter.get('/', requireAuth, async (req, res, next) => {
+    try {
+      const rooms = await listRoomsForUser(req.user.id)
+      res.json({ rooms: rooms.map((room) => room.toPublic()) })
+    } catch (err) {
+      next(err)
+    }
+  })
 
-    res.setHeader('Content-Type', 'application/octet-stream')
-    res.setHeader('X-Updates-Applied', String(applied))
-    res.send(state)
-  } catch (err) {
-    next(err)
-  }
-})
+  roomsRouter.get('/:roomId', optionalAuth, async (req, res, next) => {
+    try {
+      const room = await loadAccessibleRoom(req)
+      res.json({ room: room.toPublic() })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  roomsRouter.get('/:roomId/people', requireAuth, async (req, res, next) => {
+    try {
+      await loadRosterRoom(req)
+      res.json(await listPeople(req.params.roomId))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  roomsRouter.patch('/:roomId', requireAuth, validate(updateSchema), async (req, res, next) => {
+    try {
+      const room = await updateRoom({
+        roomId: req.params.roomId,
+        actorId: req.user.id,
+        patch: req.body,
+      })
+      res.json({ room: room.toPublic() })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  roomsRouter.delete('/:roomId', requireAuth, async (req, res, next) => {
+    try {
+      res.json(await deleteRoom({ roomId: req.params.roomId, actorId: req.user.id }))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  roomsRouter.post(
+    '/:roomId/invite',
+    requireAuth,
+    inviteLimiter,
+    validate(inviteSchema),
+    async (req, res, next) => {
+      try {
+        const room = await inviteMember({
+          roomId: req.params.roomId,
+          actorId: req.user.id,
+          userId: req.body.userId,
+          role: req.body.role,
+        })
+        res.json({ room: room.toPublic() })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  roomsRouter.get('/:roomId/replay', optionalAuth, async (req, res, next) => {
+    try {
+      await loadAccessibleRoom(req)
+      if (!env.PERSIST_UPDATE_LOG) {
+        throw badRequest('Replay is disabled (PERSIST_UPDATE_LOG=false)', 'replay_disabled')
+      }
+      res.json({ timeline: await listTimeline(req.params.roomId, { limit: req.query.limit }) })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /** Binary Yjs state as of `seq`, ready for Y.applyUpdate on the client. */
+  roomsRouter.get('/:roomId/replay/:seq', optionalAuth, async (req, res, next) => {
+    try {
+      await loadAccessibleRoom(req)
+      const { state, applied } = await stateAt(req.params.roomId, req.params.seq)
+
+      res.setHeader('Content-Type', 'application/octet-stream')
+      res.setHeader('X-Updates-Applied', String(applied))
+      res.send(state)
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  return roomsRouter
+}
