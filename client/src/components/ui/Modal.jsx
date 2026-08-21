@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Button } from './Button.jsx'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -7,8 +8,20 @@ const FOCUSABLE =
 /**
  * Accessible dialog: labelled, modal to assistive tech, Escape to close, and
  * focus kept inside while open and restored to the opener on close.
+ *
+ * The page behind is also locked from scrolling — without it, a wheel over the
+ * backdrop scrolls the page underneath, which makes the dialog feel like an
+ * overlay rather than a mode.
  */
-export function Modal({ open, title, description, children, onClose, initialFocusRef }) {
+export function Modal({
+  open,
+  title,
+  description,
+  children,
+  onClose,
+  initialFocusRef,
+  wide = false,
+}) {
   const surfaceRef = useRef(null)
   const titleId = useId()
   const descriptionId = useId()
@@ -47,7 +60,11 @@ export function Modal({ open, title, description, children, onClose, initialFocu
       initialFocusRef?.current || surfaceRef.current?.querySelector(FOCUSABLE) || surfaceRef.current
     target?.focus?.()
 
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
     return () => {
+      document.body.style.overflow = previousOverflow
       if (opener instanceof HTMLElement) opener.focus()
     }
   }, [open, initialFocusRef])
@@ -62,7 +79,7 @@ export function Modal({ open, title, description, children, onClose, initialFocu
       }}
     >
       <div
-        className="modal"
+        className={'modal' + (wide ? ' modal--wide' : '')}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -79,7 +96,7 @@ export function Modal({ open, title, description, children, onClose, initialFocu
             {description}
           </p>
         )}
-        {children}
+        <div className="modal__body">{children}</div>
       </div>
     </div>,
     document.body
@@ -97,25 +114,20 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
 }) {
-  const confirmRef = useRef(null)
-
   return (
     <Modal open={open} title={title} description={description} onClose={onClose}>
       <div className="modal__actions">
-        <button type="button" className="btn" onClick={onClose}>
-          {cancelLabel}
-        </button>
-        <button
-          type="button"
-          className={destructive ? 'btn btn--danger' : 'btn btn--primary'}
+        <Button onClick={onClose}>{cancelLabel}</Button>
+        <Button
+          variant={destructive ? 'danger' : 'primary'}
+          icon={destructive ? 'trash' : undefined}
           onClick={() => {
             onConfirm?.()
             onClose?.()
           }}
-          ref={confirmRef}
         >
           {confirmLabel}
-        </button>
+        </Button>
       </div>
     </Modal>
   )

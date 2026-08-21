@@ -1,14 +1,37 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUIStore } from '../store/uiStore.js'
+import { Segmented } from './ui/Segmented.jsx'
 
 const STEP = 0.02
 
-/** Two panes with a draggable divider. The ratio is local UI state. */
-export function SplitPane({ left, right }) {
+const PANES = [
+  { value: 'board', label: 'Board', icon: 'pen' },
+  { value: 'code', label: 'Code', icon: 'code' },
+]
+
+/**
+ * Two panes with a draggable divider.
+ *
+ * Below 720px a split gives each pane roughly 40% of a phone screen, which is
+ * unusable for both. There, the panes stack into a single grid cell and a
+ * segmented control chooses which one is visible.
+ *
+ * Both panes stay **mounted** in that mode — the inactive one is hidden with
+ * `visibility: hidden`, which keeps it laid out (so Konva and Monaco retain
+ * their measured size) while removing it from painting, hit-testing, and the
+ * tab order. Unmounting instead would tear down the Yjs binding and Monaco
+ * instance on every switch, losing undo history and scroll position.
+ *
+ * Which pane is hidden is decided in CSS from `data-pane`, so neither child
+ * component needs to know this mode exists.
+ */
+export function SplitPane({ left, right, id }) {
   const ratio = useUIStore((s) => s.splitRatio)
   const setRatio = useUIStore((s) => s.setSplitRatio)
   const frameRef = useRef(null)
   const draggingRef = useRef(false)
+
+  const [pane, setPane] = useState('board')
 
   useEffect(() => {
     const onMove = (event) => {
@@ -48,8 +71,20 @@ export function SplitPane({ left, right }) {
   const columns = (ratio * 100).toFixed(2) + '% 6px 1fr'
 
   return (
-    <div className="split" ref={frameRef} style={{ gridTemplateColumns: columns }}>
+    <div
+      className="split"
+      id={id}
+      ref={frameRef}
+      style={{ gridTemplateColumns: columns }}
+      data-pane={pane}
+    >
+      {/* Hidden by CSS above 720px, so it costs nothing on desktop. */}
+      <div className="split__switch">
+        <Segmented options={PANES} value={pane} onChange={setPane} label="Visible pane" />
+      </div>
+
       {left}
+
       <div
         className="split__handle"
         onPointerDown={startDrag}
@@ -60,6 +95,7 @@ export function SplitPane({ left, right }) {
         aria-valuenow={Math.round(ratio * 100)}
         tabIndex={0}
       />
+
       {right}
     </div>
   )
