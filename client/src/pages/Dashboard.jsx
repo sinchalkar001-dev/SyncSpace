@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useToast } from '../components/ui/useToast.js'
+import { activityByDay, FILTERS, roomLabel, selectRooms, SORTS, summarise } from '../lib/rooms.js'
+import { TopBar, Brand, TopNav } from '../components/TopBar.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
 import { RoomCard } from '../components/RoomCard.jsx'
 import { RoomPeopleDialog } from '../components/RoomPeopleDialog.jsx'
 import { RenameRoomDialog } from '../components/RenameRoomDialog.jsx'
 import { ConfirmDialog } from '../components/ui/Modal.jsx'
-import { Spinner } from '../components/ui/Spinner.jsx'
+import { Button } from '../components/ui/Button.jsx'
+import { Icon } from '../components/ui/Icon.jsx'
+import { Segmented } from '../components/ui/Segmented.jsx'
+import { StatCard } from '../components/ui/StatCard.jsx'
+import { Sparkline } from '../components/ui/Sparkline.jsx'
+import { EmptyState } from '../components/ui/EmptyState.jsx'
+import { RoomListSkeleton, StatGridSkeleton } from '../components/ui/Skeleton.jsx'
+
+const NAV = [{ to: '/dashboard', label: 'Rooms', icon: 'grid' }]
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -20,6 +30,10 @@ export default function Dashboard() {
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [creating, setCreating] = useState(false)
+
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [sort, setSort] = useState('recent')
 
   const [peopleRoom, setPeopleRoom] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -44,6 +58,15 @@ export default function Dashboard() {
     load(controller.signal)
     return () => controller.abort()
   }, [load])
+
+  // Everything below is derived from the rooms already fetched — no extra
+  // requests, and no backend stats endpoint to keep in sync.
+  const stats = useMemo(() => summarise(rooms), [rooms])
+  const days = useMemo(() => activityByDay(rooms), [rooms])
+  const visible = useMemo(
+    () => selectRooms(rooms, { query, filter, sort }),
+    [rooms, query, filter, sort]
+  )
 
   const onCreate = async (event) => {
     event.preventDefault()
@@ -77,9 +100,7 @@ export default function Dashboard() {
       patchRoom(room.roomId, { isPublic })
       try {
         await api.updateRoom(room.roomId, { isPublic })
-        toast.success(
-          isPublic ? 'Anyone with the link can now join' : 'Room is private again'
-        )
+        toast.success(isPublic ? 'Anyone with the link can now join' : 'Room is private again')
       } catch (error) {
         patchRoom(room.roomId, { isPublic: room.isPublic })
         toast.error(error.message)
@@ -89,11 +110,11 @@ export default function Dashboard() {
   )
 
   const onRenameSubmit = useCallback(
-    async (name) => {
+    async (next) => {
       const target = renameTarget
       if (!target) return
       try {
-        const { room } = await api.updateRoom(target.roomId, { name })
+        const { room } = await api.updateRoom(target.roomId, { name: next })
         patchRoom(target.roomId, room)
         toast.success('Renamed to ' + room.name)
       } catch (error) {
@@ -119,91 +140,192 @@ export default function Dashboard() {
     }
   }, [deleteTarget, toast])
 
+  const filtering = query.trim() !== '' || filter !== 'all'
+
   return (
     <div className="shell">
-      <header className="shell__bar">
-        <span className="shell__brand">
-          <span className="brand-mark">SS</span>
-          SyncSpace
-        </span>
-        <div className="shell__right">
+      <TopBar>
+        <Brand to="/dashboard" />
+        <TopNav items={NAV} />
+        <div className="topbar__right">
           <UserMenu />
         </div>
-      </header>
+      </TopBar>
 
-      <main className="dashboard">
-        <div className="dashboard__intro">
-          <h1>Hello, {user?.name}</h1>
-          <p>Start a session, or pick up where you left off.</p>
+      <main className="page anim-page" id="main">
+        <div className="dash__hero">
+          <div>
+            <h1 className="dash__greeting">Hello, {user?.name}</h1>
+            <p className="dash__sub">Start a session, or pick up where you left off.</p>
+          </div>
         </div>
 
-        <div className="dashboard__actions">
-          <form className="panel" onSubmit={onCreate}>
-            <h2 className="panel__title">Start a room</h2>
-            <p className="panel__hint">Private by default. Invite people from inside the room.</p>
-            <div className="panel__row">
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Room name (optional)"
-                aria-label="Room name"
-                maxLength={80}
+        {/* Overview: figures on the left, a week of activity on the right. */}
+        <section className="dash__overview" aria-label="Overview">
+          {state === 'loading' ? (
+            <StatGridSkeleton />
+          ) : (
+            <div className="statgrid">
+              <StatCard icon="grid" label="Rooms" value={stats.total} />
+              <StatCard icon="activity" label="Active now" value={stats.live} tone="ok" />
+              <StatCard icon="users" label="Members" value={stats.collaborators} tone="info" />
+              <StatCard
+                icon="globe"
+                label="Shared publicly"
+                value={stats.publicCount}
+                suffix={'of ' + stats.total}
+                tone="warn"
               />
-              <button type="submit" className="btn btn--primary" disabled={creating}>
-                {creating ? <Spinner label="Creating" /> : 'Create'}
-              </button>
+            </div>
+          )}
+
+          <div className="dash__activity">
+            <div className="dash__activity-head">
+              <span className="dash__activity-title">Last 7 days</span>
+              <span className="muted nums">{stats.total} rooms</span>
+            </div>
+            <Sparkline days={days} />
+          </div>
+        </section>
+
+        {/* Create and join, side by side — both are one field and one click. */}
+        <section className="dash__overview" aria-label="Start a session">
+          <form className="card" onSubmit={onCreate}>
+            <p className="card__title">Start a room</p>
+            <p className="card__hint">Private by default. Invite people from inside the room.</p>
+            <div className="hero__row" style={{ marginTop: 'var(--space-4)' }}>
+              <div className="field" style={{ marginBottom: 0, flex: 1 }}>
+                <div className="field__wrap">
+                  <input
+                    className="input"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Room name (optional)"
+                    aria-label="New room name"
+                    maxLength={80}
+                  />
+                </div>
+              </div>
+              <Button type="submit" variant="primary" loading={creating} icon="plus">
+                Create
+              </Button>
             </div>
           </form>
 
-          <form className="panel" onSubmit={onJoin}>
-            <h2 className="panel__title">Join with a code</h2>
-            <p className="panel__hint">Paste the code a teammate shared with you.</p>
-            <div className="panel__row">
-              <input
-                value={code}
-                onChange={(event) => setCode(event.target.value)}
-                placeholder="Room code"
-                aria-label="Room code"
-              />
-              <button type="submit" className="btn" disabled={!code.trim()}>
+          <form className="card" onSubmit={onJoin}>
+            <p className="card__title">Join with a code</p>
+            <p className="card__hint">Paste the code a teammate shared with you.</p>
+            <div className="hero__row" style={{ marginTop: 'var(--space-4)' }}>
+              <div className="field" style={{ marginBottom: 0, flex: 1 }}>
+                <div className="field__wrap">
+                  <input
+                    className="input"
+                    value={code}
+                    onChange={(event) => setCode(event.target.value)}
+                    placeholder="Room code"
+                    aria-label="Room code"
+                  />
+                </div>
+              </div>
+              <Button type="submit" disabled={!code.trim()}>
                 Join
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
+        </section>
 
-        <section className="dashboard__rooms" aria-labelledby="your-rooms">
-          <div className="dashboard__rooms-head">
-            <h2 id="your-rooms">Your rooms</h2>
+        <section className="section" aria-labelledby="your-rooms">
+          <div className="section__head">
+            <h2 className="section__title" id="your-rooms">
+              Your rooms
+            </h2>
             {state === 'ready' && rooms.length > 0 && (
-              <span className="muted">{rooms.length} total</span>
+              <span className="muted nums">
+                {filtering ? visible.length + ' of ' + rooms.length : rooms.length + ' total'}
+              </span>
             )}
           </div>
 
-          {state === 'loading' && (
-            <div className="placeholder">
-              <Spinner label="Loading your rooms" />
+          {state === 'ready' && rooms.length > 0 && (
+            <div className="roomtools">
+              <div className="roomtools__search">
+                <Icon name="search" size={15} />
+                <input
+                  className="input"
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search by name or code"
+                  aria-label="Search rooms"
+                />
+              </div>
+
+              <Segmented options={FILTERS} value={filter} onChange={setFilter} label="Filter rooms" />
+
+              <label className="roomtools__sort">
+                <span className="sr-only">Sort rooms</span>
+                <select value={sort} onChange={(event) => setSort(event.target.value)}>
+                  {SORTS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
+          )}
+
+          {state === 'loading' && (
+            <>
+              <span className="sr-only" role="status">
+                Loading your rooms
+              </span>
+              <RoomListSkeleton />
+            </>
           )}
 
           {state === 'error' && (
-            <div className="placeholder placeholder--error" role="alert">
-              <p>Could not load your rooms.</p>
-              <button type="button" className="btn" onClick={() => load()}>
-                Retry
-              </button>
-            </div>
+            <EmptyState
+              variant="error"
+              title="Could not load your rooms"
+              body="The request did not reach the server, or it refused. Your rooms are safe — this is only the list."
+              action={
+                <Button onClick={() => load()} icon="redo">
+                  Retry
+                </Button>
+              }
+            />
           )}
 
           {state === 'ready' && rooms.length === 0 && (
-            <div className="placeholder">
-              <p>No rooms yet. Create one above and share the link.</p>
-            </div>
+            <EmptyState
+              icon="grid"
+              title="No rooms yet"
+              body="Create your first room above, then share its link. Anyone you invite lands on the same canvas and the same code buffer."
+            />
           )}
 
-          {state === 'ready' && rooms.length > 0 && (
+          {state === 'ready' && rooms.length > 0 && visible.length === 0 && (
+            <EmptyState
+              icon="search"
+              title="No rooms match"
+              body="Nothing here fits that search and filter."
+              action={
+                <Button
+                  onClick={() => {
+                    setQuery('')
+                    setFilter('all')
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          )}
+
+          {state === 'ready' && visible.length > 0 && (
             <ul className="roomlist">
-              {rooms.map((room, index) => (
+              {visible.map((room, index) => (
                 <RoomCard
                   key={room.roomId}
                   room={room}
@@ -235,7 +357,7 @@ export default function Dashboard() {
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title={deleteTarget ? 'Delete ' + deleteTarget.name + '?' : 'Delete room?'}
+        title={deleteTarget ? 'Delete ' + roomLabel(deleteTarget) + '?' : 'Delete room?'}
         description="The whiteboard, the code, and the whole session history go with it. This cannot be undone."
         confirmLabel="Delete room"
         destructive

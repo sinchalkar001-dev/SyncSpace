@@ -1,14 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { STROKE_COLORS, TOOLS, useUIStore } from '../../store/uiStore.js'
-
-const ICONS = {
-  select: 'M4 3 L18 11 L11.5 12.4 L14.4 18 L12 19.2 L9.2 13.6 L4 17 Z',
-  pen: 'M3 17.2 L14.1 6.1 L16.9 8.9 L5.8 20 L2 21 Z M15.5 4.7 L17.3 2.9 A1.6 1.6 0 0 1 19.6 5.2 L17.9 7 Z',
-  rect: 'M3 5 H21 V19 H3 Z',
-  ellipse: 'M12 5 A9 7 0 1 1 12 19 A9 7 0 1 1 12 5 Z',
-  text: 'M4 4 H20 V8 H18 V6 H13 V18 H15.5 V20 H8.5 V18 H11 V6 H6 V8 H4 Z',
-  eraser: 'M8 20 L3 15 A2 2 0 0 1 3 12 L12 3 A2 2 0 0 1 15 3 L21 9 A2 2 0 0 1 21 12 L13 20 Z',
-}
+import { useDismissable } from '../../hooks/useDismissable.js'
+import { Icon } from '../ui/Icon.jsx'
 
 const LABELS = {
   select: 'Select and pan',
@@ -20,52 +13,6 @@ const LABELS = {
 }
 
 const KEYS = { select: 'V', pen: 'P', rect: 'R', ellipse: 'O', text: 'T', eraser: 'E' }
-const FILLED = new Set(['select', 'pen', 'text', 'eraser'])
-
-const UNDO_PATH = 'M4 9 H14 A5 5 0 0 1 14 19 H9 M4 9 L8 5 M4 9 L8 13'
-const REDO_PATH = 'M20 9 H10 A5 5 0 0 0 10 19 H15 M20 9 L16 5 M20 9 L16 13'
-const MORE_PATH =
-  'M12 5.5 A1.6 1.6 0 1 1 12 2.3 A1.6 1.6 0 1 1 12 5.5 Z M12 13.6 A1.6 1.6 0 1 1 12 10.4 A1.6 1.6 0 1 1 12 13.6 Z M12 21.7 A1.6 1.6 0 1 1 12 18.5 A1.6 1.6 0 1 1 12 21.7 Z'
-
-function Icon({ path, filled }) {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path
-        d={path}
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeWidth={filled ? 0 : 1.7}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-/** Closes a popover on outside click or Escape, returning focus to the trigger. */
-function useDismiss(open, close, triggerRef) {
-  useEffect(() => {
-    if (!open) return undefined
-
-    const onPointerDown = (event) => {
-      if (!event.target.closest('[data-popover-root]')) close()
-    }
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        close()
-        triggerRef.current?.focus()
-      }
-    }
-
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown, true)
-    }
-  }, [open, close, triggerRef])
-}
 
 /**
  * Vertical tool rail floating over the canvas.
@@ -73,6 +20,9 @@ function useDismiss(open, close, triggerRef) {
  * Everything secondary — colour, width, destructive actions — lives behind a
  * popover so the rail stays a fixed, predictable width instead of overflowing
  * the pane the way a single horizontal bar did.
+ *
+ * Geometry note: the rail must stay inside the left 140px of `.board`, which
+ * the eraser end-to-end tests clip out of their screenshots. See layout.css.
  */
 export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled = false }) {
   const tool = useUIStore((s) => s.tool)
@@ -83,11 +33,19 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
   const setStrokeWidth = useUIStore((s) => s.setStrokeWidth)
 
   const [panel, setPanel] = useState(null)
+  const railRef = useRef(null)
   const styleRef = useRef(null)
   const moreRef = useRef(null)
 
   const close = useCallback(() => setPanel(null), [])
-  useDismiss(panel !== null, close, panel === 'style' ? styleRef : moreRef)
+
+  // Escape is captured here: the board also handles Escape to clear its
+  // selection, and closing a popover must not do both at once.
+  useDismissable(panel !== null, close, {
+    containerRef: railRef,
+    triggerRef: panel === 'style' ? styleRef : moreRef,
+    captureEscape: true,
+  })
 
   const toggle = (name) => setPanel((current) => (current === name ? null : name))
 
@@ -97,7 +55,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
       role="toolbar"
       aria-orientation="vertical"
       aria-label="Drawing tools"
-      data-popover-root
+      ref={railRef}
     >
       <div className="rail__group">
         {TOOLS.map((name) => (
@@ -112,7 +70,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
             aria-pressed={tool === name}
             disabled={disabled}
           >
-            <Icon path={ICONS[name]} filled={FILLED.has(name)} />
+            <Icon name={name} size={18} />
           </button>
         ))}
       </div>
@@ -187,7 +145,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
           title="Undo your last change (Ctrl+Z)"
           aria-label="Undo"
         >
-          <Icon path={UNDO_PATH} />
+          <Icon name="undo" size={18} />
         </button>
         <button
           type="button"
@@ -197,7 +155,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
           title="Redo (Ctrl+Shift+Z)"
           aria-label="Redo"
         >
-          <Icon path={REDO_PATH} />
+          <Icon name="redo" size={18} />
         </button>
       </div>
 
@@ -215,7 +173,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
           disabled={disabled}
           ref={moreRef}
         >
-          <Icon path={MORE_PATH} filled />
+          <Icon name="more" size={18} />
         </button>
 
         {panel === 'more' && (
@@ -229,6 +187,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
                 onClear()
               }}
             >
+              <Icon name="trash" size={14} />
               Clear board
             </button>
           </div>

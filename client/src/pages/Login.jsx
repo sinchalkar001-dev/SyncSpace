@@ -4,7 +4,8 @@ import { useAuth } from '../auth/useAuth.js'
 import { useToast } from '../components/ui/useToast.js'
 import { AuthCard } from '../components/AuthCard.jsx'
 import { Field } from '../components/ui/Field.jsx'
-import { Spinner } from '../components/ui/Spinner.jsx'
+import { Button } from '../components/ui/Button.jsx'
+import { Icon } from '../components/ui/Icon.jsx'
 
 export default function Login() {
   const { login, isAuthenticated, isLoading } = useAuth()
@@ -19,7 +20,12 @@ export default function Login() {
 
   if (!isLoading && isAuthenticated) return <Navigate to={redirectTo} replace />
 
-  const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const update = (key) => (event) => {
+    const { value } = event.target
+    setForm((current) => ({ ...current, [key]: value }))
+    // Clear a stale server error as soon as the user changes anything.
+    setError(null)
+  }
 
   const onSubmit = async (event) => {
     event.preventDefault()
@@ -52,7 +58,8 @@ export default function Login() {
       <form className="auth__form" onSubmit={onSubmit} noValidate>
         {error && (
           <div className="banner banner--error" role="alert">
-            {error}
+            <Icon name="alert" size={15} className="banner__icon" />
+            <span>{error}</span>
           </div>
         )}
 
@@ -62,6 +69,8 @@ export default function Login() {
           value={form.email}
           onChange={update('email')}
           autoComplete="email"
+          placeholder="you@company.com"
+          icon="inbox"
           required
         />
 
@@ -71,12 +80,14 @@ export default function Login() {
           value={form.password}
           onChange={update('password')}
           autoComplete="current-password"
+          placeholder="Your password"
+          icon="lock"
           required
         />
 
-        <button type="submit" className="btn btn--primary btn--block" disabled={busy}>
-          {busy ? <Spinner label="Signing in" /> : 'Sign in'}
-        </button>
+        <Button type="submit" variant="primary" size="lg" block loading={busy}>
+          Sign in
+        </Button>
       </form>
     </AuthCard>
   )

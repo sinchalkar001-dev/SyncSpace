@@ -4,7 +4,9 @@ import { useAuth } from '../auth/useAuth.js'
 import { useToast } from '../components/ui/useToast.js'
 import { AuthCard } from '../components/AuthCard.jsx'
 import { Field } from '../components/ui/Field.jsx'
-import { Spinner } from '../components/ui/Spinner.jsx'
+import { Button } from '../components/ui/Button.jsx'
+import { Icon } from '../components/ui/Icon.jsx'
+import { PasswordStrength } from '../components/ui/PasswordStrength.jsx'
 import { validateRegistration } from '../lib/validation.js'
 
 export default function Register() {
@@ -23,6 +25,7 @@ export default function Register() {
     const { value } = event.target
     setForm((current) => ({ ...current, [key]: value }))
     setErrors((current) => ({ ...current, [key]: undefined }))
+    setFormError(null)
   }
 
   const onSubmit = async (event) => {
@@ -65,7 +68,8 @@ export default function Register() {
       <form className="auth__form" onSubmit={onSubmit} noValidate>
         {formError && (
           <div className="banner banner--error" role="alert">
-            {formError}
+            <Icon name="alert" size={15} className="banner__icon" />
+            <span>{formError}</span>
           </div>
         )}
 
@@ -74,8 +78,11 @@ export default function Register() {
           value={form.name}
           onChange={update('name')}
           autoComplete="nickname"
+          placeholder="How teammates will see you"
+          icon="users"
           error={errors.name}
           maxLength={32}
+          showCount
         />
 
         <Field
@@ -84,6 +91,8 @@ export default function Register() {
           value={form.email}
           onChange={update('email')}
           autoComplete="email"
+          placeholder="you@company.com"
+          icon="inbox"
           error={errors.email}
         />
 
@@ -93,13 +102,17 @@ export default function Register() {
           value={form.password}
           onChange={update('password')}
           autoComplete="new-password"
+          placeholder="At least 8 characters"
+          icon="lock"
           error={errors.password}
           hint="At least 8 characters."
-        />
+        >
+          <PasswordStrength password={form.password} />
+        </Field>
 
-        <button type="submit" className="btn btn--primary btn--block" disabled={busy}>
-          {busy ? <Spinner label="Creating account" /> : 'Create account'}
-        </button>
+        <Button type="submit" variant="primary" size="lg" block loading={busy}>
+          Create account
+        </Button>
       </form>
     </AuthCard>
   )
