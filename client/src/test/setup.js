@@ -43,6 +43,37 @@ const definition = { value: storage, configurable: true, writable: true }
 Object.defineProperty(globalThis, 'localStorage', definition)
 if (typeof window !== 'undefined') Object.defineProperty(window, 'localStorage', definition)
 
+/**
+ * The same jsdom build has no `matchMedia`. Components read it for responsive
+ * behaviour and reduced-motion preferences, so stand in a query list that
+ * simply never matches — the desktop, full-motion default.
+ */
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query) => ({
+      media: query,
+      matches: false,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
+/** Konva and the split pane both observe element size; jsdom ships no observer. */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
 afterEach(() => {
   cleanup()
   storage.clear()
