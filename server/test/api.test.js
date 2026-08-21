@@ -8,7 +8,7 @@ let app
 const ALICE = { email: 'alice@syncspace.test', password: 'correct-horse-battery', name: 'Alice' }
 const BOB = { email: 'bob@syncspace.test', password: 'another-good-passphrase', name: 'Bob' }
 
-const registerUser = (who) => request(app).post('/api/auth/register').send(who)
+const registerUser = (who) => request(app).post('/api/v1/auth/register').send(who)
 
 beforeAll(startMemoryMongo)
 afterAll(stopMemoryMongo)
@@ -52,7 +52,7 @@ describe('auth', () => {
   it('logs in with correct credentials', async () => {
     await registerUser(ALICE)
     const res = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ALICE.email, password: ALICE.password })
     expect(res.status).toBe(200)
     expect(res.body.token).toEqual(expect.any(String))
@@ -61,7 +61,7 @@ describe('auth', () => {
   it('rejects a wrong password', async () => {
     await registerUser(ALICE)
     const res = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ALICE.email, password: 'not-the-password' })
     expect(res.status).toBe(401)
     expect(res.body.error.code).toBe('bad_credentials')
@@ -69,17 +69,17 @@ describe('auth', () => {
 
   it('rejects an unknown email with the same error as a wrong password', async () => {
     const res = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: 'nobody@syncspace.test', password: 'whatever-long-enough' })
     expect(res.status).toBe(401)
     expect(res.body.error.code).toBe('bad_credentials')
   })
 
   it('guards /me behind a token', async () => {
-    expect((await request(app).get('/api/auth/me')).status).toBe(401)
+    expect((await request(app).get('/api/v1/auth/me')).status).toBe(401)
 
     const { body } = await registerUser(ALICE)
-    const res = await request(app).get('/api/auth/me').set('Authorization', 'Bearer ' + body.token)
+    const res = await request(app).get('/api/v1/auth/me').set('Authorization', 'Bearer ' + body.token)
     expect(res.status).toBe(200)
     expect(res.body.user.email).toBe(ALICE.email)
   })
@@ -87,13 +87,13 @@ describe('auth', () => {
 
 describe('rooms', () => {
   it('requires auth to create a room', async () => {
-    expect((await request(app).post('/api/rooms').send({ name: 'Design' })).status).toBe(401)
+    expect((await request(app).post('/api/v1/rooms').send({ name: 'Design' })).status).toBe(401)
   })
 
   it('creates a private room owned by the caller', async () => {
     const { body } = await registerUser(ALICE)
     const res = await request(app)
-      .post('/api/rooms')
+      .post('/api/v1/rooms')
       .set('Authorization', 'Bearer ' + body.token)
       .send({ name: 'Interview loop' })
 
@@ -107,24 +107,24 @@ describe('rooms', () => {
     const bob = (await registerUser(BOB)).body
 
     const created = await request(app)
-      .post('/api/rooms')
+      .post('/api/v1/rooms')
       .set('Authorization', 'Bearer ' + alice.token)
       .send({ name: 'Private' })
 
     const roomId = created.body.room.roomId
 
     const owner = await request(app)
-      .get('/api/rooms/' + roomId)
+      .get('/api/v1/rooms/' + roomId)
       .set('Authorization', 'Bearer ' + alice.token)
     expect(owner.status).toBe(200)
 
     const stranger = await request(app)
-      .get('/api/rooms/' + roomId)
+      .get('/api/v1/rooms/' + roomId)
       .set('Authorization', 'Bearer ' + bob.token)
     expect(stranger.status).toBe(403)
     expect(stranger.body.error.code).toBe('room_forbidden')
 
-    expect((await request(app).get('/api/rooms/' + roomId)).status).toBe(403)
+    expect((await request(app).get('/api/v1/rooms/' + roomId)).status).toBe(403)
   })
 
   it('lets an invited member in', async () => {
@@ -132,19 +132,19 @@ describe('rooms', () => {
     const bob = (await registerUser(BOB)).body
 
     const created = await request(app)
-      .post('/api/rooms')
+      .post('/api/v1/rooms')
       .set('Authorization', 'Bearer ' + alice.token)
       .send({ name: 'Shared' })
     const roomId = created.body.room.roomId
 
     const invite = await request(app)
-      .post('/api/rooms/' + roomId + '/invite')
+      .post('/api/v1/rooms/' + roomId + '/invite')
       .set('Authorization', 'Bearer ' + alice.token)
       .send({ userId: bob.user.id })
     expect(invite.status).toBe(200)
 
     const res = await request(app)
-      .get('/api/rooms/' + roomId)
+      .get('/api/v1/rooms/' + roomId)
       .set('Authorization', 'Bearer ' + bob.token)
     expect(res.status).toBe(200)
   })
@@ -154,12 +154,12 @@ describe('rooms', () => {
     const bob = (await registerUser(BOB)).body
 
     const created = await request(app)
-      .post('/api/rooms')
+      .post('/api/v1/rooms')
       .set('Authorization', 'Bearer ' + alice.token)
       .send({ name: 'Shared' })
 
     const res = await request(app)
-      .post('/api/rooms/' + created.body.room.roomId + '/invite')
+      .post('/api/v1/rooms/' + created.body.room.roomId + '/invite')
       .set('Authorization', 'Bearer ' + bob.token)
       .send({ userId: bob.user.id })
 
@@ -168,7 +168,7 @@ describe('rooms', () => {
   })
 
   it('404s an unknown room', async () => {
-    const res = await request(app).get('/api/rooms/does-not-exist')
+    const res = await request(app).get('/api/v1/rooms/does-not-exist')
     expect(res.status).toBe(404)
   })
 })

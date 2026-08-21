@@ -67,7 +67,7 @@ One HTTP server carries three surfaces:
 
 | Path | Protocol | Purpose |
 | --- | --- | --- |
-| `/api` | HTTP | Auth, rooms, replay |
+| `/api/v1` | HTTP | Auth, rooms, replay (versioned REST) |
 | `/collab` | WebSocket | Hocuspocus — Yjs sync and awareness |
 | `/socket.io` | WebSocket | Room lifecycle: join, leave, chat |
 
@@ -130,17 +130,17 @@ reconnect. The header shows connection state and a toast reports drops and recov
 | Method | Path | Notes |
 | --- | --- | --- |
 | `GET` | `/health` | Liveness plus database state |
-| `POST` | `/api/auth/register` · `/login` | Returns `{ user, token }` |
-| `GET` | `/api/auth/me` | Requires bearer token |
-| `POST` | `/api/rooms` | Creates a private room |
-| `GET` | `/api/rooms` | Rooms you own or belong to |
-| `GET` | `/api/rooms/:roomId` | Room metadata |
-| `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
-| `POST` | `/api/rooms/:roomId/invite` | Owner only |
-| `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
-| `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
-| `GET` | `/api/rooms/:roomId/replay` | Timeline metadata |
-| `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
+| `POST` | `/api/v1/auth/register` · `/login` | Returns `{ user, token }` |
+| `GET` | `/api/v1/auth/me` | Requires bearer token |
+| `POST` | `/api/v1/rooms` | Creates a private room |
+| `GET` | `/api/v1/rooms` | Rooms you own or belong to |
+| `GET` | `/api/v1/rooms/:roomId` | Room metadata |
+| `PATCH` | `/api/v1/rooms/:roomId` | Owner only; rename or flip public/private |
+| `POST` | `/api/v1/rooms/:roomId/invite` | Owner only |
+| `GET` | `/api/v1/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
+| `DELETE` | `/api/v1/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
+| `GET` | `/api/v1/rooms/:roomId/replay` | Timeline metadata |
+| `GET` | `/api/v1/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
 
 ## Layout
 

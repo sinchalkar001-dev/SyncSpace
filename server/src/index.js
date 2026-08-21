@@ -13,7 +13,7 @@ const COLLAB_PATH = '/collab'
 
 /**
  * One HTTP server carries all three surfaces:
- *   /api        Express REST
+ *   /api/v1     Express REST (versioned)
  *   /collab     Hocuspocus (Yjs sync + awareness)
  *   /socket.io  Socket.io (room lifecycle)
  */

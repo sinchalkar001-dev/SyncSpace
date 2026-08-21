@@ -204,7 +204,7 @@ describe('persistence', () => {
         label: 'second update logged',
       })
 
-      const timeline = await request(server.app).get('/api/rooms/' + room + '/replay')
+      const timeline = await request(server.app).get('/api/v1/rooms/' + room + '/replay')
       expect(timeline.status).toBe(200)
       expect(timeline.body.timeline.length).toBeGreaterThanOrEqual(2)
       expect(timeline.body.timeline.map((e) => e.seq)).toEqual(
@@ -213,7 +213,7 @@ describe('persistence', () => {
 
       // Rewinding to seq 1 must show the document before the second edit.
       const rewound = await request(server.app)
-        .get('/api/rooms/' + room + '/replay/1')
+        .get('/api/v1/rooms/' + room + '/replay/1')
         .buffer(true)
         .parse((res, callback) => {
           const chunks = []
