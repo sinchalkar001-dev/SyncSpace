@@ -714,6 +714,13 @@
   transform-origin: top right;
 }
 
+/* Flipped when there is no room below the trigger. */
+.popover--anchored.popover--above {
+  top: auto;
+  bottom: calc(100% + 6px);
+  transform-origin: bottom right;
+}
+
 .popover__label {
   margin-bottom: var(--space-2);
   color: var(--text-faint);

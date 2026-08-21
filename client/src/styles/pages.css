@@ -629,11 +629,21 @@
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--sheen);
-  overflow: hidden;
+  /* Never clip this card: its own management menu opens BELOW it, and
+     overflow:hidden makes that menu invisible and unclickable. The stripe
+     rounds its own corners instead. */
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
     transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
   animation: card-in var(--dur-slow) var(--ease-out) both;
   animation-delay: calc(min(var(--i, 0), 12) * 40ms);
+}
+
+/* The card's entrance animation leaves a transform behind, and a transform
+   creates a stacking context - so the menu cannot escape its own card no
+   matter how high its z-index. Lift the whole card while its menu is open,
+   or the menu paints behind the cards listed after it. */
+.roomcard--open {
+  z-index: 5;
 }
 
 .roomcard:hover {
@@ -648,6 +658,7 @@
 .roomcard__stripe {
   width: 3px;
   flex: none;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
   background: var(--identity, var(--accent));
   opacity: 0.55;
   transition: opacity var(--dur) var(--ease), width var(--dur) var(--ease);
