@@ -4,6 +4,9 @@ import { formatWhen, isRoomLive, isUnnamed } from '../lib/rooms.js'
 import { useDismissable } from '../hooks/useDismissable.js'
 import { Icon } from './ui/Icon.jsx'
 
+// Roughly the menu's height plus breathing room.
+const MENU_CLEARANCE = 210
+
 /**
  * One room on the dashboard.
  *
@@ -24,6 +27,9 @@ function RoomCardBase({
   onToggleVisibility,
 }) {
   const [open, setOpen] = useState(false)
+  // The menu opens downward by default, but the last card on a short screen
+  // has no room below and nothing to scroll, so it flips upward instead.
+  const [above, setAbove] = useState(false)
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
 
@@ -33,13 +39,26 @@ function RoomCardBase({
   const unnamed = isUnnamed(room)
   const live = isRoomLive(room)
 
+  const toggle = useCallback(() => {
+    setOpen((value) => {
+      if (value) return false
+      const rect = triggerRef.current?.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - (rect?.bottom ?? 0)
+      setAbove(spaceBelow < MENU_CLEARANCE)
+      return true
+    })
+  }, [])
+
   const run = (action) => () => {
     close()
     action()
   }
 
   return (
-    <li className="roomcard" style={{ '--i': index, '--identity': colorFor(room.roomId) }}>
+    <li
+      className={'roomcard' + (open ? ' roomcard--open' : '')}
+      style={{ '--i': index, '--identity': colorFor(room.roomId) }}
+    >
       <span className="roomcard__stripe" aria-hidden="true" />
 
       <button type="button" className="roomcard__main" onClick={onOpen}>
@@ -87,7 +106,7 @@ function RoomCardBase({
         <button
           type="button"
           className="roomcard__more"
-          onClick={() => setOpen((value) => !value)}
+          onClick={toggle}
           aria-expanded={open}
           aria-haspopup="menu"
           aria-label={'Manage ' + (unnamed ? room.roomId : room.name)}
@@ -97,7 +116,12 @@ function RoomCardBase({
         </button>
 
         {open && (
-          <div className="popover popover--menu popover--anchored" role="menu">
+          <div
+            className={
+              'popover popover--menu popover--anchored' + (above ? ' popover--above' : '')
+            }
+            role="menu"
+          >
             <button type="button" className="popover__item" role="menuitem" onClick={run(onRename)}>
               <Icon name="pen" size={14} />
               {unnamed ? 'Name this room' : 'Rename'}
