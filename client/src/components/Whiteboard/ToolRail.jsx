@@ -6,13 +6,26 @@ import { Icon } from '../ui/Icon.jsx'
 const LABELS = {
   select: 'Select and pan',
   pen: 'Freehand',
+  segment: 'Straight line',
+  arrow: 'Arrow',
   rect: 'Rectangle',
+  diamond: 'Diamond',
   ellipse: 'Ellipse',
   text: 'Text',
   eraser: 'Eraser',
 }
 
-const KEYS = { select: 'V', pen: 'P', rect: 'R', ellipse: 'O', text: 'T', eraser: 'E' }
+const KEYS = {
+  select: 'V',
+  pen: 'P',
+  segment: 'L',
+  arrow: 'A',
+  rect: 'R',
+  diamond: 'D',
+  ellipse: 'O',
+  text: 'T',
+  eraser: 'E',
+}
 
 /**
  * Vertical tool rail floating over the canvas.

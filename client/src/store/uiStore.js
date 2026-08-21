@@ -1,6 +1,16 @@
 import { create } from 'zustand'
 
-export const TOOLS = ['select', 'pen', 'rect', 'ellipse', 'text', 'eraser']
+export const TOOLS = [
+  'select',
+  'pen',
+  'segment',
+  'arrow',
+  'rect',
+  'diamond',
+  'ellipse',
+  'text',
+  'eraser',
+]
 
 export const STROKE_COLORS = [
   '#e2e8f0',

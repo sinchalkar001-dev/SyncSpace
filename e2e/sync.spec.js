@@ -219,3 +219,67 @@ test('one stroke is one shape, so a single erase clears it', async ({ page }) =>
     expect(Buffer.compare(empty, after), 'no duplicate stroke left behind').toBe(0)
   }).toPass({ timeout: 12000 })
 })
+
+test('straight line, arrow and diamond each draw one shape', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByText('Connected')).toBeVisible()
+  await page.waitForTimeout(1200)
+
+  const box = await page.locator('.board').boundingBox()
+  const clip = {
+    x: box.x + 140,
+    y: box.y + 20,
+    width: box.width - 180,
+    height: box.height - 130,
+  }
+  const tool = (label) => page.locator('.rail button[aria-label="' + label + '"]')
+
+  for (const [label, from, to] of [
+    ['Straight line', [220, 140], [460, 230]],
+    ['Arrow', [220, 300], [460, 300]],
+    ['Diamond', [540, 130], [680, 250]],
+  ]) {
+    const before = await page.screenshot({ clip })
+
+    await tool(label).click()
+    await page.mouse.move(box.x + from[0], box.y + from[1])
+    await page.mouse.down()
+    await page.mouse.move(box.x + to[0], box.y + to[1], { steps: 10 })
+    await page.mouse.up()
+
+    await expect(async () => {
+      const after = await page.screenshot({ clip })
+      expect(Buffer.compare(before, after), label + ' drew something').not.toBe(0)
+    }).toPass({ timeout: 10000 })
+  }
+})
+
+test('hovering a shape names who drew it', async ({ page }) => {
+  await page.goto('/room/' + newRoom())
+  await expect(page.getByText('Connected')).toBeVisible()
+  await page.waitForTimeout(1200)
+
+  const box = await page.locator('.board').boundingBox()
+  const tool = (label) => page.locator('.rail button[aria-label="' + label + '"]')
+
+  await tool('Arrow').click()
+  await page.mouse.move(box.x + 260, box.y + 300)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 520, box.y + 300, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+
+  // Nothing is attributed until the pointer is actually over a shape.
+  await expect(page.locator('.authortip')).toHaveCount(0)
+
+  await tool('Select and pan').click()
+  await page.mouse.move(box.x + 390, box.y + 300)
+
+  const tip = page.locator('.authortip')
+  await expect(tip).toBeVisible()
+  await expect(tip).toContainText(/Guest-/)
+
+  // ...and it goes away again when the pointer leaves.
+  await page.mouse.move(box.x + 390, box.y + 620)
+  await expect(tip).toHaveCount(0)
+})
