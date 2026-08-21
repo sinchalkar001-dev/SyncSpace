@@ -4,7 +4,8 @@ import { useDismissable } from '../../hooks/useDismissable.js'
 import { Icon } from '../ui/Icon.jsx'
 
 const LABELS = {
-  select: 'Select and pan',
+  select: 'Select',
+  hand: 'Hand (pan)',
   pen: 'Freehand',
   segment: 'Straight line',
   arrow: 'Arrow',
@@ -17,6 +18,7 @@ const LABELS = {
 
 const KEYS = {
   select: 'V',
+  hand: 'H',
   pen: 'P',
   segment: 'L',
   arrow: 'A',

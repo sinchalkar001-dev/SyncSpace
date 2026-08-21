@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { nanoid } from 'nanoid'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import { COLLAB_URL } from './env.js'
 
@@ -84,4 +85,62 @@ export function removeShape(shapes, id) {
 
 export function clearShapes(shapes) {
   if (shapes.length) shapes.delete(0, shapes.length)
+}
+
+/** Index of a shape in the shared array, or -1. */
+function indexOfShape(shapes, id) {
+  for (let i = 0; i < shapes.length; i += 1) {
+    const item = shapes.get(i)
+    if (item instanceof Y.Map && item.get('id') === id) return i
+  }
+  return -1
+}
+
+/**
+ * Moves a shape one step through paint order.
+ *
+ * Y.Array has no move, so this deletes and re-inserts. Both happen in one
+ * transaction, which keeps it a single undo step and a single broadcast.
+ */
+export function reorderShape(shapes, id, direction) {
+  const index = indexOfShape(shapes, id)
+  if (index < 0) return
+
+  const target = direction === 'forward' ? index + 1 : index - 1
+  if (target < 0 || target >= shapes.length) return
+
+  const apply = () => {
+    const json = shapes.get(index).toJSON()
+    shapes.delete(index, 1)
+    const fresh = new Y.Map()
+    Object.entries(json).forEach(([key, value]) => fresh.set(key, value))
+    shapes.insert(target, [fresh])
+  }
+
+  shapes.doc ? shapes.doc.transact(apply) : apply()
+}
+
+/** Appends copies of the given shapes, offset so they are visibly separate. */
+export function duplicateShapes(shapes, ids, offset = 16) {
+  const copies = []
+
+  const apply = () => {
+    for (let i = 0; i < shapes.length; i += 1) {
+      const item = shapes.get(i)
+      if (!(item instanceof Y.Map) || !ids.includes(item.get('id'))) continue
+      const json = item.toJSON()
+      // A copy is a new shape, not the same one twice: it needs its own id or
+      // every later edit would address both.
+      copies.push({
+        ...json,
+        id: nanoid(8),
+        x: (json.x || 0) + offset,
+        y: (json.y || 0) + offset,
+      })
+    }
+    copies.forEach((copy) => pushShape(shapes, copy))
+  }
+
+  shapes.doc ? shapes.doc.transact(apply) : apply()
+  return copies.map((copy) => copy.id)
 }

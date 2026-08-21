@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export const TOOLS = [
   'select',
+  'hand',
   'pen',
   'segment',
   'arrow',
