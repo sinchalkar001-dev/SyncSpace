@@ -1,4 +1,6 @@
 import { Component } from 'react'
+import { Button } from './ui/Button.jsx'
+import { Icon } from './ui/Icon.jsx'
 
 /**
  * Stops a render-time crash in one pane from blanking the whole app.
@@ -24,19 +26,24 @@ export class ErrorBoundary extends Component {
 
     return (
       <div className="crash" role="alert">
+        <span className="empty__icon">
+          <Icon name="alert" size={22} />
+        </span>
+
         <h1 className="crash__title">Something broke on this screen</h1>
+
         <p className="crash__body">
           The error was logged. Reloading usually clears it — your work is stored on the server, not
           in this tab.
         </p>
+
         <pre className="crash__detail">{String(this.state.error?.message || this.state.error)}</pre>
+
         <div className="crash__actions">
-          <button type="button" className="btn btn--primary" onClick={() => window.location.reload()}>
+          <Button variant="primary" onClick={() => window.location.reload()}>
             Reload
-          </button>
-          <button type="button" className="btn" onClick={() => this.setState({ error: null })}>
-            Try again
-          </button>
+          </Button>
+          <Button onClick={() => this.setState({ error: null })}>Try again</Button>
         </div>
       </div>
     )

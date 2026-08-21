@@ -14,6 +14,10 @@ createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <ToastProvider>
           <AuthProvider>
+            {/* First stop for keyboard users, before the nav on every page. */}
+            <a className="skip-link" href="#main">
+              Skip to content
+            </a>
             <App />
           </AuthProvider>
         </ToastProvider>
