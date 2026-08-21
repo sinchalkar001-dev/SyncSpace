@@ -26,9 +26,15 @@ async function createRoom(page, name) {
   await expect(page.locator('.roomcard').getByText(name)).toBeVisible()
 }
 
-test('the room menu opens and its items are actually clickable', async ({ page }) => {
+test('the first card of several can still reach its own menu', async ({ page }) => {
   await signUp(page)
-  await createRoom(page, 'Sprint planning')
+
+  // Several rooms on purpose. The first card's menu overlaps the cards listed
+  // after it, and the card's own transform traps it in a stacking context - a
+  // single-room dashboard never exposes that.
+  for (const name of ['First room', 'Second room', 'Third room']) {
+    await createRoom(page, name)
+  }
 
   await page.locator('.roomcard__more').first().click()
 
