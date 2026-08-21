@@ -47,7 +47,7 @@ export function createApp() {
   api.use('/auth', authRouter)
   api.use('/rooms', roomsRouter)
 
-  app.use('/api', api)
+  app.use('/api/v1', api)
   app.use(notFoundHandler)
   app.use(errorHandler)
 

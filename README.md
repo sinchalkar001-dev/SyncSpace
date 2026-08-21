@@ -67,7 +67,7 @@ One HTTP server carries three surfaces:
 
 | Path | Protocol | Purpose |
 | --- | --- | --- |
-| `/api` | HTTP | Auth, rooms, replay |
+| `/api/v1` | HTTP | Auth, rooms, replay (versioned REST) |
 | `/collab` | WebSocket | Hocuspocus — Yjs sync and awareness |
 | `/socket.io` | WebSocket | Room lifecycle: join, leave, chat |
 
