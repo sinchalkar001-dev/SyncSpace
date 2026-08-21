@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Layer, Stage } from 'react-konva'
 import { nanoid } from 'nanoid'
 import { clearShapes, pushShape, removeShape, updateShape } from '../../lib/collab.js'
+import { shapesHitBy } from '../../lib/hitTest.js'
 import { useShapes } from '../../hooks/useShapes.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import { useCursorBroadcast } from '../../hooks/useAwareness.js'
@@ -22,12 +23,7 @@ const MIN_POINT_DISTANCE = 2
 // does not work". Screen units on purpose, so the reach feels the same at any
 // zoom level.
 const ERASER_RADIUS = 14
-const ERASER_SAMPLES = [[0, 0]].concat(
-  [0, 1, 2, 3, 4, 5, 6, 7].map((step) => {
-    const angle = (step * Math.PI) / 4
-    return [Math.round(Math.cos(angle) * ERASER_RADIUS), Math.round(Math.sin(angle) * ERASER_RADIUS)]
-  })
-)
+
 const SHORTCUTS = {
   v: 'select',
   p: 'pen',
@@ -175,19 +171,24 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
    */
   const eraseAtPointer = useCallback(
     (stage) => {
-      const pointer = stage.getPointerPosition()
-      if (!pointer) return
+      const point = worldPointer(stage)
+      if (!point || !shapes) return
 
-      const hits = new Set()
-      for (const [dx, dy] of ERASER_SAMPLES) {
-        const node = stage.getIntersection({ x: pointer.x + dx, y: pointer.y + dy })
-        const id = typeof node?.id === 'function' ? node.id() : null
-        if (id) hits.add(id)
-      }
-      if (hits.size === 0) return
+      // Radius is a screen distance, so it feels the same at any zoom; the
+      // test itself happens in world space where the shapes live.
+      const scale = stage.scaleX() || 1
+      const radius = ERASER_RADIUS / scale
+
+      const hits = shapesHitBy(
+        shapes.toArray().map((shape) => shape.toJSON()),
+        point.x,
+        point.y,
+        radius
+      )
+      if (hits.length === 0) return
 
       hits.forEach((id) => removeShape(shapes, id))
-      setSelectedId((current) => (hits.has(current) ? null : current))
+      setSelectedId((current) => (hits.includes(current) ? null : current))
     },
     [shapes]
   )
