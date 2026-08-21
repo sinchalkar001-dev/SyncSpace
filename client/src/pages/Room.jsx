@@ -7,11 +7,13 @@ import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useAwareness } from '../hooks/useAwareness.js'
 import { useRoomSocket } from '../hooks/useRoomSocket.js'
 import { useToast } from '../components/ui/useToast.js'
+import { TopBar, Brand } from '../components/TopBar.jsx'
 import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceBar } from '../components/PresenceBar.jsx'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
-import { Spinner } from '../components/ui/Spinner.jsx'
+import { Icon } from '../components/ui/Icon.jsx'
+import { LoadingBlock } from '../components/ui/Spinner.jsx'
 import { Whiteboard } from '../components/Whiteboard/Whiteboard.jsx'
 import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
 
@@ -64,24 +66,23 @@ export default function Room() {
     }
   }, [toast])
 
-  if (isLoading) {
-    return (
-      <div className="route-loading">
-        <Spinner label="Restoring your session" />
-      </div>
-    )
-  }
+  if (isLoading) return <LoadingBlock label="Restoring your session" />
 
   if (authError) {
     return (
-      <main className="gate" role="alert">
+      <main className="gate" id="main" role="alert">
         <div className="gate__card">
+          <span className="empty__icon" style={{ margin: '0 auto var(--space-4)' }}>
+            <Icon name="lock" size={22} />
+          </span>
+
           <h1>You cannot open this room</h1>
           <p>{authError}</p>
           <p className="muted">
             Private rooms are limited to their owner and invited members. Ask for an invite, or sign
             in with the account that was invited.
           </p>
+
           <div className="gate__actions">
             {!isAuthenticated && (
               <Link className="btn btn--primary" to="/login" state={{ from: '/room/' + roomId }}>
@@ -99,36 +100,42 @@ export default function Room() {
 
   return (
     <div className="room">
-      <header className="room__bar">
-        <button
-          type="button"
-          className="room__back"
+      <TopBar flush>
+        <Brand
           onClick={() => navigate(isAuthenticated ? '/dashboard' : '/')}
-          aria-label="Leave room"
+          showWord={false}
           title="Leave room"
-        >
-          <span className="brand-mark">SS</span>
-        </button>
+        />
 
         <div className="room__identity">
           <span className="room__dot" style={{ background: colorFor(roomId) }} aria-hidden="true" />
           <span className="room__name">{room?.name || 'Untitled room'}</span>
-          {room && !room.isPublic && <span className="pill">Private</span>}
+          {room && !room.isPublic && (
+            <span className="pill">
+              <Icon name="lock" size={11} />
+              Private
+            </span>
+          )}
+
           <button type="button" className="room__code" onClick={onCopy} title="Copy room link">
             <code>{roomId}</code>
-            <span className="room__copy">{copied ? 'Copied' : 'Copy link'}</span>
+            <span className={'room__copy' + (copied ? ' is-shown' : '')}>
+              <Icon name={copied ? 'check' : 'copy'} size={12} />
+              <span className="room__copy-label">{copied ? 'Copied' : 'Copy link'}</span>
+            </span>
           </button>
         </div>
 
-        <div className="room__right">
+        <div className="topbar__right">
           <PresenceBar self={self} peers={peers} />
           <ConnectionStatus status={status} synced={synced} />
           <UserMenu compact />
         </div>
-      </header>
+      </TopBar>
 
       {session ? (
         <SplitPane
+          id="main"
           left={
             <Whiteboard
               shapes={session.shapes}
@@ -141,9 +148,7 @@ export default function Room() {
           right={<CodeEditor yText={session.code} provider={session.provider} peers={peers} />}
         />
       ) : (
-        <div className="route-loading">
-          <Spinner label="Opening room" />
-        </div>
+        <LoadingBlock label="Opening room" />
       )}
     </div>
   )

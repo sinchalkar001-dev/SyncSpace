@@ -1,22 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import { colorFor } from '../lib/identity.js'
-
-const MORE_PATH =
-  'M12 5.5 A1.6 1.6 0 1 1 12 2.3 A1.6 1.6 0 1 1 12 5.5 Z M12 13.6 A1.6 1.6 0 1 1 12 10.4 A1.6 1.6 0 1 1 12 13.6 Z M12 21.7 A1.6 1.6 0 1 1 12 18.5 A1.6 1.6 0 1 1 12 21.7 Z'
-
-const LIVE_WINDOW_MS = 2 * 60 * 1000
-
-function formatWhen(value) {
-  if (!value) return 'never'
-  const then = new Date(value)
-  const minutes = Math.round((Date.now() - then.getTime()) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return minutes + 'm ago'
-  if (minutes < 1440) return Math.round(minutes / 60) + 'h ago'
-  return then.toLocaleDateString()
-}
-
-const isUnnamed = (room) => !room.name || room.name === 'Untitled room'
+import { formatWhen, isRoomLive, isUnnamed } from '../lib/rooms.js'
+import { useDismissable } from '../hooks/useDismissable.js'
+import { Icon } from './ui/Icon.jsx'
 
 /**
  * One room on the dashboard.
@@ -24,36 +10,28 @@ const isUnnamed = (room) => !room.name || room.name === 'Untitled room'
  * A room created without a name leads with its code instead of a shared
  * "Untitled room" label, so two unnamed rooms are never indistinguishable.
  * Management sits behind a menu so a stray click cannot rename or delete.
+ *
+ * Memoised because the dashboard re-renders the whole list on every keystroke
+ * in the search box, and only the matching subset actually changes.
  */
-export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRename, onToggleVisibility }) {
+function RoomCardBase({
+  room,
+  index = 0,
+  onOpen,
+  onShowPeople,
+  onDelete,
+  onRename,
+  onToggleVisibility,
+}) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
 
   const close = useCallback(() => setOpen(false), [])
+  useDismissable(open, close, { containerRef, triggerRef })
+
   const unnamed = isUnnamed(room)
-  const live = room.lastActivityAt && Date.now() - new Date(room.lastActivityAt).getTime() < LIVE_WINDOW_MS
-
-  useEffect(() => {
-    if (!open) return undefined
-
-    const onPointerDown = (event) => {
-      if (!containerRef.current?.contains(event.target)) close()
-    }
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        close()
-        triggerRef.current?.focus()
-      }
-    }
-
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open, close])
+  const live = isRoomLive(room)
 
   const run = (action) => () => {
     close()
@@ -61,10 +39,7 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
   }
 
   return (
-    <li
-      className="roomcard"
-      style={{ '--i': index, '--identity': colorFor(room.roomId) }}
-    >
+    <li className="roomcard" style={{ '--i': index, '--identity': colorFor(room.roomId) }}>
       <span className="roomcard__stripe" aria-hidden="true" />
 
       <button type="button" className="roomcard__main" onClick={onOpen}>
@@ -75,7 +50,7 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
               <span className="roomcard__unnamed">Unnamed</span>
             </>
           ) : (
-            room.name
+            <span>{room.name}</span>
           )}
         </span>
 
@@ -83,16 +58,27 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
           {!unnamed && <code className="roomcard__code">{room.roomId}</code>}
 
           <span className={room.isPublic ? 'pill pill--public' : 'pill'}>
+            <Icon name={room.isPublic ? 'globe' : 'lock'} size={11} />
             {room.isPublic ? 'Public' : 'Private'}
           </span>
 
           <span className="roomcard__stat">
+            <Icon name="users" size={13} />
             {room.memberCount} member{room.memberCount === 1 ? '' : 's'}
           </span>
 
           <span className="roomcard__stat">
-            {live && <span className="livedot" aria-hidden="true" />}
-            {live ? 'Active now' : 'Active ' + formatWhen(room.lastActivityAt)}
+            {live ? (
+              <>
+                <span className="livedot" aria-hidden="true" />
+                Active now
+              </>
+            ) : (
+              <>
+                <Icon name="clock" size={13} />
+                {'Active ' + formatWhen(room.lastActivityAt)}
+              </>
+            )}
           </span>
         </span>
       </button>
@@ -107,14 +93,13 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
           aria-label={'Manage ' + (unnamed ? room.roomId : room.name)}
           ref={triggerRef}
         >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d={MORE_PATH} fill="currentColor" />
-          </svg>
+          <Icon name="more" size={16} />
         </button>
 
         {open && (
           <div className="popover popover--menu popover--anchored" role="menu">
             <button type="button" className="popover__item" role="menuitem" onClick={run(onRename)}>
+              <Icon name="pen" size={14} />
               {unnamed ? 'Name this room' : 'Rename'}
             </button>
             <button
@@ -123,6 +108,7 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
               role="menuitem"
               onClick={run(onToggleVisibility)}
             >
+              <Icon name={room.isPublic ? 'lock' : 'globe'} size={14} />
               {room.isPublic ? 'Make private' : 'Make public'}
             </button>
             <button
@@ -131,6 +117,7 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
               role="menuitem"
               onClick={run(onShowPeople)}
             >
+              <Icon name="users" size={14} />
               People
             </button>
             <div className="popover__rule" />
@@ -140,6 +127,7 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
               role="menuitem"
               onClick={run(onDelete)}
             >
+              <Icon name="trash" size={14} />
               Delete room
             </button>
           </div>
@@ -148,3 +136,5 @@ export function RoomCard({ room, index = 0, onOpen, onShowPeople, onDelete, onRe
     </li>
   )
 }
+
+export const RoomCard = memo(RoomCardBase)

@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client.js'
+import { formatWhen, roomLabel } from '../lib/rooms.js'
 import { Modal } from './ui/Modal.jsx'
-import { Spinner } from './ui/Spinner.jsx'
-
-function formatWhen(value) {
-  if (!value) return 'never'
-  const then = new Date(value)
-  const minutes = Math.round((Date.now() - then.getTime()) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return minutes + 'm ago'
-  if (minutes < 1440) return Math.round(minutes / 60) + 'h ago'
-  return then.toLocaleDateString()
-}
+import { Button } from './ui/Button.jsx'
+import { Icon } from './ui/Icon.jsx'
+import { Skeleton } from './ui/Skeleton.jsx'
 
 function Avatar({ name, muted }) {
   return (
@@ -20,6 +13,21 @@ function Avatar({ name, muted }) {
         .slice(0, 1)
         .toUpperCase()}
     </span>
+  )
+}
+
+function PeopleSkeleton() {
+  return (
+    <div className="people__list" aria-hidden="true">
+      {[0, 1, 2].map((row) => (
+        <div className="people__list" key={row} style={{ padding: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Skeleton variant="circle" width={30} height={30} />
+            <Skeleton width={`${45 + row * 12}%`} />
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -59,19 +67,17 @@ export function RoomPeopleDialog({ room, open, onClose }) {
   return (
     <Modal
       open={open}
-      title={room ? 'People in ' + room.name : 'People'}
+      title={room ? 'People in ' + roomLabel(room) : 'People'}
       description={room ? 'Room ' + room.roomId : undefined}
       onClose={onClose}
+      wide
     >
-      {state === 'loading' && (
-        <div className="people__placeholder">
-          <Spinner label="Loading people" />
-        </div>
-      )}
+      {state === 'loading' && <PeopleSkeleton />}
 
       {state === 'error' && (
         <div className="banner banner--error" role="alert">
-          {error}
+          <Icon name="alert" size={15} className="banner__icon" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -121,9 +127,7 @@ export function RoomPeopleDialog({ room, open, onClose }) {
       )}
 
       <div className="modal__actions">
-        <button type="button" className="btn" onClick={onClose}>
-          Close
-        </button>
+        <Button onClick={onClose}>Close</Button>
       </div>
     </Modal>
   )

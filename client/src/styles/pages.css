@@ -1,0 +1,933 @@
+/**
+ * Page-level composition. Everything here builds on the primitives in
+ * components.css — no new visual vocabulary is invented at this layer.
+ */
+
+/* ---------- landing ---------- */
+
+.landing {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+/* Ambient light behind the hero. Purely decorative and static. */
+.landing::before {
+  content: '';
+  position: absolute;
+  top: -340px;
+  left: 50%;
+  z-index: 0;
+  width: min(1200px, 160vw);
+  height: 780px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgba(242, 160, 63, 0.13) 0%,
+    rgba(242, 160, 63, 0.04) 45%,
+    transparent 72%
+  );
+  pointer-events: none;
+}
+
+.landing > * {
+  position: relative;
+  z-index: 1;
+}
+
+.landing__body {
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--page-pad);
+}
+
+.hero {
+  display: grid;
+  gap: var(--space-6);
+  padding: clamp(40px, 8vw, 88px) 0 var(--space-9);
+  justify-items: center;
+  text-align: center;
+}
+
+.hero__eyebrow {
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+}
+
+.hero__title {
+  max-width: 18ch;
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118;
+  font-weight: 700;
+  font-size: var(--text-4xl);
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: 60ms;
+}
+
+.hero__title em {
+  font-style: normal;
+  background: linear-gradient(120deg, var(--accent-hi), var(--accent-lo));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero__lede {
+  max-width: 58ch;
+  color: var(--text-dim);
+  font-size: var(--text-lg);
+  line-height: var(--leading-normal);
+  text-wrap: pretty;
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: 120ms;
+}
+
+/* The whole point of the landing page: starting a room stays one click away. */
+.hero__start {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 520px;
+  margin-top: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-3), var(--sheen);
+  text-align: left;
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: 180ms;
+}
+
+.hero__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.hero__row > .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.hero__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.hero__divider::before,
+.hero__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.hero__note {
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  animation: fade-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: 240ms;
+}
+
+/* ---------- landing product preview ---------- */
+
+.preview {
+  margin: var(--space-6) 0 var(--space-11);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-4), var(--sheen);
+  overflow: hidden;
+  animation: rise-in var(--dur-slower) var(--ease-out) both;
+  animation-delay: 300ms;
+}
+
+.preview__chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.preview__dots {
+  display: flex;
+  gap: 6px;
+}
+
+.preview__dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--surface-4);
+}
+
+.preview__label {
+  margin-left: var(--space-2);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.preview__panes {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  min-height: 300px;
+}
+
+.preview__board {
+  position: relative;
+  border-right: 1px solid var(--border);
+  background-color: #0b0f0e;
+  background-image: radial-gradient(circle, #232e2a 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.preview__ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.preview__ink path,
+.preview__ink rect,
+.preview__ink ellipse {
+  stroke-dasharray: var(--len, 300);
+  animation: draw-path 2.4s var(--ease-out) both infinite;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+/* A peer cursor drifting over the mock board. */
+.preview__cursor {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--accent-ink);
+  animation: drift 4.5s var(--ease) infinite;
+}
+
+.preview__code {
+  padding: var(--space-4);
+  background: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.9;
+  overflow: hidden;
+}
+
+.preview__line {
+  display: flex;
+  gap: var(--space-4);
+  color: var(--text-dim);
+  white-space: pre;
+}
+
+.preview__gutter {
+  flex: none;
+  width: 2ch;
+  color: var(--ink-7);
+  text-align: right;
+}
+
+.tok-key {
+  color: #c792ea;
+}
+.tok-fn {
+  color: #82aaff;
+}
+.tok-str {
+  color: #c3e88d;
+}
+.tok-com {
+  color: var(--ink-7);
+}
+
+/* ---------- landing features ---------- */
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: var(--space-4);
+  padding-bottom: var(--space-11);
+}
+
+.feature {
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.feature:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+}
+
+.feature__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.feature__title {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.feature__body {
+  color: var(--text-faint);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  text-wrap: pretty;
+}
+
+.landing__foot {
+  margin-top: auto;
+  padding: var(--space-6) var(--page-pad);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+.landing__foot-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  max-width: var(--page-max);
+  margin: 0 auto;
+}
+
+/* ---------- auth ---------- */
+
+.auth {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100%;
+}
+
+.auth__panel {
+  display: grid;
+  place-items: center;
+  padding: var(--space-7) var(--page-pad);
+}
+
+.auth__card {
+  width: 100%;
+  max-width: 400px;
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+}
+
+.auth__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-7);
+  color: var(--text);
+}
+
+.auth__brand:hover {
+  text-decoration: none;
+}
+
+.auth__title {
+  font-size: var(--text-2xl);
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 112;
+  font-weight: 700;
+}
+
+.auth__subtitle {
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-6);
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.auth__form {
+  display: grid;
+  gap: 0;
+}
+
+.auth__form .banner {
+  margin-bottom: var(--space-4);
+}
+
+.auth__form .btn--block {
+  margin-top: var(--space-5);
+}
+
+.auth__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--text-base);
+}
+
+/* The value panel beside the form. Decorative — hidden on narrow screens. */
+.auth__side {
+  display: none;
+  position: relative;
+  padding: var(--space-9);
+  border-left: 1px solid var(--border);
+  background: linear-gradient(160deg, var(--ink-2), var(--ink-0));
+  overflow: hidden;
+}
+
+.auth__side::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(157, 172, 166, 0.07) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.auth__side-inner {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: var(--space-5);
+  height: 100%;
+  max-width: 42ch;
+}
+
+.auth__quote {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 112;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: var(--tracking-tight);
+}
+
+.auth__points {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth__points li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: var(--text-dim);
+}
+
+.auth__points svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+/* ---------- gate / not found ---------- */
+
+.gate {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-7) var(--page-pad);
+}
+
+.gate__card {
+  width: 100%;
+  max-width: 460px;
+  padding: var(--space-7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-3), var(--sheen);
+  text-align: center;
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+}
+
+.gate__card h1 {
+  margin-bottom: var(--space-3);
+  font-size: var(--text-2xl);
+}
+
+.gate__card p {
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.gate__card p + p {
+  margin-top: var(--space-3);
+}
+
+.gate__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-6);
+}
+
+/* ---------- dashboard ---------- */
+
+.dash__hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-6);
+}
+
+.dash__greeting {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118;
+  font-weight: 700;
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.05;
+}
+
+.dash__sub {
+  margin-top: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--text-md);
+}
+
+.dash__overview {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1.35fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-8);
+}
+
+/* Fixed 2x2 rather than auto-fit: at this column width auto-fit lands on three
+   across and drops the fourth card onto a lonely second row. */
+.dash__overview .statgrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dash__activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--sheen);
+}
+
+.dash__activity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dash__activity-title {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* Room list toolbar: search, filters, sort. */
+.roomtools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.roomtools__search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.roomtools__search .input {
+  padding-left: 36px;
+}
+
+.roomtools__search svg {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.roomtools__sort select {
+  min-height: 40px;
+  padding: 0 30px 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 54%, calc(100% - 11px) 54%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.roomtools__sort select:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* ---------- room cards ---------- */
+
+.roomlist {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.roomcard {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--sheen);
+  overflow: hidden;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
+    transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  animation: card-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 12) * 40ms);
+}
+
+.roomcard:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2), var(--sheen);
+}
+
+/* Identity stripe: a stable colour per room, so two unnamed rooms still
+   read as different places at a glance. */
+.roomcard__stripe {
+  width: 3px;
+  flex: none;
+  background: var(--identity, var(--accent));
+  opacity: 0.55;
+  transition: opacity var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+
+.roomcard:hover .roomcard__stripe {
+  opacity: 1;
+  width: 5px;
+}
+
+/* A fixed height keeps every row identical whether the title is a plain name
+   or a code chip plus an "Unnamed" badge, which are different text heights. */
+.roomcard__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 82px;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.roomcard__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 22px;
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+
+.roomcard__title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomcard__unnamed {
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--surface-3);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.roomcard__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+.roomcard__code {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--ink-1);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+}
+
+.roomcard__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.roomcard__menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: var(--space-2);
+}
+
+.roomcard__more {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.roomcard__more:hover,
+.roomcard__more[aria-expanded='true'] {
+  background: var(--surface-4);
+  color: var(--text);
+}
+
+/* Loading placeholder that mirrors the real card's shape. */
+.roomcard--skeleton {
+  padding: var(--space-4);
+  animation: none;
+}
+
+.roomcard--skeleton .roomcard__main {
+  gap: var(--space-3);
+  cursor: default;
+}
+
+/* ---------- responsive ---------- */
+
+/* Two columns for the auth screen once there is room for the value panel. */
+@media (min-width: 900px) {
+  .auth {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .auth__side {
+    display: block;
+  }
+}
+
+@media (max-width: 1023px) {
+  .dash__overview {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .presence__count,
+  .usermenu__name {
+    display: none;
+  }
+
+  /* Nav collapses to icons — clipped rather than removed, so each link keeps
+     an accessible name. */
+  .topbar__link-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .topbar__link {
+    padding: 0 var(--space-2);
+  }
+
+  .preview__panes {
+    grid-template-columns: 1fr;
+  }
+
+  .preview__board {
+    min-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* Below this width the room switches from a split to one pane at a time.
+   Both panes stay mounted — see SplitPane.jsx. */
+@media (max-width: 719px) {
+  .split {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .split__handle {
+    display: none;
+  }
+
+  .split__switch {
+    display: flex;
+    grid-row: 1;
+    grid-column: 1;
+    justify-content: center;
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  /* Both panes share one grid cell; the inactive one is hidden but still laid
+     out, so Monaco and the Konva stage keep their measured size.
+     visibility:hidden also removes it from the tab order and from hit-testing,
+     and neither pane component needs to know this mode exists. */
+  .split .pane {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .split[data-pane='board'] .pane--editor,
+  .split[data-pane='code'] .pane--board {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .hero__row {
+    flex-direction: column;
+  }
+
+  .hero__row .btn {
+    width: 100%;
+  }
+
+  .roomtools__search {
+    min-width: 100%;
+  }
+
+  .toasts {
+    right: var(--space-3);
+    left: var(--space-3);
+    bottom: var(--space-3);
+    width: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .room__name {
+    max-width: 16ch;
+  }
+
+  /* The status collapses to its coloured dot; the pill keeps its accessible
+     name via aria-label, so nothing is lost but the width. */
+  .status__label {
+    display: none;
+  }
+
+  .status {
+    padding: 5px var(--space-2);
+  }
+
+  /* Not enough width for both the name and the code. Keep the human-readable
+     name and reduce copy-link to its icon, which stays permanently visible
+     since there is no hover on a touch screen. */
+  .room__code code,
+  .room__copy-label {
+    display: none;
+  }
+
+  .room__copy {
+    opacity: 1;
+  }
+
+  .dash__hero {
+    align-items: flex-start;
+  }
+
+  .statgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modal {
+    padding: var(--space-5);
+  }
+
+  .modal__actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal__actions .btn {
+    width: 100%;
+  }
+
+  /* Comfortable thumb targets on a phone. */
+  .rail__btn,
+  .roomcard__more {
+    width: 38px;
+    height: 38px;
+  }
+}

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ToastContext } from './ToastContext.js'
+import { Icon } from './Icon.jsx'
 
 const DEFAULT_DURATION = 5000
+const ERROR_DURATION = 8000
+
+const ICONS = { info: 'info', success: 'checkCircle', error: 'alert' }
+
 let nextId = 0
 
 export function ToastProvider({ children }) {
@@ -20,7 +25,7 @@ export function ToastProvider({ children }) {
   const push = useCallback(
     (message, { type = 'info', duration = DEFAULT_DURATION } = {}) => {
       const id = (nextId += 1)
-      setToasts((current) => [...current, { id, message, type }])
+      setToasts((current) => [...current, { id, message, type, duration }])
       if (duration > 0) {
         timers.current.set(
           id,
@@ -44,7 +49,8 @@ export function ToastProvider({ children }) {
       dismiss,
       info: (message, options) => push(message, { ...options, type: 'info' }),
       success: (message, options) => push(message, { ...options, type: 'success' }),
-      error: (message, options) => push(message, { ...options, type: 'error', duration: 8000 }),
+      error: (message, options) =>
+        push(message, { duration: ERROR_DURATION, ...options, type: 'error' }),
     }),
     [push, dismiss]
   )
@@ -59,7 +65,12 @@ export function ToastProvider({ children }) {
             className={'toast toast--' + toast.type}
             role={toast.type === 'error' ? 'alert' : 'status'}
           >
+            <span className="toast__icon">
+              <Icon name={ICONS[toast.type] || 'info'} size={16} />
+            </span>
+
             <span className="toast__message">{toast.message}</span>
+
             <button
               type="button"
               className="toast__close"
@@ -68,6 +79,16 @@ export function ToastProvider({ children }) {
             >
               &times;
             </button>
+
+            {/* Drains for exactly the toast's lifetime, so its disappearance is
+                predictable rather than abrupt. */}
+            {toast.duration > 0 && (
+              <span
+                className="toast__timer"
+                style={{ animationDuration: toast.duration + 'ms' }}
+                aria-hidden="true"
+              />
+            )}
           </div>
         ))}
       </div>
