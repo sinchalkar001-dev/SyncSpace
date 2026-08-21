@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth.js'
 import { useToast } from './ui/useToast.js'
+import { useDismissable } from '../hooks/useDismissable.js'
+import { Icon } from './ui/Icon.jsx'
+import { ChangePasswordDialog } from './ChangePasswordDialog.jsx'
 
 /**
- * Account menu. Signed-in users get sign-out; guests get a route to sign in,
- * plus an inline rename since their name is the only identity they have.
+ * Account menu. Signed-in users get their account controls and sign-out;
+ * guests get a route to sign in, plus an inline rename since their display
+ * name is the only identity they have.
  */
 export function UserMenu({ compact = false }) {
   const { isAuthenticated, user, identity, logout, renameGuest } = useAuth()
@@ -13,31 +17,12 @@ export function UserMenu({ compact = false }) {
   const toast = useToast()
 
   const [open, setOpen] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
 
   const close = useCallback(() => setOpen(false), [])
-
-  useEffect(() => {
-    if (!open) return undefined
-
-    const onPointerDown = (event) => {
-      if (!containerRef.current?.contains(event.target)) close()
-    }
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        close()
-        triggerRef.current?.focus()
-      }
-    }
-
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open, close])
+  useDismissable(open, close, { containerRef, triggerRef })
 
   const onSignOut = useCallback(() => {
     close()
@@ -45,6 +30,11 @@ export function UserMenu({ compact = false }) {
     toast.success('Signed out')
     navigate('/login', { replace: true })
   }, [close, logout, toast, navigate])
+
+  const go = (path) => () => {
+    close()
+    navigate(path)
+  }
 
   return (
     <div className="usermenu" ref={containerRef}>
@@ -54,15 +44,16 @@ export function UserMenu({ compact = false }) {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="menu"
+        /* Explicit, because the name collapses to just the avatar letter on
+           narrow screens and an initial is not a usable label. */
+        aria-label={identity.name + ' — account menu'}
         ref={triggerRef}
       >
         <span className="usermenu__avatar" style={{ background: identity.color }}>
           {identity.name.slice(0, 1).toUpperCase()}
         </span>
         {!compact && <span className="usermenu__name">{identity.name}</span>}
-        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-          <path d="M2 4.5 L6 8.5 L10 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        </svg>
+        <Icon name="chevronDown" size={12} className="usermenu__chevron" />
       </button>
 
       {open && (
@@ -78,12 +69,22 @@ export function UserMenu({ compact = false }) {
                 type="button"
                 className="usermenu__item"
                 role="menuitem"
+                onClick={go('/dashboard')}
+              >
+                <Icon name="grid" size={15} />
+                My rooms
+              </button>
+              <button
+                type="button"
+                className="usermenu__item"
+                role="menuitem"
                 onClick={() => {
                   close()
-                  navigate('/dashboard')
+                  setChangingPassword(true)
                 }}
               >
-                My rooms
+                <Icon name="key" size={15} />
+                Change password
               </button>
               <button
                 type="button"
@@ -91,6 +92,7 @@ export function UserMenu({ compact = false }) {
                 role="menuitem"
                 onClick={onSignOut}
               >
+                <Icon name="logOut" size={15} />
                 Sign out
               </button>
             </>
@@ -104,32 +106,28 @@ export function UserMenu({ compact = false }) {
                   maxLength={32}
                 />
               </label>
-              <button
-                type="button"
-                className="usermenu__item"
-                role="menuitem"
-                onClick={() => {
-                  close()
-                  navigate('/login')
-                }}
-              >
+              <button type="button" className="usermenu__item" role="menuitem" onClick={go('/login')}>
+                <Icon name="logOut" size={15} />
                 Sign in
               </button>
               <button
                 type="button"
                 className="usermenu__item"
                 role="menuitem"
-                onClick={() => {
-                  close()
-                  navigate('/register')
-                }}
+                onClick={go('/register')}
               >
+                <Icon name="users" size={15} />
                 Create an account
               </button>
             </>
           )}
         </div>
       )}
+
+      <ChangePasswordDialog
+        open={changingPassword}
+        onClose={() => setChangingPassword(false)}
+      />
     </div>
   )
 }
