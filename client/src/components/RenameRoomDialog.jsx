@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
+import { isUnnamed } from '../lib/rooms.js'
+
+const MAX_NAME = 80
 
 /** Names a room, or renames one that was created without a name. */
 export function RenameRoomDialog({ room, open, onClose, onSubmit }) {
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const inputRef = useRef(null)
+  const nameId = useId()
 
-  const unnamed = !room?.name || room.name === 'Untitled room'
+  const unnamed = isUnnamed(room)
 
   useEffect(() => {
     if (open) setValue(unnamed ? '' : room.name)
@@ -36,25 +41,33 @@ export function RenameRoomDialog({ room, open, onClose, onSubmit }) {
       initialFocusRef={inputRef}
     >
       <form onSubmit={submit}>
-        <label className="field">
-          <span className="field__label">Room name</span>
-          <input
-            ref={inputRef}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="Candidate screen, Sprint planning…"
-            maxLength={80}
-            aria-label="Room name"
-          />
-        </label>
+        <div className="field">
+          <div className="field__head">
+            <label className="field__label" htmlFor={nameId}>
+              Room name
+            </label>
+            <span className="field__counter">
+              {value.length}/{MAX_NAME}
+            </span>
+          </div>
+          <div className="field__wrap">
+            <input
+              id={nameId}
+              className="input"
+              ref={inputRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder="Candidate screen, Sprint planning…"
+              maxLength={MAX_NAME}
+            />
+          </div>
+        </div>
 
         <div className="modal__actions">
-          <button type="button" className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn--primary" disabled={!value.trim() || busy}>
-            {busy ? 'Saving…' : 'Save name'}
-          </button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={!value.trim()} loading={busy}>
+            Save name
+          </Button>
         </div>
       </form>
     </Modal>

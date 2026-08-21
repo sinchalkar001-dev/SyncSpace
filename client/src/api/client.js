@@ -60,6 +60,7 @@ export const api = {
   register: (body) => apiFetch('/auth/register', { method: 'POST', body }),
   login: (body) => apiFetch('/auth/login', { method: 'POST', body }),
   me: (signal) => apiFetch('/auth/me', { signal }),
+  changePassword: (body) => apiFetch('/auth/change-password', { method: 'POST', body }),
   listRooms: (signal) => apiFetch('/rooms', { signal }),
   createRoom: (body) => apiFetch('/rooms', { method: 'POST', body }),
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
