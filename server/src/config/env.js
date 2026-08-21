@@ -35,6 +35,18 @@ const schema = z
 
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+
+    // Credential endpoints get their own, much tighter budgets inside the
+    // shared window. Per endpoint rather than one pool so a login brute force
+    // cannot starve registration (or vice versa).
+    AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+    AUTH_RATE_LIMIT_REGISTER_MAX: z.coerce.number().int().positive().default(5),
+    AUTH_RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(10),
+    AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX: z.coerce.number().int().positive().default(10),
+
+    // Invites grant room access, so cap them well below the general budget
+    // while leaving normal collaboration untouched.
+    INVITE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production') return
