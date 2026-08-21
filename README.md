@@ -115,7 +115,7 @@ than one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
 | Pan | Drag with the select tool |
 
 Tools live in a floating vertical rail on the canvas, with colour, width, and destructive actions
-behind popovers, and zoom in a pill at the bottom left. That keeps the rail a fixed 48px wide
+behind popovers, and zoom in a pill at the bottom left. That keeps the rail a fixed 46px wide
 whatever the pane width — the earlier single horizontal bar overflowed and clipped its own buttons
 as soon as the split moved.
 
@@ -125,6 +125,30 @@ nothing in the app depends on `window.prompt` or `window.confirm`.
 Editing while disconnected is allowed on purpose: Yjs queues local changes and merges them on
 reconnect. The header shows connection state and a toast reports drops and recoveries.
 
+## Interface
+
+Plain CSS, no framework. [client/src/styles](client/src/styles) is layered in dependency order —
+`tokens` → `base` → `animations` → `components` → `layout` → `pages` — and `global.css` is only an
+`@import` barrel over them, so it stays the single entry point.
+
+Every value comes from a token: a green-biased graphite ramp, one amber accent (the ink you draw
+with, so the same colour is the pen, a primary button, and a selected shape's glow), a 4px spacing
+scale, and fluid type via `clamp()`. Dark only, deliberately — the canvas and the Monaco theme are
+both tuned for it, and the semantic layer is structured so a light theme would be a drop-in rather
+than a rewrite.
+
+Below 720px the room stops being a split and becomes one pane at a time behind a segmented control.
+Both panes stay **mounted** — the inactive one is hidden with `visibility: hidden`, which keeps it
+laid out so the Konva stage and the Monaco model retain their measured size. Unmounting would tear
+down the Yjs binding on every switch.
+
+**Two constraints the canvas cannot break.** The eraser end-to-end tests screenshot `.board` and
+compare raw pixels, clipping to `x+140 … width-180` and `y+20 … height-130`. So the tool rail must
+stay inside the left 140px, the zoom pill inside the bottom 130px, and `.board`'s background must be
+completely static — an animated gradient or a fading canvas hint inside that region makes those
+tests flake. Both rules are commented where they apply, in
+[layout.css](client/src/styles/layout.css).
+
 ## API
 
 | Method | Path | Notes |
@@ -132,6 +156,7 @@ reconnect. The header shows connection state and a toast reports drops and recov
 | `GET` | `/health` | Liveness plus database state |
 | `POST` | `/api/auth/register` · `/login` | Returns `{ user, token }` |
 | `GET` | `/api/auth/me` | Requires bearer token |
+| `POST` | `/api/auth/change-password` | Requires bearer token; from the account menu |
 | `POST` | `/api/rooms` | Creates a private room |
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
@@ -148,10 +173,16 @@ reconnect. The header shows connection state and a toast reports drops and recov
 client/src
 ├── api/          client.js — fetch wrapper, token, error normalisation
 ├── auth/         AuthProvider, useAuth, token storage
-├── lib/          collab.js (Y.Doc + provider + undo), monacoSetup, identity, socket, validation
-├── hooks/        useCollabSession, useAwareness, useShapes, useUndo, useElementSize, useRoomSocket
+├── lib/          collab.js (Y.Doc + provider + undo), monacoSetup, identity, socket,
+│                 validation, rooms.js (room helpers + dashboard figures), motion
+├── hooks/        useCollabSession, useAwareness, useShapes, useUndo, useElementSize,
+│                 useRoomSocket, useDismissable, useCountUp, useMediaQuery
 ├── store/        uiStore.js — tool, colour, width, zoom, split ratio
-├── components/   Whiteboard/ (ToolRail, CanvasControls, TextComposer), Editor/, ui/, UserMenu
+├── styles/       tokens · base · animations · components · layout · pages
+│                 (global.css is an @import barrel over these)
+├── components/   TopBar, UserMenu, RoomCard, SplitPane, ProductPreview, dialogs,
+│                 Whiteboard/ (ToolRail, CanvasControls, TextComposer), Editor/,
+│                 ui/ (Button, Field, Icon, Modal, Segmented, Skeleton, StatCard, …)
 └── pages/        Home, Login, Register, Dashboard, Room, NotFound
 
 server/src
@@ -168,8 +199,8 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 53 tests
-npm test --workspace client   # client, 31 tests
+npm test                      # server, 75 tests
+npm test --workspace client   # client, 42 tests
 npm run test:e2e              # browser, two real tabs, 3 tests
 ```
 
