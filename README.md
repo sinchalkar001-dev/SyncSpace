@@ -107,9 +107,11 @@ than one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
 
 | Action | How |
 | --- | --- |
-| Tools | `V` select · `P` pen · `R` rectangle · `O` ellipse · `T` text · `E` eraser |
+| Tools | `V` select · `P` freehand · `L` line · `A` arrow · `R` rectangle · `D` diamond · `O` ellipse · `T` text · `E` eraser |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) |
 | Erase | Pick the eraser and drag — it clears everything within about 14px of the pointer, so thin strokes do not need pixel-perfect aim |
+| Straight runs | Hold `Shift` while dragging a line or arrow to lock it to 45 degree steps |
+| Who drew this | Hover any shape with the select tool — it names the author and when they drew it |
 | Delete selection | `Delete` or `Backspace` |
 | Zoom | Wheel, anchored at the pointer · reset from the zoom pill |
 | Pan | Drag with the select tool |

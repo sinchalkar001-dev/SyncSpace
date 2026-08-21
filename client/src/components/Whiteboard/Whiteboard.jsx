@@ -8,6 +8,7 @@ import { useCursorBroadcast } from '../../hooks/useAwareness.js'
 import { useUndo } from '../../hooks/useUndo.js'
 import { MAX_SCALE, MIN_SCALE, useUIStore } from '../../store/uiStore.js'
 import { ConfirmDialog } from '../ui/Modal.jsx'
+import { formatWhen } from '../../lib/rooms.js'
 import { ShapeNode } from './ShapeNode.jsx'
 import { RemoteCursors } from './RemoteCursors.jsx'
 import { ToolRail } from './ToolRail.jsx'
@@ -27,7 +28,32 @@ const ERASER_SAMPLES = [[0, 0]].concat(
     return [Math.round(Math.cos(angle) * ERASER_RADIUS), Math.round(Math.sin(angle) * ERASER_RADIUS)]
   })
 )
-const SHORTCUTS = { v: 'select', p: 'pen', r: 'rect', o: 'ellipse', t: 'text', e: 'eraser' }
+const SHORTCUTS = {
+  v: 'select',
+  p: 'pen',
+  l: 'segment',
+  a: 'arrow',
+  r: 'rect',
+  d: 'diamond',
+  o: 'ellipse',
+  t: 'text',
+  e: 'eraser',
+}
+
+// Shapes whose geometry is a dragged box.
+const BOXY = new Set(['rect', 'diamond'])
+// Shapes that are a single straight run between two points.
+const STRAIGHT = new Set(['segment', 'arrow'])
+
+/** Snaps a drag to the nearest 45 degrees, for Shift-constrained lines. */
+function constrain(origin, point) {
+  const dx = point.x - origin.x
+  const dy = point.y - origin.y
+  const step = Math.PI / 4
+  const angle = Math.round(Math.atan2(dy, dx) / step) * step
+  const length = Math.hypot(dx, dy)
+  return { x: origin.x + Math.cos(angle) * length, y: origin.y + Math.sin(angle) * length }
+}
 
 /** Converts a screen pointer position into document coordinates. */
 function worldPointer(stage) {
@@ -50,6 +76,8 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const [confirmingClear, setConfirmingClear] = useState(false)
   const drawingRef = useRef(false)
   const erasingRef = useRef(false)
+  // Who drew the shape under the pointer, anchored where the pointer entered.
+  const [hovered, setHovered] = useState(null)
 
   const setDraft = useCallback((next) => {
     const value = typeof next === 'function' ? next(draftRef.current) : next
@@ -90,6 +118,9 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       stroke: current.stroke,
       strokeWidth: current.strokeWidth,
       author: user.id,
+      authorName: user.name,
+      authorColor: user.color,
+      createdAt: Date.now(),
       x: current.x,
       y: current.y,
     }
@@ -98,6 +129,12 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       pushShape(shapes, { ...base, type: 'line', x: 0, y: 0, points: current.points })
     } else if (current.type === 'rect' && current.width > 2 && current.height > 2) {
       pushShape(shapes, { ...base, type: 'rect', width: current.width, height: current.height })
+    } else if (STRAIGHT.has(current.type) && current.points.length === 4) {
+      const [x1, y1, x2, y2] = current.points
+      if (Math.hypot(x2 - x1, y2 - y1) < 4) return
+      pushShape(shapes, { ...base, type: current.type, x: 0, y: 0, points: current.points })
+    } else if (current.type === 'diamond' && current.width > 2 && current.height > 2) {
+      pushShape(shapes, { ...base, type: 'diamond', width: current.width, height: current.height })
     } else if (current.type === 'ellipse' && current.radiusX > 2 && current.radiusY > 2) {
       pushShape(shapes, {
         ...base,
@@ -106,7 +143,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         radiusY: current.radiusY,
       })
     }
-  }, [shapes, user.id, setDraft])
+  }, [shapes, user.id, user.name, user.color, setDraft])
 
   const commitText = useCallback(() => {
     const current = textDraftRef.current
@@ -126,8 +163,11 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       stroke: current.stroke,
       strokeWidth: 0,
       author: user.id,
+      authorName: user.name,
+      authorColor: user.color,
+      createdAt: Date.now(),
     })
-  }, [shapes, user.id, setTextDraft])
+  }, [shapes, user.id, user.name, user.color, setTextDraft])
 
   /**
    * Removes whatever sits under the pointer. Konva hit-tests the top node at
@@ -166,6 +206,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
       if (readOnly) return
 
+      setHovered(null)
       // Only the primary button acts. A right- or middle-click used to fall
       // through and start a shape that no drag ever finished.
       if ((event.evt?.button ?? 0) !== 0) return
@@ -201,8 +242,10 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
       if (tool === 'pen') {
         setDraft({ ...common, type: 'line', x: 0, y: 0, points: [point.x, point.y] })
-      } else if (tool === 'rect') {
-        setDraft({ ...common, type: 'rect', x: point.x, y: point.y, width: 0, height: 0 })
+      } else if (STRAIGHT.has(tool)) {
+        setDraft({ ...common, type: tool, x: 0, y: 0, points: [point.x, point.y, point.x, point.y] })
+      } else if (BOXY.has(tool)) {
+        setDraft({ ...common, type: tool, x: point.x, y: point.y, width: 0, height: 0 })
       } else if (tool === 'ellipse') {
         setDraft({ ...common, type: 'ellipse', x: point.x, y: point.y, radiusX: 0, radiusY: 0 })
       }
@@ -227,6 +270,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       const point = worldPointer(stage)
       if (!point) return
 
+      const shiftKey = Boolean(event.evt?.shiftKey)
       publishCursor({ x: point.x, y: point.y })
 
       if (erasingRef.current) {
@@ -246,7 +290,15 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         }
 
         const origin = current.origin
-        if (current.type === 'rect') {
+
+        if (STRAIGHT.has(current.type)) {
+          // Shift locks the run to 45 degree steps, so horizontals and
+          // verticals are actually straight rather than nearly straight.
+          const end = shiftKey ? constrain(origin, point) : point
+          return { ...current, x: 0, y: 0, points: [origin.x, origin.y, end.x, end.y] }
+        }
+
+        if (BOXY.has(current.type)) {
           return {
             ...current,
             x: Math.min(origin.x, point.x),
@@ -277,6 +329,26 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
     },
     [tool, readOnly]
   )
+
+  const handleHoverStart = useCallback((event, shape) => {
+    // Never while a stroke or an erase is in flight - the label would chase
+    // the pointer through the work.
+    if (drawingRef.current || erasingRef.current) return
+    const stage = event.target.getStage()
+    const pointer = stage?.getPointerPosition()
+    if (!pointer) return
+
+    setHovered({
+      id: shape.id,
+      name: shape.authorName || 'Unknown',
+      color: shape.authorColor || shape.stroke,
+      at: shape.createdAt,
+      x: pointer.x,
+      y: pointer.y,
+    })
+  }, [])
+
+  const handleHoverEnd = useCallback(() => setHovered(null), [])
 
   const handleShapeDragEnd = useCallback((id, patch) => updateShape(shapes, id, patch), [shapes])
 
@@ -412,6 +484,8 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
                   isSelected={selectedId === shape.id}
                   onPointerDown={handleShapePointerDown}
                   onDragEnd={handleShapeDragEnd}
+                  onHoverStart={handleHoverStart}
+                  onHoverEnd={handleHoverEnd}
                 />
               ))}
               {draft && (
@@ -428,6 +502,18 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
               <RemoteCursors peers={peers} scale={viewport.scale} />
             </Layer>
           </Stage>
+        )}
+
+        {hovered && (
+          <div
+            className="authortip"
+            style={{ left: hovered.x + 14 + 'px', top: hovered.y + 14 + 'px' }}
+            role="status"
+          >
+            <span className="authortip__dot" style={{ background: hovered.color }} />
+            <span className="authortip__name">{hovered.name}</span>
+            {hovered.at && <span className="authortip__when">{formatWhen(hovered.at)}</span>}
+          </div>
         )}
 
         <TextComposer

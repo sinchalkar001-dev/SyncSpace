@@ -778,6 +778,44 @@
   cursor: default;
 }
 
+/* Attribution label: who drew the shape under the pointer. Follows the
+   pointer only on enter, so it never chases the cursor across a stroke. */
+.authortip {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: fade-in var(--dur-fast) var(--ease-out) both;
+}
+
+.authortip__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.authortip__name {
+  font-weight: 600;
+}
+
+.authortip__when {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- responsive ---------- */
 
 /* Two columns for the auth screen once there is room for the value panel. */
