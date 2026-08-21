@@ -13,11 +13,11 @@ let app
 const OWNER = { email: 'owner@syncspace.test', password: 'owner-passphrase-1', name: 'Owner' }
 const OTHER = { email: 'other@syncspace.test', password: 'other-passphrase-1', name: 'Other' }
 
-const register = (who) => request(app).post('/api/auth/register').send(who)
+const register = (who) => request(app).post('/api/v1/auth/register').send(who)
 const auth = (token) => ({ Authorization: 'Bearer ' + token })
 
 async function makeRoom(token, name = 'Design review') {
-  const res = await request(app).post('/api/rooms').set(auth(token)).send({ name })
+  const res = await request(app).post('/api/v1/rooms').set(auth(token)).send({ name })
   return res.body.room.roomId
 }
 
@@ -31,12 +31,12 @@ beforeEach(async () => {
 
 describe('deleting a room', () => {
   it('requires authentication', async () => {
-    expect((await request(app).delete('/api/rooms/anything')).status).toBe(401)
+    expect((await request(app).delete('/api/v1/rooms/anything')).status).toBe(401)
   })
 
   it('404s an unknown room', async () => {
     const { body } = await register(OWNER)
-    const res = await request(app).delete('/api/rooms/no-such-room').set(auth(body.token))
+    const res = await request(app).delete('/api/v1/rooms/no-such-room').set(auth(body.token))
     expect(res.status).toBe(404)
   })
 
@@ -45,7 +45,7 @@ describe('deleting a room', () => {
     const other = (await register(OTHER)).body
     const roomId = await makeRoom(owner.token)
 
-    const res = await request(app).delete('/api/rooms/' + roomId).set(auth(other.token))
+    const res = await request(app).delete('/api/v1/rooms/' + roomId).set(auth(other.token))
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe('not_owner')
 
@@ -62,7 +62,7 @@ describe('deleting a room', () => {
     await DocUpdate.create({ roomId, seq: 2, update: Buffer.from([2]), size: 1 })
     await recordParticipant({ roomId, user: { id: owner.user.id, name: 'Owner' } })
 
-    const res = await request(app).delete('/api/rooms/' + roomId).set(auth(owner.token))
+    const res = await request(app).delete('/api/v1/rooms/' + roomId).set(auth(owner.token))
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({ roomId, deletedUpdates: 2 })
 
@@ -81,7 +81,7 @@ describe('deleting a room', () => {
     await expect(DocUpdate.deleteMany({ roomId })).rejects.toThrow(/append-only/)
 
     // ...but deleting the whole room is allowed to clear it.
-    await request(app).delete('/api/rooms/' + roomId).set(auth(owner.token)).expect(200)
+    await request(app).delete('/api/v1/rooms/' + roomId).set(auth(owner.token)).expect(200)
     expect(await DocUpdate.countDocuments({ roomId })).toBe(0)
   })
 
@@ -89,17 +89,17 @@ describe('deleting a room', () => {
     const owner = (await register(OWNER)).body
     const roomId = await makeRoom(owner.token)
 
-    expect((await request(app).get('/api/rooms').set(auth(owner.token))).body.rooms).toHaveLength(1)
+    expect((await request(app).get('/api/v1/rooms').set(auth(owner.token))).body.rooms).toHaveLength(1)
 
-    await request(app).delete('/api/rooms/' + roomId).set(auth(owner.token)).expect(200)
+    await request(app).delete('/api/v1/rooms/' + roomId).set(auth(owner.token)).expect(200)
 
-    expect((await request(app).get('/api/rooms').set(auth(owner.token))).body.rooms).toHaveLength(0)
+    expect((await request(app).get('/api/v1/rooms').set(auth(owner.token))).body.rooms).toHaveLength(0)
   })
 })
 
 describe('renaming and visibility', () => {
   it('requires authentication', async () => {
-    expect((await request(app).patch('/api/rooms/anything').send({ name: 'x' })).status).toBe(401)
+    expect((await request(app).patch('/api/v1/rooms/anything').send({ name: 'x' })).status).toBe(401)
   })
 
   it('renames a room', async () => {
@@ -107,7 +107,7 @@ describe('renaming and visibility', () => {
     const roomId = await makeRoom(owner.token, 'Untitled room')
 
     const res = await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(owner.token))
       .send({ name: 'Candidate screen' })
 
@@ -122,14 +122,14 @@ describe('renaming and visibility', () => {
     expect((await Room.findOne({ roomId })).isPublic).toBe(false)
 
     await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(owner.token))
       .send({ isPublic: true })
       .expect(200)
     expect((await Room.findOne({ roomId })).isPublic).toBe(true)
 
     await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(owner.token))
       .send({ isPublic: false })
       .expect(200)
@@ -141,23 +141,23 @@ describe('renaming and visibility', () => {
     const other = (await register(OTHER)).body
     const roomId = await makeRoom(owner.token)
 
-    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
+    expect((await request(app).get('/api/v1/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
 
     await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(owner.token))
       .send({ isPublic: true })
       .expect(200)
 
-    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(200)
+    expect((await request(app).get('/api/v1/rooms/' + roomId).set(auth(other.token))).status).toBe(200)
 
     await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(owner.token))
       .send({ isPublic: false })
       .expect(200)
 
-    expect((await request(app).get('/api/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
+    expect((await request(app).get('/api/v1/rooms/' + roomId).set(auth(other.token))).status).toBe(403)
   })
 
   it('refuses anyone who is not the owner', async () => {
@@ -166,7 +166,7 @@ describe('renaming and visibility', () => {
     const roomId = await makeRoom(owner.token, 'Mine')
 
     const res = await request(app)
-      .patch('/api/rooms/' + roomId)
+      .patch('/api/v1/rooms/' + roomId)
       .set(auth(other.token))
       .send({ name: 'Hijacked' })
 
@@ -180,19 +180,19 @@ describe('renaming and visibility', () => {
     const roomId = await makeRoom(owner.token)
 
     expect(
-      (await request(app).patch('/api/rooms/' + roomId).set(auth(owner.token)).send({ name: '   ' }))
+      (await request(app).patch('/api/v1/rooms/' + roomId).set(auth(owner.token)).send({ name: '   ' }))
         .status
     ).toBe(400)
 
     expect(
-      (await request(app).patch('/api/rooms/' + roomId).set(auth(owner.token)).send({})).status
+      (await request(app).patch('/api/v1/rooms/' + roomId).set(auth(owner.token)).send({})).status
     ).toBe(400)
   })
 })
 
 describe('room roster', () => {
   it('requires authentication', async () => {
-    expect((await request(app).get('/api/rooms/anything/people')).status).toBe(401)
+    expect((await request(app).get('/api/v1/rooms/anything/people')).status).toBe(401)
   })
 
   it('lists the owner, invited members, and everyone who opened the room', async () => {
@@ -201,7 +201,7 @@ describe('room roster', () => {
     const roomId = await makeRoom(owner.token, 'Interview loop')
 
     await request(app)
-      .post('/api/rooms/' + roomId + '/invite')
+      .post('/api/v1/rooms/' + roomId + '/invite')
       .set(auth(owner.token))
       .send({ userId: other.user.id })
       .expect(200)
@@ -209,7 +209,7 @@ describe('room roster', () => {
     await recordParticipant({ roomId, user: { id: other.user.id, name: 'Other' } })
     await recordParticipant({ roomId, user: { name: 'Candidate' } })
 
-    const res = await request(app).get('/api/rooms/' + roomId + '/people').set(auth(owner.token))
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(owner.token))
     expect(res.status).toBe(200)
 
     expect(res.body.owner).toMatchObject({ name: 'Owner', email: OWNER.email })
@@ -228,7 +228,7 @@ describe('room roster', () => {
     await recordParticipant({ roomId, user: { name: 'Candidate' } })
     await recordParticipant({ roomId, user: { name: 'Candidate' } })
 
-    const res = await request(app).get('/api/rooms/' + roomId + '/people').set(auth(owner.token))
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(owner.token))
     const rows = res.body.participants.filter((p) => p.name === 'Candidate')
 
     expect(rows).toHaveLength(1)
@@ -240,7 +240,7 @@ describe('room roster', () => {
     const other = (await register(OTHER)).body
     const roomId = await makeRoom(owner.token)
 
-    const res = await request(app).get('/api/rooms/' + roomId + '/people').set(auth(other.token))
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(other.token))
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe('room_forbidden')
   })
@@ -251,13 +251,13 @@ describe('room roster', () => {
     const roomId = await makeRoom(owner.token)
 
     await request(app)
-      .post('/api/rooms/' + roomId + '/invite')
+      .post('/api/v1/rooms/' + roomId + '/invite')
       .set(auth(owner.token))
       .send({ userId: other.user.id })
       .expect(200)
 
     expect(
-      (await request(app).get('/api/rooms/' + roomId + '/people').set(auth(other.token))).status
+      (await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(other.token))).status
     ).toBe(200)
   })
 })

@@ -7,7 +7,7 @@ let app
 
 const ALICE = { email: 'alice@syncspace.test', password: 'correct-horse-battery', name: 'Alice' }
 
-const registerUser = (who) => request(app).post('/api/auth/register').send(who)
+const registerUser = (who) => request(app).post('/api/v1/auth/register').send(who)
 
 beforeAll(startMemoryMongo)
 afterAll(stopMemoryMongo)
@@ -17,10 +17,10 @@ beforeEach(async () => {
   app = createApp()
 })
 
-describe('POST /api/auth/change-password', () => {
+describe('POST /api/v1/auth/change-password', () => {
   it('requires authentication', async () => {
     const res = await request(app)
-      .post('/api/auth/change-password')
+      .post('/api/v1/auth/change-password')
       .send({ currentPassword: 'anything', newPassword: 'new-valid-password' })
     expect(res.status).toBe(401)
   })
@@ -30,7 +30,7 @@ describe('POST /api/auth/change-password', () => {
     const token = body.token
 
     const res = await request(app)
-      .post('/api/auth/change-password')
+      .post('/api/v1/auth/change-password')
       .set('Authorization', 'Bearer ' + token)
       .send({ currentPassword: ALICE.password, newPassword: 'brand-new-password' })
 
@@ -39,13 +39,13 @@ describe('POST /api/auth/change-password', () => {
 
     // Old password no longer works
     const oldLogin = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ALICE.email, password: ALICE.password })
     expect(oldLogin.status).toBe(401)
 
     // New password works
     const newLogin = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ALICE.email, password: 'brand-new-password' })
     expect(newLogin.status).toBe(200)
     expect(newLogin.body.token).toEqual(expect.any(String))
@@ -55,7 +55,7 @@ describe('POST /api/auth/change-password', () => {
     const { body } = await registerUser(ALICE)
 
     const res = await request(app)
-      .post('/api/auth/change-password')
+      .post('/api/v1/auth/change-password')
       .set('Authorization', 'Bearer ' + body.token)
       .send({ currentPassword: 'wrong-password-here', newPassword: 'brand-new-password' })
 
@@ -64,7 +64,7 @@ describe('POST /api/auth/change-password', () => {
 
     // Original password still works
     const login = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ALICE.email, password: ALICE.password })
     expect(login.status).toBe(200)
   })
@@ -73,7 +73,7 @@ describe('POST /api/auth/change-password', () => {
     const { body } = await registerUser(ALICE)
 
     const res = await request(app)
-      .post('/api/auth/change-password')
+      .post('/api/v1/auth/change-password')
       .set('Authorization', 'Bearer ' + body.token)
       .send({ currentPassword: ALICE.password, newPassword: 'short' })
 
@@ -85,7 +85,7 @@ describe('POST /api/auth/change-password', () => {
     const { body } = await registerUser(ALICE)
 
     const res = await request(app)
-      .post('/api/auth/change-password')
+      .post('/api/v1/auth/change-password')
       .set('Authorization', 'Bearer ' + body.token)
       .send({})
 
