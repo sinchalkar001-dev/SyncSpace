@@ -1,13 +1,13 @@
 import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
-import rateLimit from 'express-rate-limit'
 import pinoHttp from 'pino-http'
 import mongoose from 'mongoose'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
-import { authRouter } from './routes/auth.routes.js'
-import { roomsRouter } from './routes/rooms.routes.js'
+import { createAuthRouter } from './routes/auth.routes.js'
+import { createRoomsRouter } from './routes/rooms.routes.js'
+import { createRateLimiters } from './middleware/rateLimit.js'
 import { errorHandler, notFoundHandler } from './middleware/error.js'
 
 export function createApp() {
@@ -36,16 +36,10 @@ export function createApp() {
   })
 
   const api = express.Router()
-  api.use(
-    rateLimit({
-      windowMs: env.RATE_LIMIT_WINDOW_MS,
-      max: env.RATE_LIMIT_MAX,
-      standardHeaders: true,
-      legacyHeaders: false,
-    })
-  )
-  api.use('/auth', authRouter)
-  api.use('/rooms', roomsRouter)
+  const { apiLimiter } = createRateLimiters()
+  api.use(apiLimiter)
+  api.use('/auth', createAuthRouter())
+  api.use('/rooms', createRoomsRouter())
 
   app.use('/api/v1', api)
   app.use(notFoundHandler)
