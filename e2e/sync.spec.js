@@ -272,7 +272,7 @@ test('hovering a shape names who drew it', async ({ page }) => {
   // Nothing is attributed until the pointer is actually over a shape.
   await expect(page.locator('.authortip')).toHaveCount(0)
 
-  await tool('Select and pan').click()
+  await tool('Select').click()
   await page.mouse.move(box.x + 390, box.y + 300)
 
   const tip = page.locator('.authortip')

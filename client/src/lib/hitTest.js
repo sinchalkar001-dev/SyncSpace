@@ -156,3 +156,89 @@ export function shapesHitBy(shapes, px, py, radius) {
   }
   return hits
 }
+
+/** Axis-aligned world bounds for a shape, or null when it has no geometry. */
+export function shapeBounds(shape) {
+  if (!shape) return null
+  const offsetX = shape.x || 0
+  const offsetY = shape.y || 0
+
+  switch (shape.type) {
+    case 'line':
+    case 'segment':
+    case 'arrow': {
+      const points = shape.points
+      if (!points || points.length < 2) return null
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (let i = 0; i + 1 < points.length; i += 2) {
+        minX = Math.min(minX, points[i] + offsetX)
+        maxX = Math.max(maxX, points[i] + offsetX)
+        minY = Math.min(minY, points[i + 1] + offsetY)
+        maxY = Math.max(maxY, points[i + 1] + offsetY)
+      }
+      return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+    }
+
+    case 'rect':
+    case 'diamond':
+      return { x: offsetX, y: offsetY, width: shape.width || 0, height: shape.height || 0 }
+
+    case 'ellipse':
+      return {
+        x: offsetX - (shape.radiusX || 0),
+        y: offsetY - (shape.radiusY || 0),
+        width: (shape.radiusX || 0) * 2,
+        height: (shape.radiusY || 0) * 2,
+      }
+
+    case 'text': {
+      const box = textBox(shape)
+      return { x: box.x, y: box.y, width: box.width, height: box.height }
+    }
+
+    default:
+      return null
+  }
+}
+
+/** Ids of shapes whose bounds overlap the given world rectangle. */
+export function shapesInRect(shapes, rect) {
+  const x2 = rect.x + rect.width
+  const y2 = rect.y + rect.height
+
+  return shapes
+    .filter((shape) => {
+      const bounds = shapeBounds(shape)
+      if (!bounds || !shape.id) return false
+      return (
+        bounds.x <= x2 &&
+        bounds.x + bounds.width >= rect.x &&
+        bounds.y <= y2 &&
+        bounds.y + bounds.height >= rect.y
+      )
+    })
+    .map((shape) => shape.id)
+}
+
+/** Union of several shapes' bounds, for framing a multi-selection. */
+export function unionBounds(shapes) {
+  let box = null
+  for (const shape of shapes) {
+    const bounds = shapeBounds(shape)
+    if (!bounds) continue
+    if (!box) {
+      box = { ...bounds }
+      continue
+    }
+    const right = Math.max(box.x + box.width, bounds.x + bounds.width)
+    const bottom = Math.max(box.y + box.height, bounds.y + bounds.height)
+    box.x = Math.min(box.x, bounds.x)
+    box.y = Math.min(box.y, bounds.y)
+    box.width = right - box.x
+    box.height = bottom - box.y
+  }
+  return box
+}

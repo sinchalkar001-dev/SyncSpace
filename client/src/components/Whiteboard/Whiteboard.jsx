@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Layer, Stage } from 'react-konva'
 import { nanoid } from 'nanoid'
-import { clearShapes, pushShape, removeShape, updateShape } from '../../lib/collab.js'
-import { shapesHitBy } from '../../lib/hitTest.js'
+import {
+  clearShapes,
+  duplicateShapes,
+  pushShape,
+  removeShape,
+  reorderShape,
+  updateShape,
+} from '../../lib/collab.js'
+import { shapesHitBy, shapesInRect, unionBounds } from '../../lib/hitTest.js'
 import { useShapes } from '../../hooks/useShapes.js'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import { useCursorBroadcast } from '../../hooks/useAwareness.js'
@@ -10,6 +17,7 @@ import { useUndo } from '../../hooks/useUndo.js'
 import { MAX_SCALE, MIN_SCALE, useUIStore } from '../../store/uiStore.js'
 import { ConfirmDialog } from '../ui/Modal.jsx'
 import { formatWhen } from '../../lib/rooms.js'
+import { SelectionActions } from './SelectionActions.jsx'
 import { ShapeNode } from './ShapeNode.jsx'
 import { RemoteCursors } from './RemoteCursors.jsx'
 import { ToolRail } from './ToolRail.jsx'
@@ -24,9 +32,13 @@ const MIN_POINT_DISTANCE = 2
 // zoom level.
 const ERASER_RADIUS = 14
 
+// How far a pasted or duplicated copy sits from its original.
+const PASTE_OFFSET = 16
+
 const SHORTCUTS = {
   v: 'select',
   p: 'pen',
+  h: 'hand',
   l: 'segment',
   a: 'arrow',
   r: 'rect',
@@ -68,10 +80,16 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   // shapes stacked exactly on top of each other.
   const draftRef = useRef(null)
   const textDraftRef = useRef(null)
-  const [selectedId, setSelectedId] = useState(null)
+  // A selection is a set: shift-click adds, a marquee sweeps up several.
+  const [selectedIds, setSelectedIds] = useState([])
+  // Screen-space rectangle while a marquee is being dragged.
+  const [marquee, setMarquee] = useState(null)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const drawingRef = useRef(false)
   const erasingRef = useRef(false)
+  const marqueeRef = useRef(null)
+  const stageRef = useRef(null)
+  const clipboardRef = useRef([])
   // Who drew the shape under the pointer, anchored where the pointer entered.
   const [hovered, setHovered] = useState(null)
 
@@ -99,7 +117,34 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const { publish: publishCursor, clear: clearCursor } = useCursorBroadcast(provider)
   const { canUndo, canRedo, undo, redo } = useUndo(undoManager)
 
-  const isDrawingTool = tool !== 'select' && tool !== 'eraser'
+  const isDrawingTool = tool !== 'select' && tool !== 'eraser' && tool !== 'hand'
+
+  /** Turns a finished marquee drag into a selection. */
+  const commitMarquee = useCallback(
+    (stage) => {
+      const origin = marqueeRef.current
+      marqueeRef.current = null
+      setMarquee(null)
+      if (!origin || !stage || !shapes) return
+
+      const pointer = { x: origin.toX, y: origin.toY }
+      // A tap is not a sweep; ignore anything too small to be deliberate.
+      if (Math.abs(pointer.x - origin.x) < 4 && Math.abs(pointer.y - origin.y) < 4) return
+
+      const transform = stage.getAbsoluteTransform().copy().invert()
+      const a = transform.point(origin)
+      const b = transform.point(pointer)
+      const rect = {
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+      }
+
+      setSelectedIds(shapesInRect(shapes.toArray().map((shape) => shape.toJSON()), rect))
+    },
+    [shapes]
+  )
 
   const commitDraft = useCallback(() => {
     drawingRef.current = false
@@ -188,7 +233,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       if (hits.length === 0) return
 
       hits.forEach((id) => removeShape(shapes, id))
-      setSelectedId((current) => (hits.includes(current) ? null : current))
+      setSelectedIds((current) => current.filter((id) => !hits.includes(id)))
     },
     [shapes]
   )
@@ -212,8 +257,15 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       // through and start a shape that no drag ever finished.
       if ((event.evt?.button ?? 0) !== 0) return
 
+      if (tool === 'hand') return
+
       if (tool === 'select') {
-        if (event.target === stage) setSelectedId(null)
+        if (event.target === stage) {
+          setSelectedIds([])
+          // An empty-canvas drag with the select tool sweeps a marquee.
+          const pointer = stage.getPointerPosition()
+          if (pointer) marqueeRef.current = { x: pointer.x, y: pointer.y, toX: pointer.x, toY: pointer.y }
+        }
         return
       }
       // Erasing is a drag, not just a click: press starts it and every move
@@ -278,6 +330,21 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         eraseAtPointer(stage)
         return
       }
+
+      if (marqueeRef.current) {
+        const pointer = stage.getPointerPosition()
+        if (!pointer) return
+        const origin = marqueeRef.current
+        origin.toX = pointer.x
+        origin.toY = pointer.y
+        setMarquee({
+          x: Math.min(origin.x, pointer.x),
+          y: Math.min(origin.y, pointer.y),
+          width: Math.abs(pointer.x - origin.x),
+          height: Math.abs(pointer.y - origin.y),
+        })
+        return
+      }
       if (!drawingRef.current) return
 
       setDraft((current) => {
@@ -323,10 +390,17 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const handleShapePointerDown = useCallback(
     (event, shape) => {
       if (readOnly) return
-      if (tool === 'select') {
-        event.cancelBubble = true
-        setSelectedId(shape.id)
-      }
+      if (tool !== 'select') return
+
+      event.cancelBubble = true
+      const additive = event.evt?.shiftKey || event.evt?.metaKey || event.evt?.ctrlKey
+
+      setSelectedIds((current) => {
+        if (!additive) return current.includes(shape.id) ? current : [shape.id]
+        return current.includes(shape.id)
+          ? current.filter((id) => id !== shape.id)
+          : [...current, shape.id]
+      })
     },
     [tool, readOnly]
   )
@@ -351,7 +425,75 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
   const handleHoverEnd = useCallback(() => setHovered(null), [])
 
-  const handleShapeDragEnd = useCallback((id, patch) => updateShape(shapes, id, patch), [shapes])
+  const handleShapeDragEnd = useCallback(
+    (id, patch) => {
+      const all = shapes.toArray().map((shape) => shape.toJSON())
+      const moved = all.find((shape) => shape.id === id)
+      const dx = patch.x - (moved?.x || 0)
+      const dy = patch.y - (moved?.y || 0)
+
+      const apply = () => {
+        updateShape(shapes, id, patch)
+        // Drag one of several and the rest of the selection travels with it.
+        if (!selectedIds.includes(id)) return
+        selectedIds
+          .filter((other) => other !== id)
+          .forEach((other) => {
+            const shape = all.find((candidate) => candidate.id === other)
+            if (!shape || shape.locked) return
+            updateShape(shapes, other, { x: (shape.x || 0) + dx, y: (shape.y || 0) + dy })
+          })
+      }
+
+      shapes.doc ? shapes.doc.transact(apply) : apply()
+    },
+    [shapes, selectedIds]
+  )
+
+  const selection = useMemo(
+    () => list.filter((shape) => selectedIds.includes(shape.id)),
+    [list, selectedIds]
+  )
+
+  // World bounds converted to board pixels, so the action bar can sit over it.
+  const selectionBox = useMemo(() => {
+    if (selection.length === 0) return null
+    const bounds = unionBounds(selection)
+    if (!bounds) return null
+    return {
+      x: bounds.x * viewport.scale + viewport.x,
+      y: bounds.y * viewport.scale + viewport.y,
+      width: bounds.width * viewport.scale,
+      height: bounds.height * viewport.scale,
+    }
+  }, [selection, viewport])
+
+  const allLocked = selection.length > 0 && selection.every((shape) => shape.locked)
+
+  const runOnSelection = useCallback(
+    (fn) => {
+      const apply = () => selectedIds.forEach(fn)
+      shapes.doc ? shapes.doc.transact(apply) : apply()
+    },
+    [shapes, selectedIds]
+  )
+
+  const selectionActions = useMemo(
+    () => ({
+      duplicate: () => setSelectedIds(duplicateShapes(shapes, selectedIds)),
+      copy: () => {
+        clipboardRef.current = selection
+      },
+      forward: () => runOnSelection((id) => reorderShape(shapes, id, 'forward')),
+      backward: () => runOnSelection((id) => reorderShape(shapes, id, 'backward')),
+      toggleLock: () => runOnSelection((id) => updateShape(shapes, id, { locked: !allLocked })),
+      remove: () => {
+        runOnSelection((id) => removeShape(shapes, id))
+        setSelectedIds([])
+      },
+    }),
+    [shapes, selectedIds, selection, runOnSelection, allLocked]
+  )
 
   const handleWheel = useCallback(
     (event) => {
@@ -400,39 +542,85 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         redo()
         return
       }
-      if (modifier) return
+      if (modifier) {
+        const key = event.key.toLowerCase()
+        if (readOnly) return
 
-      if (event.key === 'Escape') {
-        setSelectedId(null)
+        if (key === 'c' && selectedIds.length) {
+          event.preventDefault()
+          clipboardRef.current = shapes
+            .toArray()
+            .map((shape) => shape.toJSON())
+            .filter((shape) => selectedIds.includes(shape.id))
+          return
+        }
+
+        if (key === 'v' && clipboardRef.current.length) {
+          event.preventDefault()
+          const pasted = clipboardRef.current.map((shape) => ({
+            ...shape,
+            id: nanoid(8),
+            x: (shape.x || 0) + PASTE_OFFSET,
+            y: (shape.y || 0) + PASTE_OFFSET,
+          }))
+          pasted.forEach((shape) => pushShape(shapes, shape))
+          // Paste again and the next copy lands further along, rather than
+          // stacking invisibly on the last one.
+          clipboardRef.current = pasted
+          setSelectedIds(pasted.map((shape) => shape.id))
+          return
+        }
+
+        if (key === 'd' && selectedIds.length) {
+          event.preventDefault()
+          setSelectedIds(duplicateShapes(shapes, selectedIds))
+          return
+        }
+
+        if (key === 'a') {
+          event.preventDefault()
+          setSelectedIds(shapes.toArray().map((shape) => shape.get('id')).filter(Boolean))
+          return
+        }
+
         return
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId && !readOnly) {
+
+      if (event.key === 'Escape') {
+        setSelectedIds([])
+        return
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length && !readOnly) {
         event.preventDefault()
-        removeShape(shapes, selectedId)
-        setSelectedId(null)
+        selectedIds.forEach((id) => removeShape(shapes, id))
+        setSelectedIds([])
         return
       }
 
       const next = SHORTCUTS[event.key.toLowerCase()]
       if (next) setTool(next)
     },
-    [selectedId, shapes, setTool, undo, redo, readOnly]
+    [selectedIds, shapes, setTool, undo, redo, readOnly]
   )
 
   // A pointer released outside the canvas must still close the stroke.
   useEffect(() => {
     const onUp = () => {
       erasingRef.current = false
+      if (marqueeRef.current) commitMarquee(stageRef.current)
+      marqueeRef.current = null
+      setMarquee(null)
       if (drawingRef.current) commitDraft()
     }
     window.addEventListener('pointerup', onUp)
     return () => window.removeEventListener('pointerup', onUp)
-  }, [commitDraft])
+  }, [commitDraft, commitMarquee])
 
   const boardClass = [
     'board',
     isDrawingTool && !readOnly ? 'board--draw' : '',
     tool === 'eraser' && !readOnly ? 'board--erase' : '',
+    tool === 'hand' ? 'board--pan' : '',
     readOnly ? 'board--locked' : '',
   ]
     .filter(Boolean)
@@ -461,17 +649,21 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
         {size.width > 0 && size.height > 0 && (
           <Stage
+            ref={stageRef}
             width={size.width}
             height={size.height}
             scaleX={viewport.scale}
             scaleY={viewport.scale}
             x={viewport.x}
             y={viewport.y}
-            draggable={tool === 'select'}
+            draggable={tool === 'hand'}
             onContextMenu={(event) => event.evt.preventDefault()}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
-            onPointerUp={commitDraft}
+            onPointerUp={(event) => {
+              commitMarquee(event.target.getStage())
+              commitDraft()
+            }}
             onPointerLeave={clearCursor}
             onDragEnd={handleStageDragEnd}
             onWheel={handleWheel}
@@ -481,8 +673,8 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
                 <ShapeNode
                   key={shape.id}
                   shape={shape}
-                  draggable={tool === 'select' && !readOnly}
-                  isSelected={selectedId === shape.id}
+                  draggable={tool === 'select' && !readOnly && !shape.locked}
+                  isSelected={selectedIds.includes(shape.id)}
                   onPointerDown={handleShapePointerDown}
                   onDragEnd={handleShapeDragEnd}
                   onHoverStart={handleHoverStart}
@@ -503,6 +695,34 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
               <RemoteCursors peers={peers} scale={viewport.scale} />
             </Layer>
           </Stage>
+        )}
+
+        {marquee && (
+          <div
+            className="marquee"
+            style={{
+              left: marquee.x + 'px',
+              top: marquee.y + 'px',
+              width: marquee.width + 'px',
+              height: marquee.height + 'px',
+            }}
+            aria-hidden="true"
+          />
+        )}
+
+        {tool === 'select' && !readOnly && selectionBox && (
+          <SelectionActions
+            box={selectionBox}
+            count={selection.length}
+            locked={allLocked}
+            board={size}
+            onDuplicate={selectionActions.duplicate}
+            onCopy={selectionActions.copy}
+            onForward={selectionActions.forward}
+            onBackward={selectionActions.backward}
+            onToggleLock={selectionActions.toggleLock}
+            onDelete={selectionActions.remove}
+          />
         )}
 
         {hovered && (
@@ -536,7 +756,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         destructive
         onConfirm={() => {
           clearShapes(shapes)
-          setSelectedId(null)
+          setSelectedIds([])
         }}
         onClose={() => setConfirmingClear(false)}
       />

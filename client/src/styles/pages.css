@@ -816,6 +816,65 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Marquee sweep while dragging on empty canvas. */
+.marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--accent-soft);
+  pointer-events: none;
+}
+
+/* Actions for the current selection, floated over the board. */
+.selbar {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-3);
+  animation: rise-in var(--dur-fast) var(--ease-out) both;
+}
+
+.selbar__count {
+  min-width: 22px;
+  padding: 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.selbar__btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.selbar__btn:hover {
+  background: var(--surface-4);
+  color: var(--text);
+}
+
+.selbar__btn--danger:hover {
+  background: #2a1a18;
+  color: var(--danger);
+}
+
 /* ---------- responsive ---------- */
 
 /* Two columns for the auth screen once there is room for the value panel. */
