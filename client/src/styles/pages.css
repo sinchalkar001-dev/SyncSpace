@@ -638,6 +638,14 @@
   animation-delay: calc(min(var(--i, 0), 12) * 40ms);
 }
 
+/* The card's entrance animation leaves a transform behind, and a transform
+   creates a stacking context - so the menu cannot escape its own card no
+   matter how high its z-index. Lift the whole card while its menu is open,
+   or the menu paints behind the cards listed after it. */
+.roomcard--open {
+  z-index: 5;
+}
+
 .roomcard:hover {
   background: var(--surface-2);
   border-color: var(--border-strong);

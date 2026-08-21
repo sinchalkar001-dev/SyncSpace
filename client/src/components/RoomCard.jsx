@@ -55,7 +55,10 @@ function RoomCardBase({
   }
 
   return (
-    <li className="roomcard" style={{ '--i': index, '--identity': colorFor(room.roomId) }}>
+    <li
+      className={'roomcard' + (open ? ' roomcard--open' : '')}
+      style={{ '--i': index, '--identity': colorFor(room.roomId) }}
+    >
       <span className="roomcard__stripe" aria-hidden="true" />
 
       <button type="button" className="roomcard__main" onClick={onOpen}>
