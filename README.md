@@ -199,7 +199,7 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 92 tests
+npm test                      # server, 102 tests
 npm test --workspace client   # client, 42 tests
 npm run test:e2e              # browser, two real tabs, 3 tests
 ```
