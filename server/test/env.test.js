@@ -26,15 +26,26 @@ describe('environment validation', () => {
   })
 
   it('requires JWT_SECRET in production', () => {
-    expect(() => loadEnv({ NODE_ENV: 'production', ALLOW_ANONYMOUS: 'false' })).toThrow(
-      /JWT_SECRET is required in production/
-    )
+    expect(() =>
+      loadEnv({ NODE_ENV: 'production', ALLOW_ANONYMOUS: 'false', CORS_ORIGIN: 'https://app.test' })
+    ).toThrow(/JWT_SECRET is required in production/)
   })
 
   it('refuses anonymous access in production', () => {
     expect(() =>
-      loadEnv({ NODE_ENV: 'production', JWT_SECRET: PROD_SECRET, ALLOW_ANONYMOUS: 'true' })
+      loadEnv({
+        NODE_ENV: 'production',
+        JWT_SECRET: PROD_SECRET,
+        ALLOW_ANONYMOUS: 'true',
+        CORS_ORIGIN: 'https://app.test',
+      })
     ).toThrow(/ALLOW_ANONYMOUS must be false/)
+  })
+
+  it('requires an explicit origin allowlist in production', () => {
+    expect(() =>
+      loadEnv({ NODE_ENV: 'production', JWT_SECRET: PROD_SECRET, ALLOW_ANONYMOUS: 'false' })
+    ).toThrow(/CORS_ORIGIN is required in production/)
   })
 
   it('accepts a valid production configuration', () => {
@@ -42,12 +53,34 @@ describe('environment validation', () => {
       NODE_ENV: 'production',
       JWT_SECRET: PROD_SECRET,
       ALLOW_ANONYMOUS: 'false',
+      CORS_ORIGIN: 'https://syncspace.example, https://www.syncspace.example',
     })
     expect(env.ALLOW_ANONYMOUS).toBe(false)
     expect(env.JWT_SECRET).toBe(PROD_SECRET)
+    expect(env.CORS_ORIGIN).toEqual(['https://syncspace.example', 'https://www.syncspace.example'])
   })
 
   it('falls back to a development secret outside production', () => {
     expect(loadEnv({}).JWT_SECRET).toMatch(/development/)
+  })
+
+  it('rejects a wildcard origin', () => {
+    expect(() => loadEnv({ CORS_ORIGIN: '*' })).toThrow(/wildcard/)
+  })
+
+  it('rejects origins that are not absolute scheme://host[:port]', () => {
+    expect(() => loadEnv({ CORS_ORIGIN: 'not an origin' })).toThrow(/absolute origin/)
+    expect(() => loadEnv({ CORS_ORIGIN: 'localhost:5173' })).toThrow(/without a path/)
+    expect(() => loadEnv({ CORS_ORIGIN: 'https://app.test/rooms' })).toThrow(/without a path/)
+    expect(() => loadEnv({ CORS_ORIGIN: 'ftp://app.test' })).toThrow(/without a path/)
+  })
+
+  it('rejects an empty allowlist in any environment', () => {
+    expect(() => loadEnv({ CORS_ORIGIN: ' , ,' })).toThrow(/at least one origin/)
+  })
+
+  it('normalises trailing slashes and default ports away', () => {
+    const env = loadEnv({ CORS_ORIGIN: 'http://localhost:5173/, https://app.test:443' })
+    expect(env.CORS_ORIGIN).toEqual(['http://localhost:5173', 'https://app.test'])
   })
 })

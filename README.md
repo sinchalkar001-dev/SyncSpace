@@ -188,7 +188,7 @@ client/src
 └── pages/        Home, Login, Register, Dashboard, Room, NotFound
 
 server/src
-├── config/       env.js (zod-validated), logger.js
+├── config/       env.js (zod-validated), cors.js (shared origin policy), logger.js
 ├── models/       User, Room, Snapshot, DocUpdate (append-only)
 ├── services/     auth, room, replay
 ├── routes/       auth.routes.js, rooms.routes.js
@@ -201,7 +201,7 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 75 tests
+npm test                      # server, 102 tests
 npm test --workspace client   # client, 42 tests
 npm run test:e2e              # browser, two real tabs, 3 tests
 ```
