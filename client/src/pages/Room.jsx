@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { colorFor } from '../lib/identity.js'
+import { useUIStore } from '../store/uiStore.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useAwareness } from '../hooks/useAwareness.js'
@@ -11,11 +12,48 @@ import { TopBar, Brand } from '../components/TopBar.jsx'
 import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceBar } from '../components/PresenceBar.jsx'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
+import { Segmented } from '../components/ui/Segmented.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
 import { LoadingBlock } from '../components/ui/Spinner.jsx'
 import { Whiteboard } from '../components/Whiteboard/Whiteboard.jsx'
 import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
+import { CommandPalette } from '../components/CommandPalette.jsx'
+import { ShortcutsPanel } from '../components/ShortcutsPanel.jsx'
+import { LANGUAGES } from '../lib/monacoSetup.js'
+import { TOOLS } from '../store/uiStore.js'
+
+const VIEWS = [
+  { value: 'board', label: 'Board', icon: 'pen' },
+  { value: 'split', label: 'Split', icon: 'grid' },
+  { value: 'code', label: 'Code', icon: 'code' },
+]
+
+const TOOL_LABELS = {
+  select: 'Select',
+  hand: 'Hand (pan)',
+  pen: 'Pen',
+  segment: 'Line',
+  arrow: 'Arrow',
+  rect: 'Rectangle',
+  diamond: 'Diamond',
+  ellipse: 'Ellipse',
+  text: 'Text',
+  eraser: 'Eraser',
+}
+
+const TOOL_KEYS = { select: 'V', hand: 'H', pen: 'P', segment: 'L', arrow: 'A', rect: 'R', diamond: 'D', ellipse: 'O', text: 'T', eraser: 'E' }
+
+const FONT_STEP = 0.5
+const FONT_MIN = 10
+const FONT_MAX = 22
+
+/** True when a keystroke belongs to whatever the user is typing into. */
+function isTyping(target) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
 
 export default function Room() {
   const { roomId } = useParams()
@@ -25,6 +63,17 @@ export default function Room() {
 
   const [copied, setCopied] = useState(false)
   const [room, setRoom] = useState(null)
+  const paneMode = useUIStore((state) => state.paneMode)
+  const setPaneMode = useUIStore((state) => state.setPaneMode)
+  const setTool = useUIStore((state) => state.setTool)
+  const setLanguage = useUIStore((state) => state.setLanguage)
+  const language = useUIStore((state) => state.language)
+  const editorPrefs = useUIStore((state) => state.editor)
+  const toggleEditorOption = useUIStore((state) => state.toggleEditorOption)
+  const setEditorOption = useUIStore((state) => state.setEditorOption)
+
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const copyTimer = useRef(null)
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
@@ -65,6 +114,144 @@ export default function Room() {
       toast.info('Copy failed — the room code is in the address bar')
     }
   }, [toast])
+
+  // Ctrl/Cmd+K is claimed on the capture phase so Monaco, which treats it as a
+  // chord prefix, never swallows it first.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const modifier = event.metaKey || event.ctrlKey
+
+      if (modifier && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        event.stopPropagation()
+        setPaletteOpen((open) => !open)
+        return
+      }
+
+      if (event.key === '?' && !isTyping(event.target)) {
+        event.preventDefault()
+        setShortcutsOpen((open) => !open)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+
+  const commands = useMemo(() => {
+    const list = []
+
+    for (const view of VIEWS) {
+      list.push({
+        id: 'view:' + view.value,
+        group: 'View',
+        icon: view.icon,
+        title: view.label === 'Split' ? 'Split view' : view.label + ' only',
+        detail: paneMode === view.value ? 'current' : undefined,
+        run: () => setPaneMode(view.value),
+      })
+    }
+
+    for (const tool of TOOLS) {
+      list.push({
+        id: 'tool:' + tool,
+        group: 'Board',
+        icon: tool === 'hand' ? 'hand' : tool,
+        title: TOOL_LABELS[tool] || tool,
+        keywords: 'tool draw',
+        hint: TOOL_KEYS[tool],
+        run: () => {
+          // Picking a board tool while the board is hidden is a request to see it.
+          if (paneMode === 'code') setPaneMode('split')
+          setTool(tool)
+        },
+      })
+    }
+
+    list.push(
+      {
+        id: 'editor:wordWrap',
+        group: 'Editor',
+        icon: 'text',
+        title: (editorPrefs.wordWrap ? 'Disable' : 'Enable') + ' word wrap',
+        run: () => toggleEditorOption('wordWrap'),
+      },
+      {
+        id: 'editor:minimap',
+        group: 'Editor',
+        icon: 'layers',
+        title: (editorPrefs.minimap ? 'Hide' : 'Show') + ' minimap',
+        run: () => toggleEditorOption('minimap'),
+      },
+      {
+        id: 'editor:fontUp',
+        group: 'Editor',
+        icon: 'plus',
+        title: 'Increase font size',
+        run: () =>
+          setEditorOption('fontSize', Math.min(FONT_MAX, editorPrefs.fontSize + FONT_STEP)),
+      },
+      {
+        id: 'editor:fontDown',
+        group: 'Editor',
+        icon: 'minus',
+        title: 'Decrease font size',
+        run: () =>
+          setEditorOption('fontSize', Math.max(FONT_MIN, editorPrefs.fontSize - FONT_STEP)),
+      }
+    )
+
+    for (const name of LANGUAGES) {
+      list.push({
+        id: 'lang:' + name,
+        group: 'Language',
+        icon: 'code',
+        title: 'Switch to ' + name,
+        keywords: 'language syntax ' + name,
+        detail: name === language ? 'current' : undefined,
+        run: () => setLanguage(name),
+      })
+    }
+
+    list.push(
+      {
+        id: 'room:copy',
+        group: 'Room',
+        icon: 'copy',
+        title: 'Copy room link',
+        run: onCopy,
+      },
+      {
+        id: 'room:shortcuts',
+        group: 'Room',
+        icon: 'key',
+        title: 'Keyboard shortcuts',
+        hint: '?',
+        run: () => setShortcutsOpen(true),
+      },
+      {
+        id: 'room:leave',
+        group: 'Room',
+        icon: 'arrowRight',
+        title: 'Leave this room',
+        run: () => navigate(isAuthenticated ? '/dashboard' : '/'),
+      }
+    )
+
+    return list
+  }, [
+    paneMode,
+    setPaneMode,
+    setTool,
+    editorPrefs,
+    toggleEditorOption,
+    setEditorOption,
+    language,
+    setLanguage,
+    onCopy,
+    navigate,
+    isAuthenticated,
+  ])
 
   if (isLoading) return <LoadingBlock label="Restoring your session" />
 
@@ -128,6 +315,14 @@ export default function Room() {
 
         <div className="topbar__right">
           <PresenceBar self={self} peers={peers} />
+          <div className="room__views">
+            <Segmented
+              options={VIEWS}
+              value={paneMode}
+              onChange={setPaneMode}
+              label="Workspace view"
+            />
+          </div>
           <ConnectionStatus status={status} synced={synced} />
           <UserMenu compact />
         </div>
@@ -145,11 +340,26 @@ export default function Room() {
               user={identity}
             />
           }
-          right={<CodeEditor yText={session.code} provider={session.provider} peers={peers} />}
+          right={
+            <CodeEditor
+              yText={session.code}
+              provider={session.provider}
+              peers={peers}
+              status={status}
+              synced={synced}
+            />
+          }
         />
       ) : (
         <LoadingBlock label="Opening room" />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+      />
+      <ShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   )
 }

@@ -1,22 +1,12 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { MonacoBinding } from 'y-monaco'
-import { LANGUAGES } from '../../lib/monacoSetup.js'
 import { useUIStore } from '../../store/uiStore.js'
+import { Icon } from '../ui/Icon.jsx'
+import { LanguagePicker } from './LanguagePicker.jsx'
+import { EditorStatusBar } from './EditorStatusBar.jsx'
 
-const EDITOR_OPTIONS = {
-  fontSize: 13.5,
-  fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-  minimap: { enabled: false },
-  smoothScrolling: true,
-  cursorBlinking: 'smooth',
-  renderLineHighlight: 'line',
-  scrollBeyondLastLine: false,
-  automaticLayout: true,
-  padding: { top: 14 },
-  tabSize: 2,
-  scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-}
+const TAB_SIZE = 2
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace('#', '')
@@ -54,20 +44,70 @@ function remoteSelectionCss(peers) {
     .join('\n')
 }
 
-export function CodeEditor({ yText, provider, peers }) {
+export function CodeEditor({ yText, provider, peers, status = 'connecting', synced = false }) {
   const bindingRef = useRef(null)
+  const editorRef = useRef(null)
+
   const language = useUIStore((s) => s.language)
-  const setLanguage = useUIStore((s) => s.setLanguage)
+  const editorPrefs = useUIStore((s) => s.editor)
+  const toggleEditorOption = useUIStore((s) => s.toggleEditorOption)
+  const paneMode = useUIStore((s) => s.paneMode)
+  const setPaneMode = useUIStore((s) => s.setPaneMode)
 
-  const handleMount = (editor, monaco) => {
-    monaco.editor.setTheme('syncspace-dark')
-    const model = editor.getModel()
-    if (!model || !yText || !provider) return
+  const [position, setPosition] = useState({ line: 1, column: 1, selected: 0 })
+  const [empty, setEmpty] = useState(true)
 
-    // Binding the Yjs text type to the Monaco model is what makes concurrent
-    // edits merge; the model itself is never the source of truth.
-    bindingRef.current = new MonacoBinding(yText, model, new Set([editor]), provider.awareness)
-  }
+  const options = useMemo(
+    () => ({
+      fontSize: editorPrefs.fontSize,
+      fontFamily: "'IBM Plex Mono', 'JetBrains Mono', Consolas, monospace",
+      minimap: { enabled: editorPrefs.minimap },
+      wordWrap: editorPrefs.wordWrap ? 'on' : 'off',
+      smoothScrolling: true,
+      cursorBlinking: 'smooth',
+      renderLineHighlight: 'line',
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      padding: { top: 14, bottom: 14 },
+      tabSize: TAB_SIZE,
+      bracketPairColorization: { enabled: true },
+      guides: { bracketPairs: true, indentation: true },
+      folding: true,
+      matchBrackets: 'always',
+      renderWhitespace: 'selection',
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+    }),
+    [editorPrefs]
+  )
+
+  const handleMount = useCallback(
+    (editor, monaco) => {
+      monaco.editor.setTheme('syncspace-dark')
+      editorRef.current = editor
+
+      const model = editor.getModel()
+      if (!model || !yText || !provider) return
+
+      // Binding the Yjs text type to the Monaco model is what makes concurrent
+      // edits merge; the model itself is never the source of truth.
+      bindingRef.current = new MonacoBinding(yText, model, new Set([editor]), provider.awareness)
+
+      const readPosition = () => {
+        const at = editor.getPosition()
+        const selection = editor.getSelection()
+        const selected = selection ? model.getValueInRange(selection).length : 0
+        if (at) setPosition({ line: at.lineNumber, column: at.column, selected })
+      }
+
+      readPosition()
+      setEmpty(model.getValue().trim() === '')
+
+      editor.onDidChangeCursorPosition(readPosition)
+      editor.onDidChangeCursorSelection(readPosition)
+      model.onDidChangeContent(() => setEmpty(model.getValue().trim() === ''))
+    },
+    [yText, provider]
+  )
 
   useEffect(
     () => () => {
@@ -77,22 +117,67 @@ export function CodeEditor({ yText, provider, peers }) {
     []
   )
 
+  const format = useCallback(() => {
+    editorRef.current?.getAction('editor.action.formatDocument')?.run()
+  }, [])
+
+  const find = useCallback(() => {
+    editorRef.current?.getAction('actions.find')?.run()
+  }, [])
+
   const css = useMemo(() => remoteSelectionCss(peers), [peers])
+  const expanded = paneMode === 'code'
 
   return (
-    <section className="pane pane--editor">
+    <section className="pane pane--editor" aria-label="Code editor">
       <header className="pane__bar">
         <span className="pane__title">Code</span>
-        <label className="pane__control">
-          <span className="sr-only">Editor language</span>
-          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {LANGUAGES.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <LanguagePicker />
+
+        <span className="pane__spacer" />
+
+        <button type="button" className="panebtn" onClick={find} title="Find (Ctrl+F)" aria-label="Find">
+          <Icon name="search" size={14} />
+        </button>
+        <button
+          type="button"
+          className="panebtn"
+          onClick={format}
+          title="Format document"
+          aria-label="Format document"
+        >
+          <Icon name="zap" size={14} />
+        </button>
+        <button
+          type="button"
+          className={'panebtn' + (editorPrefs.wordWrap ? ' is-active' : '')}
+          onClick={() => toggleEditorOption('wordWrap')}
+          aria-pressed={editorPrefs.wordWrap}
+          title="Word wrap"
+          aria-label="Word wrap"
+        >
+          <Icon name="text" size={14} />
+        </button>
+        <button
+          type="button"
+          className={'panebtn' + (editorPrefs.minimap ? ' is-active' : '')}
+          onClick={() => toggleEditorOption('minimap')}
+          aria-pressed={editorPrefs.minimap}
+          title="Minimap"
+          aria-label="Minimap"
+        >
+          <Icon name="layers" size={14} />
+        </button>
+        <button
+          type="button"
+          className={'panebtn' + (expanded ? ' is-active' : '')}
+          onClick={() => setPaneMode(expanded ? 'split' : 'code')}
+          aria-pressed={expanded}
+          title={expanded ? 'Back to split view' : 'Expand the editor'}
+          aria-label={expanded ? 'Back to split view' : 'Expand the editor'}
+        >
+          <Icon name="grid" size={14} />
+        </button>
       </header>
 
       <style>{css}</style>
@@ -101,11 +186,30 @@ export function CodeEditor({ yText, provider, peers }) {
         <Editor
           language={language}
           theme="syncspace-dark"
-          options={EDITOR_OPTIONS}
+          options={options}
           onMount={handleMount}
           loading={<div className="editor-loading">Loading editor…</div>}
         />
+
+        {empty && (
+          <div className="editor-hint" aria-hidden="true">
+            <p className="editor-hint__title">Start typing</p>
+            <p className="editor-hint__body">
+              Everyone in this room edits the same buffer. Press{' '}
+              <kbd>Ctrl</kbd>+<kbd>K</kbd> for commands.
+            </p>
+          </div>
+        )}
       </div>
+
+      <EditorStatusBar
+        position={position}
+        language={language}
+        tabSize={TAB_SIZE}
+        status={status}
+        synced={synced}
+        peerCount={peers.length}
+      />
     </section>
   )
 }
