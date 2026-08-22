@@ -50,30 +50,74 @@ test('the first card of several can still reach its own menu', async ({ page }) 
   // Playwright's own .click() would NOT catch that: overflow:hidden is still
   // programmatically scrollable, so scrollIntoViewIfNeeded slides the menu
   // into view and clicks it, which a person with no scrollbar cannot do.
+  //
+  // Nothing is scrolled here on purpose. The menu is absolutely positioned, so
+  // it adds nothing to the page's scroll height: if it hangs past the bottom
+  // edge there is no scrolling anyone could do to reach it, and the card is
+  // expected to have flipped it upward instead.
   const reachable = await page.evaluate(() => {
     const menu = document.querySelector('.roomcard .popover--menu')
     if (!menu) return { found: false }
 
-    // Scroll the WINDOW only, never the card: a menu hanging below a short
-    // viewport is not the bug, and scrolling the card itself would hide the
-    // bug we are looking for.
-    const first = menu.getBoundingClientRect()
-    const below = first.bottom - window.innerHeight
-    if (below > 0) window.scrollBy(0, below + 24)
-
     const box = menu.getBoundingClientRect()
-    const at = (x, y) => menu.contains(document.elementFromPoint(Math.round(x), Math.round(y)))
+
+    // Naming what got in the way turns a bare false into a diagnosis: a
+    // clipping ancestor reports the card, an overlay reports itself, and a
+    // menu hanging off the screen reports that instead of a null.
+    const at = (x, y) => {
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return 'offscreen'
+      const el = document.elementFromPoint(Math.round(x), Math.round(y))
+      if (menu.contains(el)) return 'menu'
+      if (!el) return 'nothing'
+      const classes = typeof el.className === 'string' ? el.className.trim() : ''
+      return el.tagName.toLowerCase() + (classes ? '.' + classes.split(/\s+/).join('.') : '')
+    }
+
     return {
       found: true,
-      centre: at(box.left + box.width / 2, box.top + box.height / 2),
       firstItem: at(box.left + box.width / 2, box.top + 16),
+      centre: at(box.left + box.width / 2, box.top + box.height / 2),
+      lastItem: at(box.left + box.width / 2, box.bottom - 16),
     }
   })
 
   expect(reachable.found).toBe(true)
-  expect(reachable.centre, 'menu centre must not be clipped away').toBe(true)
-  expect(reachable.firstItem, 'first menu item must be reachable').toBe(true)
+  expect(reachable.firstItem, 'first menu item is covered, clipped or off screen').toBe('menu')
+  expect(reachable.centre, 'menu centre is covered, clipped or off screen').toBe('menu')
+  expect(reachable.lastItem, 'last menu item is covered, clipped or off screen').toBe('menu')
 
+  await menu.getByRole('menuitem', { name: 'Rename' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('a menu with no room below it flips up rather than off the screen', async ({ page }) => {
+  await signUp(page)
+  await createRoom(page, 'Only room')
+
+  // Short enough that the last card sits hard against the bottom edge.
+  await page.setViewportSize({ width: 1280, height: 600 })
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+
+  const trigger = page.locator('.roomcard__more').last()
+  await trigger.click()
+
+  const menu = page.locator('.roomcard .popover--menu')
+  await expect(menu).toBeVisible()
+
+  const placement = await page.evaluate(() => {
+    const menu = document.querySelector('.roomcard .popover--menu')
+    const trigger = document.querySelector('.roomcard--open .roomcard__more')
+    const box = menu.getBoundingClientRect()
+    return {
+      above: box.bottom <= trigger.getBoundingClientRect().top,
+      withinViewport: box.top >= 0 && box.bottom <= window.innerHeight,
+    }
+  })
+
+  expect(placement.above, 'menu should open upward here').toBe(true)
+  expect(placement.withinViewport, 'menu should be fully on screen').toBe(true)
+
+  // And it still works: a flipped menu that cannot be clicked is no better.
   await menu.getByRole('menuitem', { name: 'Rename' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
 })

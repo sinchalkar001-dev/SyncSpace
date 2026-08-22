@@ -1,11 +1,12 @@
-import { memo, useCallback, useRef, useState } from 'react'
+import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { colorFor } from '../lib/identity.js'
 import { formatWhen, isRoomLive, isUnnamed } from '../lib/rooms.js'
 import { useDismissable } from '../hooks/useDismissable.js'
 import { Icon } from './ui/Icon.jsx'
 
-// Roughly the menu's height plus breathing room.
-const MENU_CLEARANCE = 210
+// The gap between trigger and menu, from .popover--anchored.
+const MENU_GAP = 6
+const VIEWPORT_MARGIN = 8
 
 /**
  * One room on the dashboard.
@@ -39,15 +40,55 @@ function RoomCardBase({
   const unnamed = isUnnamed(room)
   const live = isRoomLive(room)
 
-  const toggle = useCallback(() => {
-    setOpen((value) => {
-      if (value) return false
-      const rect = triggerRef.current?.getBoundingClientRect()
-      const spaceBelow = window.innerHeight - (rect?.bottom ?? 0)
-      setAbove(spaceBelow < MENU_CLEARANCE)
-      return true
-    })
-  }, [])
+  const toggle = useCallback(() => setOpen((value) => !value), [])
+
+  /**
+   * Decides which side the menu opens on, from the real menu once it exists.
+   *
+   * A popover is absolutely positioned, so it adds nothing to the page's
+   * scroll height: one hanging past the bottom edge cannot be scrolled to at
+   * all. Height comes from `offsetHeight` rather than the bounding box because
+   * the menu animates in with a scale, and the box during that animation is
+   * smaller than the menu it is about to become.
+   *
+   * As a layout effect this runs before the browser paints, so a flip is never
+   * seen as a jump.
+   */
+  useLayoutEffect(() => {
+    if (!open) return undefined
+
+    const place = () => {
+      const menu = containerRef.current?.querySelector('.popover--menu')
+      const trigger = triggerRef.current
+      if (!menu || !trigger) return
+
+      const height = menu.offsetHeight
+      const box = trigger.getBoundingClientRect()
+      const overflowsBelow = box.bottom + MENU_GAP + height > window.innerHeight - VIEWPORT_MARGIN
+      const fitsAbove = box.top - MENU_GAP - height > VIEWPORT_MARGIN
+
+      setAbove(overflowsBelow && fitsAbove)
+    }
+
+    place()
+
+    // One measurement is not enough. The page can still be scrolling when the
+    // menu opens, and the dashboard settles its own layout a frame or two
+    // later, so a decision taken on the click alone can be about a position
+    // the card no longer holds.
+    const frame = requestAnimationFrame(place)
+    const observer = new ResizeObserver(place)
+    observer.observe(document.body)
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open])
 
   const run = (action) => () => {
     close()

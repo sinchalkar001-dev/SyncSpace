@@ -4,9 +4,14 @@ const CLIENT = 'http://localhost:5180'
 
 /**
  * End-to-end tests drive two real browser tabs against the real stack, so both
- * servers must be up. A MongoDB on 127.0.0.1:27017 is required; without one,
- * start the backend with `npm run dev:memory --workspace server` first and
- * these will reuse it.
+ * servers must be up. The backend runs against an ephemeral in-process
+ * MongoDB, so no local mongod is needed; a server already listening on 4000 is
+ * reused as-is.
+ *
+ * The registration limiter is raised for this run only. At its production
+ * default of five per fifteen minutes, a second full run inside that window
+ * fails at sign-up — and the failures surface much later, as missing rooms and
+ * error toasts covering the thing a test was about to click.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -22,10 +27,14 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'npm run start --workspace server',
+      command: 'npm run dev:memory --workspace server',
       url: 'http://127.0.0.1:4000/health',
       reuseExistingServer: true,
-      timeout: 60000,
+      timeout: 120000,
+      env: {
+        AUTH_RATE_LIMIT_REGISTER_MAX: '500',
+        AUTH_RATE_LIMIT_LOGIN_MAX: '500',
+      },
     },
     {
       command: 'npm run dev --workspace client -- --port 5180 --strictPort',
