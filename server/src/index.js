@@ -7,6 +7,7 @@ import { setHocuspocus } from './collab/registry.js'
 import { createSocketServer } from './realtime/socket.js'
 import { connectDatabase, disconnectDatabase } from './db/connect.js'
 import { env } from './config/env.js'
+import { isAllowedOrigin } from './config/cors.js'
 import { logger } from './config/logger.js'
 
 const COLLAB_PATH = '/collab'
@@ -35,6 +36,20 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
     if (pathname.startsWith('/socket.io')) return
 
     if (pathname !== COLLAB_PATH) {
+      socket.destroy()
+      return
+    }
+
+    // WebSocket handshakes are not covered by the cors middleware, so browser
+    // origins are checked here. Without this, any web page could open a sync
+    // connection (cross-site WebSocket hijacking). Missing Origin means a
+    // non-browser client (curl, tests) and is allowed.
+    if (!isAllowedOrigin(request.headers.origin)) {
+      logger.warn(
+        { origin: request.headers.origin, ip: request.socket.remoteAddress },
+        'blocked collab upgrade from disallowed origin'
+      )
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
     }

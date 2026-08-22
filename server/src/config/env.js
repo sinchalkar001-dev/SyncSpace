@@ -7,6 +7,49 @@ const csv = z
   .string()
   .transform((value) => value.split(',').map((part) => part.trim()).filter(Boolean))
 
+/**
+ * A comma-separated allowlist of absolute origins. Each entry is normalised
+ * (trailing slash and default port removed) so it matches exactly what
+ * browsers send in the Origin header — "https://app.test/" would otherwise
+ * silently never match.
+ */
+const origins = csv.superRefine((list, ctx) => {
+  const issue = (message) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGIN'], message })
+
+  if (!list.length) {
+    issue('must list at least one origin')
+    return
+  }
+
+  list.forEach((origin, index) => {
+    if (origin === '*') {
+      issue('wildcard "*" is not allowed; list explicit origins instead')
+      return
+    }
+
+    let url
+    try {
+      url = new URL(origin)
+    } catch {
+      issue(`"${origin}" is not an absolute origin (scheme://host[:port])`)
+      return
+    }
+
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
+      issue(`"${origin}" must be scheme://host[:port] without a path`)
+      return
+    }
+
+    list[index] = url.origin
+  })
+})
+
 const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -18,7 +61,7 @@ const schema = z
     JWT_SECRET: z.string().min(32).optional(),
     JWT_EXPIRES_IN: z.string().default('7d'),
 
-    CORS_ORIGIN: csv.default('http://localhost:5173'),
+    CORS_ORIGIN: origins.optional(),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
@@ -65,9 +108,20 @@ const schema = z
         message: 'ALLOW_ANONYMOUS must be false in production',
       })
     }
+    if (!value.CORS_ORIGIN?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CORS_ORIGIN'],
+        message:
+          'CORS_ORIGIN is required in production (comma-separated origins, no wildcards)',
+      })
+    }
   })
 
 const DEV_SECRET = 'syncspace-development-secret-do-not-use-in-production'
+
+// Convenient local default while developing; production must be explicit.
+const DEV_ORIGINS = ['http://localhost:5173']
 
 /** Parses and validates process.env. Throws with a readable report on failure. */
 export function loadEnv(source = process.env) {
@@ -80,7 +134,11 @@ export function loadEnv(source = process.env) {
     throw new Error('Invalid environment configuration:\n' + details)
   }
 
-  return { ...parsed.data, JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET }
+  return {
+    ...parsed.data,
+    JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET,
+    CORS_ORIGIN: parsed.data.CORS_ORIGIN ?? DEV_ORIGINS,
+  }
 }
 
 export const env = loadEnv()

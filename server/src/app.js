@@ -3,7 +3,7 @@ import helmet from 'helmet'
 import cors from 'cors'
 import pinoHttp from 'pino-http'
 import mongoose from 'mongoose'
-import { env } from './config/env.js'
+import { isAllowedOrigin } from './config/cors.js'
 import { logger } from './config/logger.js'
 import { createAuthRouter } from './routes/auth.routes.js'
 import { createRoomsRouter } from './routes/rooms.routes.js'
@@ -17,7 +17,12 @@ export function createApp() {
   app.set('trust proxy', 1)
 
   app.use(helmet())
-  app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }))
+  app.use(
+    cors({
+      origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+      credentials: true,
+    })
+  )
   app.use(express.json({ limit: '256kb' }))
   app.use(
     pinoHttp({
