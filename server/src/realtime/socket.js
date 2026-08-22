@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { verifyToken } from '../services/auth.service.js'
 import { canAccess, ensureRoom, recordParticipant } from '../services/room.service.js'
 import { env } from '../config/env.js'
+import { isAllowedOrigin } from '../config/cors.js'
 import { logger } from '../config/logger.js'
 
 const joinSchema = z.object({
@@ -37,7 +38,10 @@ async function roster(io, roomId) {
 export function createSocketServer(httpServer) {
   const io = new SocketServer(httpServer, {
     path: '/socket.io',
-    cors: { origin: env.CORS_ORIGIN, credentials: true },
+    cors: {
+      origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+      credentials: true,
+    },
   })
 
   io.use((socket, next) => {
