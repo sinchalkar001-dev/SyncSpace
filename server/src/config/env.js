@@ -76,6 +76,15 @@ const schema = z
     PERSIST_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(2000),
     PERSIST_MAX_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(10000),
 
+    // Running a room's buffer executes a real program on this machine. There
+    // is no sandbox around it, so it is worth switching off anywhere the
+    // people in a room are not people you trust.
+    ALLOW_CODE_EXECUTION: booleanish.default('true'),
+    RUN_TIMEOUT_MS: z.coerce.number().int().positive().max(60000).default(5000),
+    RUN_OUTPUT_LIMIT: z.coerce.number().int().positive().default(65536),
+    RUN_MAX_CONCURRENT: z.coerce.number().int().positive().default(4),
+    RUN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
 

@@ -36,6 +36,7 @@ const ICONS = {
     filled: true,
   },
 
+  play: { d: 'M6.5 4.2 L19.5 12 L6.5 19.8 Z', filled: true },
   plus: { d: 'M12 5 V19 M5 12 H19' },
   minus: { d: 'M5 12 H19' },
   chevronDown: { d: 'M5 9 L12 16 L19 9' },

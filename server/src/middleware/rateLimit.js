@@ -33,6 +33,13 @@ export function createRateLimiters() {
       max: env.INVITE_RATE_LIMIT_MAX,
       message: 'Too many invites sent, try again later',
     }),
+
+    /** Each run costs a process; far cheaper to refuse than to fork. */
+    runLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.RUN_RATE_LIMIT_MAX,
+      message: 'Too many runs from this address, try again later',
+    }),
   }
 
   // Credential endpoints share one window but each has its own budget, so a

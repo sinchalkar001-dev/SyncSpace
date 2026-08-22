@@ -5,6 +5,7 @@ import { createApp } from './app.js'
 import { createHocuspocus } from './collab/hocuspocus.js'
 import { setHocuspocus } from './collab/registry.js'
 import { createSocketServer } from './realtime/socket.js'
+import { setIo } from './realtime/registry.js'
 import { connectDatabase, disconnectDatabase } from './db/connect.js'
 import { env } from './config/env.js'
 import { isAllowedOrigin } from './config/cors.js'
@@ -26,6 +27,7 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
   const hocuspocus = createHocuspocus()
   setHocuspocus(hocuspocus)
   const io = createSocketServer(httpServer)
+  setIo(io)
   const wss = new WebSocketServer({ noServer: true })
 
   httpServer.on('upgrade', (request, socket, head) => {
@@ -76,6 +78,7 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
     closing = (async () => {
       logger.info('shutting down')
       io.close()
+      setIo(null)
       await hocuspocus.destroy()
       setHocuspocus(null)
       wss.close()

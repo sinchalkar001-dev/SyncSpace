@@ -3,8 +3,10 @@ import Editor from '@monaco-editor/react'
 import { MonacoBinding } from 'y-monaco'
 import { useUIStore } from '../../store/uiStore.js'
 import { Icon } from '../ui/Icon.jsx'
+import { Spinner } from '../ui/Spinner.jsx'
 import { LanguagePicker } from './LanguagePicker.jsx'
 import { EditorStatusBar } from './EditorStatusBar.jsx'
+import { RunPanel } from './RunPanel.jsx'
 
 const TAB_SIZE = 2
 
@@ -44,7 +46,14 @@ function remoteSelectionCss(peers) {
     .join('\n')
 }
 
-export function CodeEditor({ yText, provider, peers, status = 'connecting', synced = false }) {
+export function CodeEditor({
+  yText,
+  provider,
+  peers,
+  status = 'connecting',
+  synced = false,
+  runner,
+}) {
   const bindingRef = useRef(null)
   const editorRef = useRef(null)
 
@@ -56,6 +65,9 @@ export function CodeEditor({ yText, provider, peers, status = 'connecting', sync
 
   const [position, setPosition] = useState({ line: 1, column: 1, selected: 0 })
   const [empty, setEmpty] = useState(true)
+  const [consoleOpen, setConsoleOpen] = useState(false)
+  const [stdinOpen, setStdinOpen] = useState(false)
+  const [stdin, setStdin] = useState('')
 
   const options = useMemo(
     () => ({
@@ -125,6 +137,52 @@ export function CodeEditor({ yText, provider, peers, status = 'connecting', sync
     editorRef.current?.getAction('actions.find')?.run()
   }, [])
 
+  // blocker() answers null when the language can run, so this cannot be a ??
+  // — that would read "nothing is wrong" as a reason to disable the button.
+  const blocker = runner ? runner.blocker(language) : 'Running code is unavailable'
+  const running = runner?.status === 'running'
+
+  const run = useCallback(() => {
+    if (!runner || blocker || running) return
+
+    // The editor's own model, not the Yjs text: they agree, but this is the
+    // copy the person pressing Run is looking at.
+    const code = editorRef.current?.getValue() ?? ''
+    if (!code.trim()) return
+
+    setConsoleOpen(true)
+    runner.start({ language, code, stdin })
+  }, [runner, blocker, running, language, stdin])
+
+  // Somebody else's run opens the console too, so output never lands unseen.
+  useEffect(() => {
+    if (runner?.result) setConsoleOpen(true)
+  }, [runner?.result])
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return
+      event.preventDefault()
+      run()
+    }
+
+    // Capture phase: Monaco handles keys on its own textarea and stops them
+    // travelling, so a bubbling listener never hears Ctrl+Enter typed in code.
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [run])
+
+  // Somewhere else asked for a run — the command palette, say. Held in a ref
+  // so a changed buffer or language does not count as a fresh request.
+  const runRef = useRef(run)
+  useEffect(() => {
+    runRef.current = run
+  }, [run])
+
+  useEffect(() => {
+    if (runner?.requestId) runRef.current()
+  }, [runner?.requestId])
+
   const css = useMemo(() => remoteSelectionCss(peers), [peers])
   const expanded = paneMode === 'code'
 
@@ -135,6 +193,32 @@ export function CodeEditor({ yText, provider, peers, status = 'connecting', sync
         <LanguagePicker />
 
         <span className="pane__spacer" />
+
+        {runner && (
+          <>
+            <button
+              type="button"
+              className={'runbtn' + (running ? ' is-busy' : '')}
+              onClick={run}
+              disabled={Boolean(blocker) || running}
+              title={blocker || 'Run this code (Ctrl+Enter)'}
+            >
+              {running ? <Spinner /> : <Icon name="play" size={13} />}
+              {running ? 'Running' : 'Run'}
+            </button>
+
+            <button
+              type="button"
+              className={'panebtn' + (stdinOpen ? ' is-active' : '')}
+              onClick={() => setStdinOpen((value) => !value)}
+              aria-pressed={stdinOpen}
+              title="Input given to the program"
+              aria-label="Program input"
+            >
+              <Icon name="inbox" size={14} />
+            </button>
+          </>
+        )}
 
         <button type="button" className="panebtn" onClick={find} title="Find (Ctrl+F)" aria-label="Find">
           <Icon name="search" size={14} />
@@ -201,6 +285,30 @@ export function CodeEditor({ yText, provider, peers, status = 'connecting', sync
           </div>
         )}
       </div>
+
+      {stdinOpen && runner && (
+        <label className="stdin">
+          <span className="stdin__label">Input</span>
+          <textarea
+            className="stdin__field"
+            value={stdin}
+            onChange={(event) => setStdin(event.target.value)}
+            placeholder="Typed into the program's standard input"
+            rows={2}
+            spellCheck={false}
+          />
+        </label>
+      )}
+
+      {consoleOpen && runner && (
+        <RunPanel
+          status={runner.status}
+          result={runner.result}
+          error={runner.error}
+          onClear={runner.clear}
+          onClose={() => setConsoleOpen(false)}
+        />
+      )}
 
       <EditorStatusBar
         position={position}

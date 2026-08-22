@@ -12,6 +12,7 @@ const GROUPS = [
     items: [
       ['Ctrl K', 'Command palette'],
       ['?', 'This panel'],
+      ['Ctrl Enter', 'Run the code'],
       ['Ctrl F', 'Find in code'],
       ['Ctrl S', 'Nothing — every edit is already saved'],
     ],
