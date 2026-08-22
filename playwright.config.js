@@ -34,6 +34,11 @@ export default defineConfig({
       env: {
         AUTH_RATE_LIMIT_REGISTER_MAX: '500',
         AUTH_RATE_LIMIT_LOGIN_MAX: '500',
+        // The suite runs the client on 5180, not the 5173 the server allows by
+        // default. Vite proxies the API and the sockets but forwards the
+        // browser's Origin as it is, so the collab upgrade is refused without
+        // this and every room test fails at "Connected".
+        CORS_ORIGIN: CLIENT,
       },
     },
     {
