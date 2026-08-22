@@ -74,6 +74,11 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   }
 }
 
+/** jsdom has no layout, so scrolling an element into view is a no-op here. */
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => {}
+}
+
 afterEach(() => {
   cleanup()
   storage.clear()

@@ -281,36 +281,6 @@
   letter-spacing: var(--tracking-wider);
 }
 
-.pane__control {
-  margin-left: auto;
-}
-
-.pane__control select {
-  min-height: 28px;
-  padding: 0 26px 0 var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  outline: none;
-  cursor: pointer;
-  font-size: var(--text-sm);
-  appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 13px) 52%, calc(100% - 9px) 52%;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
-  transition: background-color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-
-.pane__control select:hover {
-  border-color: var(--border);
-  background-color: var(--surface-2);
-  color: var(--text);
-}
-
 /* ---------- canvas ---------- */
 
 /* Static by contract — see the geometry warning at the top of this file. */
@@ -510,6 +480,7 @@
 /* ---------- editor ---------- */
 
 .editor-host {
+  position: relative;
   flex: 1;
   min-height: 0;
 }
@@ -562,4 +533,17 @@
   gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: center;
+}
+
+/* Collapsed panes. display:none rather than a zero-width column: both Monaco
+   and the Konva stage measure themselves, and a 0px box makes them lay out at
+   zero and then need coaxing back. Hidden entirely, each re-measures cleanly
+   from its ResizeObserver when it returns. */
+@media (min-width: 720px) {
+  .split[data-mode='board'] .pane--editor,
+  .split[data-mode='code'] .pane--board,
+  .split[data-mode='board'] .split__handle,
+  .split[data-mode='code'] .split__handle {
+    display: none;
+  }
 }

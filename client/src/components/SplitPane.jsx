@@ -23,11 +23,15 @@ const PANES = [
  * instance on every switch, losing undo history and scroll position.
  *
  * Which pane is hidden is decided in CSS from `data-pane`, so neither child
- * component needs to know this mode exists.
+ * component needs to know this mode exists. The desktop collapse (`data-mode`)
+ * is deliberately not applied at this width: a stored 'code' mode would
+ * otherwise hide the board on a phone with no visible way back.
  */
 export function SplitPane({ left, right, id }) {
   const ratio = useUIStore((s) => s.splitRatio)
   const setRatio = useUIStore((s) => s.setSplitRatio)
+  // Desktop collapse: 'split' shows both, 'board' or 'code' gives one the room.
+  const paneMode = useUIStore((s) => s.paneMode)
   const frameRef = useRef(null)
   const draggingRef = useRef(false)
 
@@ -68,7 +72,12 @@ export function SplitPane({ left, right, id }) {
     [ratio, setRatio]
   )
 
-  const columns = (ratio * 100).toFixed(2) + '% 6px 1fr'
+  const columns =
+    paneMode === 'board'
+      ? '1fr 0 0'
+      : paneMode === 'code'
+        ? '0 0 1fr'
+        : (ratio * 100).toFixed(2) + '% 6px 1fr' 
 
   return (
     <div
@@ -77,6 +86,7 @@ export function SplitPane({ left, right, id }) {
       ref={frameRef}
       style={{ gridTemplateColumns: columns }}
       data-pane={pane}
+      data-mode={paneMode}
     >
       {/* Hidden by CSS above 720px, so it costs nothing on desktop. */}
       <div className="split__switch">
