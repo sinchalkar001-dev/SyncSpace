@@ -16,8 +16,12 @@ import { logger } from '../config/logger.js'
  *
  * The sequence counter is per-process. That is correct for a single node;
  * going multi-node means moving it to Redis alongside the Hocuspocus Redis
- * extension.
+ * extension. Until then the unique index on (roomId, seq) is the authority:
+ * a collision is caught and the counter re-derived from the log.
  */
+const DUPLICATE_KEY = 11000
+const SEQ_ATTEMPTS = 5
+
 export class MongoPersistence {
   constructor() {
     this.sequences = new Map()
@@ -27,6 +31,12 @@ export class MongoPersistence {
     const next = this.sequences.get(roomId) ?? 1
     this.sequences.set(roomId, next + 1)
     return next
+  }
+
+  /** Re-reads the high-water mark, for when the in-memory counter is behind. */
+  async syncSeq(roomId) {
+    const last = await DocUpdate.findOne({ roomId }).sort({ seq: -1 }).select({ seq: 1 }).lean()
+    this.sequences.set(roomId, (last?.seq ?? 0) + 1)
   }
 
   async onLoadDocument({ documentName, document }) {
@@ -58,19 +68,53 @@ export class MongoPersistence {
     // Mutating `document` is enough; returning it would re-apply its own state.
   }
 
-  async onChange({ documentName, update, context }) {
-    if (!env.PERSIST_UPDATE_LOG) return
+  async appendUpdate({ documentName, update, context }) {
+    for (let attempt = 1; attempt <= SEQ_ATTEMPTS; attempt += 1) {
+      try {
+        return await DocUpdate.create({
+          roomId: documentName,
+          seq: this.nextSeq(documentName),
+          update: Buffer.from(update),
+          actor: context?.user?.id ?? null,
+          size: update.byteLength,
+        })
+      } catch (error) {
+        if (error?.code !== DUPLICATE_KEY) throw error
+        // The slot was taken — by a reconnect that reset the counter, or by a
+        // second process. Take the log's word for where the end is and retry.
+        await this.syncSeq(documentName)
+      }
+    }
 
-    await DocUpdate.create({
-      roomId: documentName,
-      seq: this.nextSeq(documentName),
-      update: Buffer.from(update),
-      actor: context?.user?.id ?? null,
-      size: update.byteLength,
-    })
+    throw new Error('could not allocate a sequence number for ' + documentName)
   }
 
-  async onStoreDocument({ documentName, document }) {
+  async onChange(payload) {
+    if (!env.PERSIST_UPDATE_LOG) return
+
+    try {
+      await this.appendUpdate(payload)
+    } catch (error) {
+      // Hocuspocus rethrows whatever this hook rejects with, which Node turns
+      // into an unhandled rejection and a dead process — one failed insert
+      // would disconnect every room on the server. The log is a convenience
+      // (the snapshot still carries the document), so this is logged and the
+      // session carries on.
+      logger.error({ err: error, room: payload.documentName }, 'update log append failed')
+    }
+  }
+
+  async onStoreDocument(payload) {
+    // Same reasoning as onChange: a storage failure must not take the process
+    // with it. The next debounced store will try again.
+    try {
+      await this.storeDocument(payload)
+    } catch (error) {
+      logger.error({ err: error, room: payload.documentName }, 'snapshot store failed')
+    }
+  }
+
+  async storeDocument({ documentName, document }) {
     const state = Buffer.from(Y.encodeStateAsUpdate(document))
     const seq = (this.sequences.get(documentName) ?? 1) - 1
 
@@ -84,7 +128,13 @@ export class MongoPersistence {
     logger.debug({ room: documentName, bytes: state.byteLength, seq }, 'snapshot stored')
   }
 
-  async onDisconnect({ documentName, clientsCount }) {
-    if (clientsCount === 0) this.sequences.delete(documentName)
+  /**
+   * Counters are dropped when the document leaves memory, not when the last
+   * client disconnects: Hocuspocus keeps writing an emptied room's pending
+   * updates, and a counter cleared underneath those restarted numbering at 1
+   * and collided with rows already in the log.
+   */
+  async afterUnloadDocument({ documentName }) {
+    this.sequences.delete(documentName)
   }
 }
