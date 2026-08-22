@@ -85,6 +85,18 @@
   }
 }
 
+/* The console arriving from the bottom of the code pane. */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Drains left to right for the lifetime of a toast. */
 @keyframes toast-timer {
   from {

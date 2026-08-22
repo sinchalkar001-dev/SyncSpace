@@ -5,6 +5,7 @@ import { colorFor } from '../lib/identity.js'
 import { useUIStore } from '../store/uiStore.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
+import { useCodeRunner } from '../hooks/useCodeRunner.js'
 import { useAwareness } from '../hooks/useAwareness.js'
 import { useRoomSocket } from '../hooks/useRoomSocket.js'
 import { useToast } from '../components/ui/useToast.js'
@@ -78,7 +79,11 @@ export default function Room() {
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
   const { peers, self } = useAwareness(session?.provider)
-  useRoomSocket(roomId, identity)
+  const runner = useCodeRunner(roomId, identity?.name)
+
+  // Runs are announced to the whole room, so the console shows everyone's.
+  const socketHandlers = useMemo(() => ({ 'code:run': runner.receive }), [runner.receive])
+  useRoomSocket(roomId, identity, socketHandlers)
 
   // A dropped connection is worth telling the user about; a restored one too.
   const previousStatus = useRef(status)
@@ -170,6 +175,18 @@ export default function Room() {
 
     list.push(
       {
+        id: 'run:code',
+        group: 'Editor',
+        icon: 'play',
+        title: 'Run the code',
+        keywords: 'execute output console',
+        hint: 'Ctrl ⏎',
+        detail: runner.blocker(language) ? 'unavailable' : undefined,
+        // Only the editor knows the current buffer, so this asks it to run
+        // rather than trying to run anything itself.
+        run: runner.request,
+      },
+      {
         id: 'editor:wordWrap',
         group: 'Editor',
         icon: 'text',
@@ -240,6 +257,7 @@ export default function Room() {
 
     return list
   }, [
+    runner,
     paneMode,
     setPaneMode,
     setTool,
@@ -347,6 +365,7 @@ export default function Room() {
               peers={peers}
               status={status}
               synced={synced}
+              runner={runner}
             />
           }
         />

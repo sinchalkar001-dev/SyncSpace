@@ -70,4 +70,11 @@ export const api = {
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'PATCH', body: patch }),
   deleteRoom: (roomId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' }),
+
+  /** What this server can run, and whether running is switched on at all. */
+  runners: (signal) => apiFetch('/runners', { signal }),
+
+  /** Runs a program and resolves with its output; a crash is a result, not a throw. */
+  run: (roomId, body, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/run', { method: 'POST', body, signal }),
 }

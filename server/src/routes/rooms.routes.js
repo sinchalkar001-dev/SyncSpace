@@ -6,6 +6,7 @@ import {
   canAccess,
   createRoom,
   deleteRoom,
+  ensureRoom,
   getRoom,
   inviteMember,
   listPeople,
@@ -13,6 +14,8 @@ import {
   updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
+import { runCode } from '../services/runner.service.js'
+import { getIo } from '../realtime/registry.js'
 import { env } from '../config/env.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
 import { badRequest, forbidden } from '../errors.js'
@@ -30,6 +33,23 @@ const updateSchema = z
   .refine((value) => value.name !== undefined || value.isPublic !== undefined, {
     message: 'provide a name or isPublic',
   })
+
+/**
+ * A program and its input. The code cap is well under the body limit, and
+ * generous next to anything anyone types into a shared editor.
+ */
+const runSchema = z.object({
+  language: z.string().trim().min(1).max(32),
+  code: z.string().max(100000),
+  stdin: z.string().max(10000).optional(),
+  // Echoed back in the broadcast so a client can recognise its own run and
+  // not show the same output twice.
+  runId: z.string().max(64).optional(),
+  // A guest's display name, so a shared console can say who ran what. Ignored
+  // for signed-in callers, whose name comes from their token — exactly how the
+  // socket layer treats a claimed name on join.
+  as: z.string().trim().max(32).optional(),
+})
 
 const inviteSchema = z.object({
   userId: z.string().regex(/^[a-f\d]{24}$/i, 'must be a user id'),
@@ -59,7 +79,7 @@ async function loadRosterRoom(req) {
 
 export function createRoomsRouter() {
   const roomsRouter = Router()
-  const { inviteLimiter } = createRateLimiters()
+  const { inviteLimiter, runLimiter } = createRateLimiters()
 
   roomsRouter.post('/', requireAuth, validate(createSchema), async (req, res, next) => {
     try {
@@ -167,6 +187,62 @@ export function createRoomsRouter() {
       next(err)
     }
   })
+
+  /**
+   * Runs the code a client sends and answers with what it printed.
+   *
+   * The code travels in the request rather than being read from the room's
+   * document, because the person pressing Run is looking at their own local
+   * copy of the buffer. Taking the server's copy could run something a
+   * keystroke older, and confusion about which version ran is worse than the
+   * few kilobytes.
+   */
+  roomsRouter.post(
+    '/:roomId/run',
+    optionalAuth,
+    runLimiter,
+    validate(runSchema),
+    async (req, res, next) => {
+      try {
+        // ensureRoom, not getRoom: a room typed straight into the address bar
+        // exists as a live document before anything is written about it, and
+        // "Room not found" on the first Run of a brand new room is nonsense.
+        // The socket layer treats a join the same way.
+        const room = await ensureRoom(req.params.roomId)
+        if (!canAccess(room, req.user?.id)) {
+          throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        const run = await runCode({
+          language: req.body.language,
+          code: req.body.code,
+          stdin: req.body.stdin,
+        })
+
+        const by = req.user
+          ? { id: req.user.id, name: req.user.name }
+          : req.body.as
+            ? { id: null, name: req.body.as }
+            : null
+
+        // Everyone in the room sees the result, not only whoever pressed Run:
+        // a shared buffer with a private console would leave people guessing
+        // why the code they are looking at just changed.
+        getIo()
+          ?.to(req.params.roomId)
+          .emit('code:run', {
+            roomId: req.params.roomId,
+            runId: req.body.runId ?? null,
+            by,
+            run,
+          })
+
+        res.json({ run })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
 
   return roomsRouter
 }

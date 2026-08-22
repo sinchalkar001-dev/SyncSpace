@@ -113,6 +113,8 @@ than one node means moving it to Redis alongside `@hocuspocus/extension-redis`.
 | Straight runs | Hold `Shift` while dragging a line or arrow to lock it to 45 degree steps |
 | Who drew this | Hover any shape with the select tool — it names the author and when they drew it |
 | Delete selection | `Delete` or `Backspace` |
+| Run the code | `Ctrl+Enter`, or the Run button in the code pane |
+| Everything else | `Ctrl+K` for the command palette, `?` for the shortcut list |
 | Zoom | Wheel, anchored at the pointer · reset from the zoom pill |
 | Pan | Drag with the select tool |
 
@@ -126,6 +128,47 @@ nothing in the app depends on `window.prompt` or `window.confirm`.
 
 Editing while disconnected is allowed on purpose: Yjs queues local changes and merges them on
 reconnect. The header shows connection state and a toast reports drops and recoveries.
+
+## Running code
+
+The code pane has a Run button (`Ctrl+Enter`). The server writes the buffer to a throwaway
+directory, runs it, and answers with stdout, stderr, the exit code and how long it took. Output
+appears in a console under the editor, and the result is broadcast to everyone in the room — a
+shared buffer with a private console leaves people guessing why the code they are reading just
+printed something.
+
+An `Input` box beside the button is piped to the program's standard input, which is enough for the
+usual read-a-line exercises.
+
+| Language | Needs | How it runs |
+| --- | --- | --- |
+| JavaScript | Node.js | `node main.js` |
+| TypeScript | Node.js | Types are stripped, not checked |
+| Python | Python 3 | `python -u main.py` |
+| Java | JDK 11+ | Single-file source mode, class `Main` |
+| C++ | g++ | Compiled with `-std=c++17`, then run |
+| Go | Go | `go run main.go` |
+| Rust | rustc | Compiled, then run |
+
+Whatever is not installed is reported as unavailable and its Run button says so rather than
+failing when pressed. Languages with nothing to execute — SQL, JSON, HTML, CSS, Markdown — can
+still be written and shared.
+
+**This runs real programs on the machine hosting the server.** There is no container and no
+syscall filter, so the protections are the ones a single process can enforce: a fresh working
+directory per run, an environment scrubbed down to a toolchain whitelist (a program cannot read
+`MONGODB_URI` or `JWT_SECRET`), a wall-clock timeout that kills the whole process tree, a cap on
+captured output, a ceiling on concurrent runs, and a rate limit. Access is the room's: only
+someone who can open a room can run its code. Anywhere the people in a room are not people you
+trust, set `ALLOW_CODE_EXECUTION=false`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ALLOW_CODE_EXECUTION` | `true` | Turns running off entirely |
+| `RUN_TIMEOUT_MS` | `5000` | Wall clock per run; compiles get twice this |
+| `RUN_OUTPUT_LIMIT` | `65536` | Bytes of stdout and stderr kept |
+| `RUN_MAX_CONCURRENT` | `4` | Programs allowed to run at once |
+| `RUN_RATE_LIMIT_MAX` | `60` | Runs per IP per window |
 
 ## Interface
 
@@ -168,6 +211,8 @@ tests flake. Both rules are commented where they apply, in
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
 | `GET` | `/api/rooms/:roomId/replay` | Timeline metadata |
 | `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
+| `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
+| `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
 
 ## Layout
 

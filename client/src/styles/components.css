@@ -1674,3 +1674,191 @@
 .shortcuts__sep {
   color: var(--text-faint);
 }
+
+/* ---------- run button and console ---------- */
+
+.runbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  flex: none;
+  border: 1px solid rgba(95, 208, 138, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(95, 208, 138, 0.12);
+  color: var(--ok);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+.runbtn:hover:not(:disabled) {
+  background: rgba(95, 208, 138, 0.2);
+  border-color: rgba(95, 208, 138, 0.55);
+}
+
+.runbtn:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* Busy is a state, not a disabled control: it keeps its colour. */
+.runbtn.is-busy {
+  color: var(--text-dim);
+}
+
+.runbtn .spinner__ring {
+  width: 11px;
+  height: 11px;
+  border-width: 1.6px;
+}
+
+.stdin {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.stdin__label {
+  padding-top: 5px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.stdin__field {
+  flex: 1;
+  min-width: 0;
+  padding: 5px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  resize: vertical;
+  outline: none;
+}
+
+.stdin__field:focus {
+  border-color: var(--accent);
+}
+
+/* The console keeps a third of the pane at most: the code is still the
+   point, and output that pushes the editor off screen helps nobody. */
+.runpanel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 34%;
+  min-height: 96px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  animation: slide-up var(--dur) var(--ease-out) both;
+}
+
+.runpanel__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  height: 30px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+
+.runpanel__title {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+}
+
+.runpanel__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.runpanel__state--ok {
+  color: var(--ok);
+}
+
+.runpanel__state--warn {
+  color: var(--warn);
+}
+
+.runpanel__state--danger {
+  color: var(--danger);
+}
+
+.runpanel__state--busy {
+  color: var(--text-dim);
+}
+
+.runpanel__state--busy .spinner__ring {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+}
+
+.runpanel__author,
+.runpanel__note {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.runpanel__note {
+  color: var(--warn);
+}
+
+.runpanel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  overflow: auto;
+  outline: none;
+}
+
+.runpanel__out {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runpanel__out--err {
+  color: var(--danger);
+}
+
+.runpanel__empty,
+.runpanel__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+.runpanel__error {
+  color: var(--danger);
+}
