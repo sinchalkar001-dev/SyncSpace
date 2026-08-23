@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { User } from '../models/User.js'
-import { badRequest } from '../errors.js'
+import { badRequest, conflict, notFound } from '../errors.js'
+import { env } from '../config/env.js'
+import { sendVerificationEmail as sendMessage } from './email.service.js'
 
 // Verification links should be used promptly; 24h is the usual balance.
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
@@ -23,6 +25,43 @@ export async function issueVerificationToken(user) {
   await user.save()
 
   return raw
+}
+
+/** The one link that proves control of the address. */
+function confirmLink(raw) {
+  return env.CLIENT_URL + '/verify-email?token=' + raw
+}
+
+/**
+ * Hands the confirm link to the email service. `sendMessage` never throws —
+ * a relay outage is answered by the user pressing "resend", not by failing
+ * registration — and with no SMTP configured it logs the message, which
+ * keeps development and tests working without credentials.
+ */
+async function deliverVerificationLink(email, raw) {
+  await sendMessage(email, { url: confirmLink(raw) })
+}
+
+/** Issues a fresh token for `user` and hands the confirm link to the mailer. */
+export async function sendVerificationEmail(user) {
+  const raw = await issueVerificationToken(user)
+  deliverVerificationLink(user.email, raw)
+}
+
+/**
+ * Re-issues the verification email for the signed-in account. Refuses
+ * `already_verified` rather than silently succeeding, so a client stuck on
+ * the "check your inbox" screen learns it can move on.
+ */
+export async function resendVerification(userId) {
+  const user = await User.findById(userId)
+  if (!user) throw notFound('User not found', 'user_not_found')
+  if (user.emailVerified) throw conflict('This account is already verified', 'already_verified')
+
+  await sendVerificationEmail(user)
+  // `sent` means processed, not proven delivered — reporting provider
+  // outages here would let outsiders probe the mail setup.
+  return { sent: true }
 }
 
 /**

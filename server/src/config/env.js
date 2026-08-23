@@ -61,6 +61,12 @@ const schema = z
     JWT_SECRET: z.string().min(32).optional(),
     JWT_EXPIRES_IN: z.string().default('7d'),
 
+    // Outbound email. Unset means verification links are logged instead of
+    // sent — enough for development; production sets a real relay.
+    SMTP_URL: z.string().optional(),
+    MAIL_FROM: z.string().optional(),
+    CLIENT_URL: z.string().optional(),
+
     CORS_ORIGIN: origins.optional(),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
@@ -96,6 +102,11 @@ const schema = z
     AUTH_RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(10),
     AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX: z.coerce.number().int().positive().default(10),
 
+    // Confirming guesses tokens, resending hands out emails; both get their
+    // own tight budgets inside the shared auth window.
+    AUTH_RATE_LIMIT_VERIFY_MAX: z.coerce.number().int().positive().default(10),
+    AUTH_RATE_LIMIT_RESEND_MAX: z.coerce.number().int().positive().default(5),
+
     // Invites grant room access, so cap them well below the general budget
     // while leaving normal collaboration untouched.
     INVITE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
@@ -126,6 +137,62 @@ const schema = z
       })
     }
   })
+  .superRefine((value, ctx) => {
+    // The mail relay is a URL that carries credentials, so it is parsed here
+    // rather than trusted: a typo fails at boot with a readable report
+    // instead of at first send inside nodemailer internals.
+    if (value.SMTP_URL) {
+      let relay
+      try {
+        relay = new URL(value.SMTP_URL)
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SMTP_URL'],
+          message: 'SMTP_URL must be a URL (smtp://host[:port] or smtps://user:pass@host[:port])',
+        })
+        relay = null
+      }
+      if (relay && relay.protocol !== 'smtp:' && relay.protocol !== 'smtps:') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SMTP_URL'],
+          message: 'SMTP_URL must use the smtp: or smtps: scheme',
+        })
+      }
+      if (relay && !value.MAIL_FROM) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['MAIL_FROM'],
+          message: 'MAIL_FROM is required when SMTP_URL is set',
+        })
+      }
+    }
+
+    // Where emailed links point. Optional because it defaults to the first
+    // allowed origin — usually the same app.
+    if (value.CLIENT_URL) {
+      let link
+      try {
+        link = new URL(value.CLIENT_URL)
+      } catch {
+        link = null
+      }
+      if (
+        !link ||
+        (link.protocol !== 'http:' && link.protocol !== 'https:') ||
+        link.pathname !== '/' ||
+        link.search ||
+        link.hash
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CLIENT_URL'],
+          message: 'CLIENT_URL must be scheme://host[:port] without a path',
+        })
+      }
+    }
+  })
 
 const DEV_SECRET = 'syncspace-development-secret-do-not-use-in-production'
 
@@ -143,10 +210,15 @@ export function loadEnv(source = process.env) {
     throw new Error('Invalid environment configuration:\n' + details)
   }
 
+  const corsOrigin = parsed.data.CORS_ORIGIN ?? DEV_ORIGINS
+
   return {
     ...parsed.data,
     JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET,
-    CORS_ORIGIN: parsed.data.CORS_ORIGIN ?? DEV_ORIGINS,
+    CORS_ORIGIN: corsOrigin,
+    // Emailed links land on the client; the first allowed origin is the same
+    // app in every deployment we run.
+    CLIENT_URL: parsed.data.CLIENT_URL || corsOrigin[0],
   }
 }
 
