@@ -202,6 +202,8 @@ tests flake. Both rules are commented where they apply, in
 | `POST` | `/api/auth/register` · `/login` | Returns `{ user, token }` |
 | `GET` | `/api/auth/me` | Requires bearer token |
 | `POST` | `/api/auth/change-password` | Requires bearer token; from the account menu |
+| `POST` | `/api/auth/verify-email` | Confirms the address with the emailed token; returns `{ user }` |
+| `POST` | `/api/auth/resend-verification` | Requires bearer token; re-issues the email unless already verified |
 | `POST` | `/api/rooms` | Creates a private room |
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
@@ -235,7 +237,7 @@ client/src
 server/src
 ├── config/       env.js (zod-validated), cors.js (shared origin policy), logger.js
 ├── models/       User, Room, Snapshot, DocUpdate (append-only)
-├── services/     auth, room, replay
+├── services/       auth, room, replay, verification
 ├── routes/       auth.routes.js, rooms.routes.js
 ├── middleware/   auth, validate, error
 ├── collab/       hocuspocus.js, persistence.js
@@ -246,7 +248,7 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 102 tests
+npm test                      # server, 147 tests
 npm test --workspace client   # client, 42 tests
 npm run test:e2e              # browser, two real tabs, 3 tests
 ```

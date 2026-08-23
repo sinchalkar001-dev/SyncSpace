@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { User } from '../models/User.js'
-import { badRequest } from '../errors.js'
+import { badRequest, conflict, notFound } from '../errors.js'
+import { isProduction } from '../config/env.js'
+import { logger } from '../config/logger.js'
 
 // Verification links should be used promptly; 24h is the usual balance.
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
@@ -23,6 +25,39 @@ export async function issueVerificationToken(user) {
   await user.save()
 
   return raw
+}
+
+/**
+ * Hands the confirm link to the user. No mailer is wired up yet, so outside
+ * production the link is logged — enough to complete the flow in development
+ * and tests. A real transport (SES, Postmark, …) replaces this one function.
+ */
+function deliverVerificationLink(email, raw) {
+  if (isProduction) {
+    logger.info({ email }, 'verification email queued')
+    return
+  }
+  logger.info({ email }, 'verification link: /api/v1/auth/verify-email?token=' + raw)
+}
+
+/** Issues a fresh token for `user` and hands the confirm link to the mailer. */
+export async function sendVerificationEmail(user) {
+  const raw = await issueVerificationToken(user)
+  deliverVerificationLink(user.email, raw)
+}
+
+/**
+ * Re-issues the verification email for the signed-in account. Refuses
+ * `already_verified` rather than silently succeeding, so a client stuck on
+ * the "check your inbox" screen learns it can move on.
+ */
+export async function resendVerification(userId) {
+  const user = await User.findById(userId)
+  if (!user) throw notFound('User not found', 'user_not_found')
+  if (user.emailVerified) throw conflict('This account is already verified', 'already_verified')
+
+  await sendVerificationEmail(user)
+  return { sent: true }
 }
 
 /**

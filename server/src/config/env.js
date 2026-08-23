@@ -96,6 +96,11 @@ const schema = z
     AUTH_RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(10),
     AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX: z.coerce.number().int().positive().default(10),
 
+    // Confirming guesses tokens, resending hands out emails; both get their
+    // own tight budgets inside the shared auth window.
+    AUTH_RATE_LIMIT_VERIFY_MAX: z.coerce.number().int().positive().default(10),
+    AUTH_RATE_LIMIT_RESEND_MAX: z.coerce.number().int().positive().default(5),
+
     // Invites grant room access, so cap them well below the general budget
     // while leaving normal collaboration untouched.
     INVITE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),

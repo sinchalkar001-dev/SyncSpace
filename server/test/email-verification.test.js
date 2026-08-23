@@ -16,11 +16,13 @@ const newUser = async () => {
 }
 
 describe('email verification model', () => {
-  it('starts every account unverified with no token outstanding', async () => {
+  it('starts every account unverified with a pending token outstanding', async () => {
     const user = await newUser()
     expect(user.emailVerified).toBe(false)
-    expect(user.verificationTokenHash).toBeNull()
     expect(user.emailVerifiedAt).toBeNull()
+    // Registration issues the first verification email, so a hash is pending.
+    expect(user.verificationTokenHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(user.verificationTokenExpiresAt.getTime()).toBeGreaterThan(Date.now())
   })
 
   it('never exposes the token hash through toPublic or toJSON', async () => {
