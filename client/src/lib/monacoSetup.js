@@ -45,18 +45,3 @@ monaco.editor.defineTheme('syncspace-dark', {
 })
 
 loader.config({ monaco })
-
-export const LANGUAGES = [
-  'javascript',
-  'typescript',
-  'python',
-  'java',
-  'cpp',
-  'go',
-  'rust',
-  'sql',
-  'json',
-  'html',
-  'css',
-  'markdown',
-]

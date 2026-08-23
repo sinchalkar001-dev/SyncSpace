@@ -7,6 +7,7 @@ import { Spinner } from '../ui/Spinner.jsx'
 import { LanguagePicker } from './LanguagePicker.jsx'
 import { EditorStatusBar } from './EditorStatusBar.jsx'
 import { RunPanel } from './RunPanel.jsx'
+import { hintFor } from '../../lib/runHints.js'
 
 const TAB_SIZE = 2
 
@@ -68,6 +69,7 @@ export function CodeEditor({
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [stdinOpen, setStdinOpen] = useState(false)
   const [stdin, setStdin] = useState('')
+  const stdinRef = useRef(null)
 
   const options = useMemo(
     () => ({
@@ -183,6 +185,17 @@ export function CodeEditor({
     if (runner?.requestId) runRef.current()
   }, [runner?.requestId])
 
+  // Opening the box is only half the job — the point is to type in it.
+  const openStdin = useCallback(() => {
+    setStdinOpen(true)
+    requestAnimationFrame(() => stdinRef.current?.focus())
+  }, [])
+
+  const hint = useMemo(
+    () => (runner ? hintFor(runner.result, stdin) : null),
+    [runner, stdin]
+  )
+
   const css = useMemo(() => remoteSelectionCss(peers), [peers])
   const expanded = paneMode === 'code'
 
@@ -207,15 +220,18 @@ export function CodeEditor({
               {running ? 'Running' : 'Run'}
             </button>
 
+            {/* Labelled, not an icon alone: a program that reads input fails
+                bafflingly without this, so it has to be findable first time. */}
             <button
               type="button"
-              className={'panebtn' + (stdinOpen ? ' is-active' : '')}
-              onClick={() => setStdinOpen((value) => !value)}
+              className={'inputbtn' + (stdinOpen ? ' is-active' : '')}
+              onClick={() => (stdinOpen ? setStdinOpen(false) : openStdin())}
               aria-pressed={stdinOpen}
-              title="Input given to the program"
-              aria-label="Program input"
+              title="Text handed to the program on standard input"
             >
               <Icon name="inbox" size={14} />
+              Input
+              {stdin.trim() && <span className="inputbtn__dot" aria-hidden="true" />}
             </button>
           </>
         )}
@@ -290,6 +306,7 @@ export function CodeEditor({
         <label className="stdin">
           <span className="stdin__label">Input</span>
           <textarea
+            ref={stdinRef}
             className="stdin__field"
             value={stdin}
             onChange={(event) => setStdin(event.target.value)}
@@ -305,6 +322,8 @@ export function CodeEditor({
           status={runner.status}
           result={runner.result}
           error={runner.error}
+          hint={hint}
+          onHintAction={openStdin}
           onClear={runner.clear}
           onClose={() => setConsoleOpen(false)}
         />

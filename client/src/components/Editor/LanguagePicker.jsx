@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LANGUAGES } from '../../lib/monacoSetup.js'
+import { LANGUAGES } from '../../lib/languages.js'
 import { useUIStore } from '../../store/uiStore.js'
 import { useDismissable } from '../../hooks/useDismissable.js'
 import { Icon } from '../ui/Icon.jsx'
+
+/**
+ * Ranks a search: the exact name first, then names that start with what was
+ * typed, then the rest.
+ *
+ * Without this, "java" listed javascript above java — first in the list and
+ * first for Enter — so asking for one language and being given another was a
+ * single keystroke away.
+ */
+const score = (name, needle) => (name === needle ? 0 : name.startsWith(needle) ? 1 : 2)
+
+const byRelevance = (needle) => (a, b) => score(a, needle) - score(b, needle)
 
 /** Only languages Monaco is actually configured for ever appear here. */
 export function LanguagePicker() {
@@ -29,7 +41,7 @@ export function LanguagePicker() {
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    const all = needle ? LANGUAGES.filter((name) => name.includes(needle)) : LANGUAGES
+    const all = needle ? LANGUAGES.filter((name) => name.includes(needle)).sort(byRelevance(needle)) : LANGUAGES
     if (needle) return all
 
     // No query: surface what this person actually uses, then the rest.

@@ -19,6 +19,17 @@ async function type(page, code) {
 
 const runButton = (page) => page.getByRole('button', { name: /^Run/ })
 
+/**
+ * Picks a language by its exact name. "java" also matches javascript, so the
+ * first row is not necessarily the language that was asked for.
+ */
+async function chooseLanguage(page, name) {
+  await page.locator('.langpicker__trigger').click()
+  await page.locator('.langpicker__search').fill(name)
+  await page.getByRole('option', { name, exact: true }).click()
+  await expect(page.locator('.langpicker__trigger')).toContainText(name)
+}
+
 test('runs a program and shows what it printed', async ({ page }) => {
   await openRoom(page)
   await type(page, 'console.log("hello from javascript")')
@@ -53,7 +64,7 @@ test('feeds the input box to the program', async ({ page }) => {
     ].join('\n')
   )
 
-  await page.getByRole('button', { name: 'Program input' }).click()
+  await page.getByRole('button', { name: 'Input' }).click()
   await page.locator('.stdin__field').fill('good morning')
 
   await runButton(page).click()
@@ -100,13 +111,61 @@ test('the console is shared: the room sees a run it did not start', async ({ bro
 test('says why a language cannot be run instead of failing on the press', async ({ page }) => {
   await openRoom(page)
 
-  await page.locator('.langpicker__trigger').click()
-  await page.locator('.langpicker__search').fill('markdown')
-  await page.locator('.langpicker__item').first().click()
+  await chooseLanguage(page, 'markdown')
 
   const button = runButton(page)
   await expect(button).toBeDisabled()
   await expect(button).toHaveAttribute('title', /not run/)
+})
+
+/**
+ * The Scanner case, which is how most people meet standard input: the program
+ * is correct, the input box was empty, and the only feedback used to be a
+ * stack trace about an exception in somebody else's code.
+ */
+test('points at the input box when a program runs out of input', async ({ page }) => {
+  const room = await openRoom(page)
+
+  const support = await page.request.get('/api/v1/runners').then((r) => r.json())
+  const java = support.languages.find((entry) => entry.language === 'java')
+  test.skip(!java?.available, 'no JDK on this machine')
+
+  await chooseLanguage(page, 'java')
+
+  await type(
+    page,
+    [
+      'import java.util.Scanner;',
+      'public class Main {',
+      'public static void main(String[] args) {',
+      'Scanner sc = new Scanner(System.in);',
+      'System.out.print("Enter first number: ");',
+      'int a = sc.nextInt();',
+      'System.out.print("Enter second number: ");',
+      'int b = sc.nextInt();',
+      'System.out.println("Sum = " + (a + b));',
+      'sc.close();',
+      '}',
+      '}',
+    ].join('\n')
+  )
+
+  await runButton(page).click()
+
+  const hint = page.locator('.runhint')
+  await expect(hint).toContainText('input box was empty')
+  await expect(page.locator('.runpanel__out--err')).toContainText('NoSuchElementException')
+
+  // The hint is the fix: it opens the box and puts the caret in it.
+  await hint.getByRole('button', { name: 'Add input' }).click()
+  await expect(page.locator('.stdin__field')).toBeFocused()
+  await page.keyboard.type('3\n4')
+
+  await runButton(page).click()
+
+  await expect(page.locator('.runpanel__out').first()).toContainText('Sum = 7')
+  await expect(page.locator('.runhint')).toHaveCount(0)
+  expect(room).toBeTruthy()
 })
 
 test('runs python when the server has it', async ({ page }) => {
@@ -116,9 +175,7 @@ test('runs python when the server has it', async ({ page }) => {
   const python = support.languages.find((entry) => entry.language === 'python')
   test.skip(!python?.available, 'no python on this machine')
 
-  await page.locator('.langpicker__trigger').click()
-  await page.locator('.langpicker__search').fill('python')
-  await page.locator('.langpicker__item').first().click()
+  await chooseLanguage(page, 'python')
 
   await type(page, 'print("hello from python")')
   await runButton(page).click()
