@@ -57,7 +57,11 @@ export function useCodeRunner(roomId, displayName) {
           { language, code, stdin, runId, as: displayName || undefined },
           inFlight.current.signal
         )
-        setResult({ ...payload.run, by: null, at: Date.now() })
+        // What was sent is part of the result. Judging a finished run by
+        // whatever the input box holds *now* means the moment someone acts on
+        // the advice, the advice disappears and the failure it explained is
+        // still on screen.
+        setResult({ ...payload.run, by: null, at: Date.now(), sentStdin: stdin })
       } catch (cause) {
         if (cause?.name === 'AbortError') return
         setError(cause?.message || 'Could not run this')

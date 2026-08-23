@@ -33,7 +33,17 @@ function verdict(result) {
  * buffer is shared: seeing "Priya ran this" next to output you did not ask
  * for is the difference between collaboration and a haunting.
  */
-export function RunPanel({ status, result, error, hint, onHintAction, onClear, onClose }) {
+export function RunPanel({
+  status,
+  result,
+  error,
+  hint,
+  stale,
+  onHintAction,
+  onRun,
+  onClear,
+  onClose,
+}) {
   const bodyRef = useRef(null)
 
   // A long program's tail is the interesting part.
@@ -93,6 +103,18 @@ export function RunPanel({ status, result, error, hint, onHintAction, onClear, o
       <div className="runpanel__body" ref={bodyRef} role="log" aria-live="polite" tabIndex={0}>
         {/* Above the output, not below it: the explanation is more use than
             the stack trace it is explaining. */}
+        {stale && (
+          <p className="runstale">
+            <Icon name="clock" size={13} />
+            <span>This is an older run — the code or input has changed since.</span>
+            {onRun && (
+              <button type="button" className="runstale__action" onClick={onRun}>
+                Run again
+              </button>
+            )}
+          </p>
+        )}
+
         {hint && status !== 'running' && (
           <p className="runhint">
             <Icon name="info" size={13} />
