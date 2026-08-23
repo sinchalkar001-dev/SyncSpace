@@ -80,6 +80,50 @@ describe('rate limiting', () => {
     expect(rooms.status).toBe(200)
   })
 
+  it('limits verification attempts without touching other endpoints', async () => {
+    await register(ALICE)
+    const bad = { token: 'b'.repeat(64) } // well-formed, so it reaches the limiter
+
+    for (let i = 0; i < env.AUTH_RATE_LIMIT_VERIFY_MAX; i += 1) {
+      const res = await request(app).post('/api/v1/auth/verify-email').send(bad)
+      expect(res.status).toBe(400)
+    }
+
+    const res = await request(app).post('/api/v1/auth/verify-email').send(bad)
+    expect(res.status).toBe(429)
+    expect(res.body.error.code).toBe('rate_limited')
+
+    // The exhausted verify budget must not bleed into everyday calls.
+    const carol = await register({ email: 'carol@syncspace.test', password: 'a-good-passphrase' })
+    const rooms = await request(app)
+      .get('/api/v1/rooms')
+      .set('Authorization', 'Bearer ' + carol.body.token)
+    expect(rooms.status).toBe(200)
+  })
+
+  it('limits resend requests separately from login and registration', async () => {
+    const { body } = await register(ALICE)
+
+    for (let i = 0; i < env.AUTH_RATE_LIMIT_RESEND_MAX; i += 1) {
+      const res = await request(app)
+        .post('/api/v1/auth/resend-verification')
+        .set('Authorization', 'Bearer ' + body.token)
+      expect(res.status).toBe(200)
+    }
+
+    const res = await request(app)
+      .post('/api/v1/auth/resend-verification')
+      .set('Authorization', 'Bearer ' + body.token)
+    expect(res.status).toBe(429)
+    expect(res.body.error.code).toBe('rate_limited')
+
+    // Login still works on its own budget.
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: ALICE.email, password: ALICE.password })
+    expect(login.status).toBe(200)
+  })
+
   it('keeps normal room operations well under their budget', async () => {
     const { body } = await register(ALICE)
     const auth = { Authorization: 'Bearer ' + body.token }

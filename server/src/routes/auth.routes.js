@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate.js'
 import { requireAuth } from '../middleware/auth.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
 import { changePassword, login, register } from '../services/auth.service.js'
+import { resendVerification, verifyEmail } from '../services/verification.service.js'
 import { User } from '../models/User.js'
 import { notFound } from '../errors.js'
 
@@ -18,9 +19,21 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(200),
 })
 
+// Tokens are 32 random bytes hex-encoded by issueVerificationToken; the shape
+// check rejects garbage before it can reach a database lookup.
+const verificationSchema = z.object({
+  token: z.string().regex(/^[0-9a-f]{64}$/, 'malformed verification token'),
+})
+
 export function createAuthRouter() {
   const authRouter = Router()
-  const { registerLimiter, loginLimiter, passwordChangeLimiter } = createRateLimiters()
+  const {
+    registerLimiter,
+    loginLimiter,
+    passwordChangeLimiter,
+    verifyLimiter,
+    resendVerificationLimiter,
+  } = createRateLimiters()
 
   authRouter.post('/register', registerLimiter, validate(credentials), async (req, res, next) => {
     try {
@@ -34,6 +47,16 @@ export function createAuthRouter() {
   authRouter.post('/login', loginLimiter, validate(credentials.omit({ name: true })), async (req, res, next) => {
     try {
       res.json(await login(req.body))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  // Public: the token itself proves control of the address.
+  authRouter.post('/verify-email', verifyLimiter, validate(verificationSchema), async (req, res, next) => {
+    try {
+      const user = await verifyEmail(req.body.token)
+      res.json({ user: user.toPublic() })
     } catch (err) {
       next(err)
     }
@@ -57,12 +80,21 @@ export function createAuthRouter() {
     async (req, res, next) => {
       try {
         const { currentPassword, newPassword } = req.body
-        res.json(await changePassword(req.user.id, currentPassword, newPassword))
-      } catch (err) {
-        next(err)
-      }
+      res.json(await changePassword(req.user.id, currentPassword, newPassword))
+    } catch (err) {
+      next(err)
     }
-  )
+  })
+
+  // Authenticated: re-sending needs to know which account, but must not leak
+  // whether an arbitrary address is registered.
+  authRouter.post('/resend-verification', requireAuth, resendVerificationLimiter, async (req, res, next) => {
+    try {
+      res.json(await resendVerification(req.user.id))
+    } catch (err) {
+      next(err)
+    }
+  })
 
   return authRouter
 }

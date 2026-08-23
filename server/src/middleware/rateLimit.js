@@ -57,5 +57,13 @@ export function createRateLimiters() {
       env.AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX,
       'Too many password changes, try again later'
     ),
+    verifyLimiter: auth(
+      env.AUTH_RATE_LIMIT_VERIFY_MAX,
+      'Too many verification attempts, try again later'
+    ),
+    resendVerificationLimiter: auth(
+      env.AUTH_RATE_LIMIT_RESEND_MAX,
+      'Too many verification emails requested, try again later'
+    ),
   }
 }
