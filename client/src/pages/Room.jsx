@@ -21,7 +21,7 @@ import { Whiteboard } from '../components/Whiteboard/Whiteboard.jsx'
 import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
 import { CommandPalette } from '../components/CommandPalette.jsx'
 import { ShortcutsPanel } from '../components/ShortcutsPanel.jsx'
-import { LANGUAGES } from '../lib/monacoSetup.js'
+import { LANGUAGES } from '../lib/languages.js'
 import { TOOLS } from '../store/uiStore.js'
 
 const VIEWS = [
