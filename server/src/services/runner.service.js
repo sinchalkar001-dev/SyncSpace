@@ -42,7 +42,10 @@ export const RECIPES = {
     // Node strips the types and runs the JavaScript underneath; no tsc, and
     // so no type checking either.
     run: () => ['node', ['--experimental-strip-types', 'main.ts']],
-    probe: ['node', ['--version']],
+    // Probing the flag rather than node itself: type stripping only exists
+    // from Node 22.6, and an older runtime would otherwise advertise every
+    // .ts buffer as runnable, then die on a confusing "bad option".
+    probe: ['node', ['--experimental-strip-types', '-e', '']],
     toolchain: 'Node.js',
   },
   python: {
