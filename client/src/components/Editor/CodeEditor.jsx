@@ -70,6 +70,11 @@ export function CodeEditor({
   const [stdinOpen, setStdinOpen] = useState(false)
   const [stdin, setStdin] = useState('')
   const stdinRef = useRef(null)
+  // Whether the buffer has been touched since the last run. A ref guards the
+  // state so a keystroke only re-renders the first time after each run,
+  // rather than on every character typed into a code editor.
+  const [editedSinceRun, setEditedSinceRun] = useState(false)
+  const editedRef = useRef(false)
 
   const options = useMemo(
     () => ({
@@ -118,7 +123,13 @@ export function CodeEditor({
 
       editor.onDidChangeCursorPosition(readPosition)
       editor.onDidChangeCursorSelection(readPosition)
-      model.onDidChangeContent(() => setEmpty(model.getValue().trim() === ''))
+      model.onDidChangeContent(() => {
+        setEmpty(model.getValue().trim() === '')
+        if (!editedRef.current) {
+          editedRef.current = true
+          setEditedSinceRun(true)
+        }
+      })
     },
     [yText, provider]
   )
@@ -153,6 +164,8 @@ export function CodeEditor({
     if (!code.trim()) return
 
     setConsoleOpen(true)
+    editedRef.current = false
+    setEditedSinceRun(false)
     runner.start({ language, code, stdin })
   }, [runner, blocker, running, language, stdin])
 
@@ -191,10 +204,20 @@ export function CodeEditor({
     requestAnimationFrame(() => stdinRef.current?.focus())
   }, [])
 
-  const hint = useMemo(
-    () => (runner ? hintFor(runner.result, stdin) : null),
-    [runner, stdin]
-  )
+  const hint = useMemo(() => (runner ? hintFor(runner.result) : null), [runner])
+
+  /**
+   * Whether the console is showing a run of something other than what is on
+   * screen now. Without this, a failure sits there looking current while the
+   * code or the input that caused it has already been changed — which is
+   * exactly how a fixed program still looks broken.
+   */
+  const result = runner?.result
+  const stale =
+    Boolean(result) &&
+    !result.by &&
+    runner.status !== 'running' &&
+    (editedSinceRun || stdin !== (result.sentStdin || ''))
 
   const css = useMemo(() => remoteSelectionCss(peers), [peers])
   const expanded = paneMode === 'code'
@@ -323,7 +346,9 @@ export function CodeEditor({
           result={runner.result}
           error={runner.error}
           hint={hint}
+          stale={stale}
           onHintAction={openStdin}
+          onRun={run}
           onClear={runner.clear}
           onClose={() => setConsoleOpen(false)}
         />

@@ -9,12 +9,31 @@ async function openRoom(page, room = newRoom()) {
 }
 
 /** Monaco's textarea sits under the rendered lines; click those instead. */
-async function type(page, code) {
+async function focusEditor(page) {
   await page.locator('.monaco-editor .view-lines').click()
   await expect(page.locator('.monaco-editor textarea')).toBeFocused()
-  // Autoclosing brackets would double every one that is typed.
-  await page.evaluate(() => window.monaco?.editor?.getEditors?.()[0]?.updateOptions({ autoClosingBrackets: 'never' }))
+}
+
+async function type(page, code) {
+  await focusEditor(page)
   await page.keyboard.type(code)
+}
+
+/**
+ * Puts a whole program in the editor by pasting it.
+ *
+ * Typing anything with braces does not survive the editor: Monaco closes them
+ * as they are typed and re-indents around them, so a Java class arrives with
+ * doubled braces and does not compile. Pasting is both reliable and what
+ * someone actually does with a program this size.
+ */
+async function paste(page, code) {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await focusEditor(page)
+  await page.evaluate((text) => navigator.clipboard.writeText(text), code)
+  await page.keyboard.press('Control+A')
+  await page.keyboard.press('Control+V')
+  await expect(page.locator('.view-lines')).toContainText('public class Main')
 }
 
 const runButton = (page) => page.getByRole('button', { name: /^Run/ })
@@ -132,20 +151,31 @@ test('points at the input box when a program runs out of input', async ({ page }
 
   await chooseLanguage(page, 'java')
 
-  await type(
+  // The array-maximum exercise, as a person actually writes it.
+  await paste(
     page,
     [
-      'import java.util.Scanner;',
+      'import java.util.*;',
+      '',
       'public class Main {',
-      'public static void main(String[] args) {',
-      'Scanner sc = new Scanner(System.in);',
-      'System.out.print("Enter first number: ");',
-      'int a = sc.nextInt();',
-      'System.out.print("Enter second number: ");',
-      'int b = sc.nextInt();',
-      'System.out.println("Sum = " + (a + b));',
-      'sc.close();',
-      '}',
+      '    static int findMaximum(int[] arr) {',
+      '        int max = arr[0];',
+      '        for (int num : arr) {',
+      '            if (num > max) { max = num; }',
+      '        }',
+      '        return max;',
+      '    }',
+      '',
+      '    public static void main(String[] args) {',
+      '        Scanner sc = new Scanner(System.in);',
+      '        System.out.print("Enter array size: ");',
+      '        int n = sc.nextInt();',
+      '        int[] arr = new int[n];',
+      '        System.out.println("Enter " + n + " numbers:");',
+      '        for (int i = 0; i < n; i++) { arr[i] = sc.nextInt(); }',
+      '        System.out.println("Maximum = " + findMaximum(arr));',
+      '        sc.close();',
+      '    }',
       '}',
     ].join('\n')
   )
@@ -159,13 +189,48 @@ test('points at the input box when a program runs out of input', async ({ page }
   // The hint is the fix: it opens the box and puts the caret in it.
   await hint.getByRole('button', { name: 'Add input' }).click()
   await expect(page.locator('.stdin__field')).toBeFocused()
-  await page.keyboard.type('3\n4')
+  await page.keyboard.type('5\n3 9 2 7 1')
+
+  // Typing does not retract the explanation. It described the run that is
+  // still on screen, and taking it away the moment someone acts on it leaves
+  // them staring at the same stack trace with nothing to explain it.
+  await expect(hint).toBeVisible()
+
+  // What did change is that the output no longer matches the input box.
+  const stale = page.locator('.runstale')
+  await expect(stale).toContainText('older run')
+
+  await stale.getByRole('button', { name: 'Run again' }).click()
+
+  await expect(page.locator('.runpanel__out').first()).toContainText('Maximum = 9')
+  await expect(page.locator('.runhint')).toHaveCount(0)
+  await expect(page.locator('.runstale')).toHaveCount(0)
+  expect(room).toBeTruthy()
+})
+
+/**
+ * Editing the code leaves the last run's output on screen. Unmarked, a fix
+ * looks like it did not work: the same failure is still sitting there.
+ */
+test('marks output as older once the code changes under it', async ({ page }) => {
+  await openRoom(page)
+  await type(page, 'console.log("first version")')
 
   await runButton(page).click()
+  await expect(page.locator('.runpanel__out')).toHaveText('first version\n')
+  await expect(page.locator('.runstale')).toHaveCount(0)
 
-  await expect(page.locator('.runpanel__out').first()).toContainText('Sum = 7')
-  await expect(page.locator('.runhint')).toHaveCount(0)
-  expect(room).toBeTruthy()
+  await page.locator('.monaco-editor .view-lines').click()
+  await page.keyboard.type('\nconsole.log("second version")')
+
+  await expect(page.locator('.runstale')).toBeVisible()
+  // The old output is still there to read, just no longer presented as current.
+  await expect(page.locator('.runpanel__out')).toHaveText('first version\n')
+
+  await page.locator('.runstale').getByRole('button', { name: 'Run again' }).click()
+
+  await expect(page.locator('.runpanel__out')).toContainText('second version')
+  await expect(page.locator('.runstale')).toHaveCount(0)
 })
 
 test('runs python when the server has it', async ({ page }) => {

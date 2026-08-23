@@ -25,7 +25,7 @@ const OUT_OF_INPUT = [
  * A short explanation to show above the output, or null when the failure
  * speaks for itself.
  */
-export function hintFor(result, stdin) {
+export function hintFor(result) {
   if (!result || result.ok || result.timedOut) return null
 
   // Somebody else's run, shown in the shared console. Their input box is not
@@ -35,7 +35,8 @@ export function hintFor(result, stdin) {
 
   const output = (result.stderr || '') + (result.stdout || '')
 
-  if (!stdin.trim() && OUT_OF_INPUT.some((sign) => sign.test(output))) {
+  // The input as it was when this ran, not as it is now.
+  if (!(result.sentStdin || '').trim() && OUT_OF_INPUT.some((sign) => sign.test(output))) {
     return {
       id: 'needs-input',
       message: 'This program reads input, and the input box was empty.',
