@@ -67,6 +67,85 @@ describe('apiFetch', () => {
     expect(error.status).toBe(0)
   })
 
+  /**
+   * The backend opens its port only once the database is connected, so the
+   * first request of a session can arrive before anything is listening. The
+   * dev proxy answers that with a status and no JSON, which used to surface as
+   * "Something went wrong" on a sign-in that worked perfectly a second later.
+   */
+  describe('a server that is not up yet', () => {
+    it('says so, rather than blaming the request', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      })
+
+      const error = await apiFetch('/rooms').catch((cause) => cause)
+      expect(error.code).toBe('server_unreachable')
+      expect(error.message).toMatch(/still starting up/i)
+    })
+
+    it('names the status for any other answer it cannot read', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 418,
+        json: () => Promise.reject(new SyntaxError('not json')),
+      })
+
+      const error = await apiFetch('/rooms').catch((cause) => cause)
+      expect(error.code).toBe('unexpected_response')
+      expect(error.message).toContain('418')
+    })
+
+    it('retries a call that never arrived, and returns the answer', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValue(jsonResponse({ token: 'welcome' }))
+
+      const payload = await apiFetch('/auth/login', { method: 'POST', retry: 2 })
+
+      expect(payload).toEqual({ token: 'welcome' })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it('gives up after its retries and reports the failure', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new TypeError('Failed to fetch'))
+
+      const error = await apiFetch('/auth/login', { method: 'POST', retry: 2 }).catch((c) => c)
+
+      expect(error.code).toBe('network_error')
+      expect(fetchSpy).toHaveBeenCalledTimes(3)
+    })
+
+    /**
+     * A 502 or 504 means something upstream answered — the work may already be
+     * done and only the reply lost. Repeating that could create a second room
+     * or a second account.
+     */
+    it('does not repeat a call that may have been carried out', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: () => Promise.reject(new SyntaxError('not json')),
+      })
+
+      await apiFetch('/auth/register', { method: 'POST', retry: 2 }).catch(() => {})
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('never retries a request the caller aborted', async () => {
+      const abort = Object.assign(new Error('aborted'), { name: 'AbortError' })
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(abort)
+
+      await apiFetch('/auth/me', { retry: 2 }).catch(() => {})
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('notifies the expiry handler when an authenticated request is rejected', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ error: { code: 'unauthorized', message: 'nope' } }, 401)
