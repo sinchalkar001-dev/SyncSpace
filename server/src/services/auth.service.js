@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import { User } from '../models/User.js'
 import { env } from '../config/env.js'
 import { conflict, unauthorized } from '../errors.js'
+import { sendVerificationEmail } from './verification.service.js'
 
 const ROUNDS = 10
 
@@ -34,6 +35,11 @@ export async function register({ email, password, name }) {
     name,
     passwordHash: await hashPassword(password),
   })
+
+  // Every account is born with a pending verification email; failing to
+  // prepare it fails the sign-up, since an unverifiable account is worse
+  // than no account.
+  await sendVerificationEmail(user)
 
   return { user: user.toPublic(), token: issueToken(user) }
 }
