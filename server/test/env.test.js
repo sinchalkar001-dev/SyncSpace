@@ -83,4 +83,35 @@ describe('environment validation', () => {
     const env = loadEnv({ CORS_ORIGIN: 'http://localhost:5173/, https://app.test:443' })
     expect(env.CORS_ORIGIN).toEqual(['http://localhost:5173', 'https://app.test'])
   })
+
+  it('defaults CLIENT_URL to the first allowed origin', () => {
+    const env = loadEnv({
+      CORS_ORIGIN: 'https://syncspace.example, https://www.syncspace.example',
+    })
+    expect(env.CLIENT_URL).toBe('https://syncspace.example')
+  })
+
+  it('rejects an SMTP_URL that is not an smtp(s) relay', () => {
+    expect(() => loadEnv({ SMTP_URL: 'not a url' })).toThrow(/SMTP_URL must be a URL/)
+    expect(() => loadEnv({ SMTP_URL: 'http://mail.test' })).toThrow(/smtp: or smtps:/)
+  })
+
+  it('requires MAIL_FROM once a relay is configured', () => {
+    expect(() => loadEnv({ SMTP_URL: 'smtps://user:pass@mail.test:465' })).toThrow(
+      /MAIL_FROM is required/
+    )
+  })
+
+  it('accepts a complete email configuration', () => {
+    const env = loadEnv({
+      SMTP_URL: 'smtps://user:pass@mail.test:465',
+      MAIL_FROM: 'SyncSpace <no-reply@syncspace.example>',
+      CLIENT_URL: 'https://app.syncspace.example',
+    })
+    expect(env.CLIENT_URL).toBe('https://app.syncspace.example')
+  })
+
+  it('rejects a CLIENT_URL carrying a path', () => {
+    expect(() => loadEnv({ CLIENT_URL: 'https://app.test/verify' })).toThrow(/without a path/)
+  })
 })

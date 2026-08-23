@@ -31,8 +31,8 @@ const register = async (who = ALICE) => {
 const loggedTokens = () =>
   infoSpy.mock.calls
     .map((call) => String(call[1] ?? ''))
-    .filter((message) => message.includes('/api/v1/auth/verify-email?token='))
-    .map((message) => message.split('token=')[1])
+    .filter((message) => message.includes('/verify-email?token='))
+    .map((message) => message.match(/token=([0-9a-f]{64})/)[1])
 
 describe('POST /api/v1/auth/verify-email', () => {
   it('registration issues exactly one pending, hashed, unexpired token', async () => {
