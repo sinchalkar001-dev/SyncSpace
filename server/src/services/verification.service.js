@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { User } from '../models/User.js'
 import { badRequest, conflict, notFound } from '../errors.js'
-import { isProduction } from '../config/env.js'
-import { logger } from '../config/logger.js'
+import { env } from '../config/env.js'
+import { sendVerificationEmail as sendMessage } from './email.service.js'
 
 // Verification links should be used promptly; 24h is the usual balance.
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
@@ -27,17 +27,19 @@ export async function issueVerificationToken(user) {
   return raw
 }
 
+/** The one link that proves control of the address. */
+function confirmLink(raw) {
+  return env.CLIENT_URL + '/verify-email?token=' + raw
+}
+
 /**
- * Hands the confirm link to the user. No mailer is wired up yet, so outside
- * production the link is logged — enough to complete the flow in development
- * and tests. A real transport (SES, Postmark, …) replaces this one function.
+ * Hands the confirm link to the email service. `sendMessage` never throws —
+ * a relay outage is answered by the user pressing "resend", not by failing
+ * registration — and with no SMTP configured it logs the message, which
+ * keeps development and tests working without credentials.
  */
-function deliverVerificationLink(email, raw) {
-  if (isProduction) {
-    logger.info({ email }, 'verification email queued')
-    return
-  }
-  logger.info({ email }, 'verification link: /api/v1/auth/verify-email?token=' + raw)
+async function deliverVerificationLink(email, raw) {
+  await sendMessage(email, { url: confirmLink(raw) })
 }
 
 /** Issues a fresh token for `user` and hands the confirm link to the mailer. */
@@ -57,6 +59,8 @@ export async function resendVerification(userId) {
   if (user.emailVerified) throw conflict('This account is already verified', 'already_verified')
 
   await sendVerificationEmail(user)
+  // `sent` means processed, not proven delivered — reporting provider
+  // outages here would let outsiders probe the mail setup.
   return { sent: true }
 }
 

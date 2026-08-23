@@ -12,7 +12,7 @@ Rooms sync live, survive a server restart, and can be replayed from an append-on
 Zustand · React Router · socket.io-client
 
 **Server** — Node 20+ ESM · Express 4 · `@hocuspocus/server` + `ws` · Socket.io · MongoDB + Mongoose ·
-JWT + bcryptjs · zod · pino · helmet / cors / rate-limit
+JWT + bcryptjs · zod · pino · nodemailer · helmet / cors / rate-limit
 
 ## Running it
 
@@ -49,6 +49,21 @@ production with `ALLOW_ANONYMOUS=true`.
 
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
+
+**Email verification.** Sign-up issues a confirmation link valid for 24 hours; confirming is a
+single `POST` with the token from the email, and signed-in users can have it re-sent. With no mail
+relay configured the message is logged instead of sent, which is all development needs. A relay
+outage never fails sign-up — the account exists and "resend" retries delivery.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SMTP_URL` | *(unset)* | Relay for outgoing mail (`smtp://host[:port]`, `smtps://user:pass@host:465`). Unset = log emails instead of sending |
+| `MAIL_FROM` | *(required with `SMTP_URL`)* | From-header for outgoing mail, e.g. `SyncSpace <no-reply@syncspace.example>` |
+| `CLIENT_URL` | first `CORS_ORIGIN` | Absolute origin the emailed links point at |
+
+Credentials live only in `SMTP_URL` in the environment — never in code or logs. Delivery failures
+are logged with a masked recipient and an error code only, and the resend endpoint reports
+"sent" without exposing provider state.
 
 A room created without a name leads with its code and an `Unnamed` chip rather than a shared
 "Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
@@ -237,7 +252,7 @@ client/src
 server/src
 ├── config/       env.js (zod-validated), cors.js (shared origin policy), logger.js
 ├── models/       User, Room, Snapshot, DocUpdate (append-only)
-├── services/       auth, room, replay, verification
+├── services/       auth, room, replay, verification · email
 ├── routes/       auth.routes.js, rooms.routes.js
 ├── middleware/   auth, validate, error
 ├── collab/       hocuspocus.js, persistence.js
@@ -248,7 +263,7 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 147 tests
+npm test                      # server, 158 tests
 npm test --workspace client   # client, 42 tests
 npm run test:e2e              # browser, two real tabs, 3 tests
 ```
