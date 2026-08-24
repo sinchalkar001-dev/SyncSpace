@@ -8,6 +8,7 @@ import { logger } from './config/logger.js'
 import { createAuthRouter } from './routes/auth.routes.js'
 import { createRoomsRouter } from './routes/rooms.routes.js'
 import { createRunnersRouter } from './routes/runners.routes.js'
+import { mountDocs } from './docs/docs.routes.js'
 import { createRateLimiters } from './middleware/rateLimit.js'
 import { errorHandler, notFoundHandler } from './middleware/error.js'
 
@@ -40,6 +41,11 @@ export function createApp() {
       uptime: Math.round(process.uptime()),
     })
   })
+
+  // Browsable API documentation. One endpoint, placed by SWAGGER_PATH and
+  // removable with SWAGGER_ENABLED=false; outside the versioned API so
+  // browsing the docs never spends rate-limit budget.
+  mountDocs(app)
 
   const api = express.Router()
   const { apiLimiter } = createRateLimiters()

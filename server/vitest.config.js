@@ -14,6 +14,10 @@ export default defineConfig({
       PERSIST_UPDATE_LOG: 'true',
       PERSIST_DEBOUNCE_MS: '50',
       PERSIST_MAX_DEBOUNCE_MS: '200',
+      // Pinned so a developer's own server/.env cannot reshuffle the
+      // documentation endpoint out from under the docs tests.
+      SWAGGER_ENABLED: 'true',
+      SWAGGER_PATH: '/docs',
     },
   },
 })
