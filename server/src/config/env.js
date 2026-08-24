@@ -8,6 +8,33 @@ const csv = z
   .transform((value) => value.split(',').map((part) => part.trim()).filter(Boolean))
 
 /**
+ * Where the browsable API documentation lives. One plain path, so it can be
+ * renamed or firewalled as a unit; trailing slashes are trimmed away because
+ * the mount must not depend on how the operator spelled the variable.
+ */
+const RESERVED_MOUNTS = ['health', 'api', 'collab', 'socket.io']
+
+const swaggerPath = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/\/+$/, ''))
+  .superRefine((value, ctx) => {
+    const issue = (message) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['SWAGGER_PATH'], message })
+
+    if (!/^\/\S+$/.test(value)) {
+      issue('must start with a single "/" and contain no whitespace')
+      return
+    }
+
+    const top = value.slice(1).split('/')[0]
+    if (RESERVED_MOUNTS.includes(top)) {
+      issue(`"${value}" would overlap a reserved route (${RESERVED_MOUNTS.map((r) => '/' + r).join(', ')})`)
+    }
+  })
+  .default('/docs')
+
+/**
  * A comma-separated allowlist of absolute origins. Each entry is normalised
  * (trailing slash and default port removed) so it matches exactly what
  * browsers send in the Origin header — "https://app.test/" would otherwise
@@ -71,6 +98,12 @@ const schema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
+
+    // The Swagger UI and its OpenAPI document are exposed under one path.
+    // Switching SWAGGER_ENABLED off removes every docs route entirely, for
+    // deployments that would rather not advertise the API surface at all.
+    SWAGGER_ENABLED: booleanish.default('true'),
+    SWAGGER_PATH: swaggerPath,
 
     // Guests may open rooms without an account. Convenient in development,
     // refused outright in production.

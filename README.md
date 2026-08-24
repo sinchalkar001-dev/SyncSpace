@@ -231,6 +231,11 @@ tests flake. Both rules are commented where they apply, in
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
 
+The whole surface is also browsable as OpenAPI: Swagger UI at `/docs/`, machine-readable
+spec at `/docs/openapi.json`. Both move with `SWAGGER_PATH` and disappear entirely with
+`SWAGGER_ENABLED=false` (default: enabled at `/docs`). The docs sit outside `/api/v1`,
+so browsing them never spends rate-limit budget.
+
 ## Layout
 
 ```
