@@ -324,7 +324,8 @@ export const openapiDocument = {
       get: {
         tags: ['Users', 'Rooms'],
         summary: 'Roster of a room',
-        description: 'Owner, invited members, and everyone who actually opened the room. Owned rooms show this only to owner and members.',
+        description:
+          'Owner, invited members, and everyone who actually opened the room. Owned rooms show this only to owner and members. Participants are ordered by most recent visit and capped at the latest 100.',
         responses: {
           200: {
             description: 'Roster',
@@ -377,7 +378,8 @@ export const openapiDocument = {
       get: {
         tags: ['Replay'],
         summary: 'Document update timeline',
-        description: 'Metadata for a replay scrubber — never payloads. Requires PERSIST_UPDATE_LOG=true, otherwise refused.',
+        description:
+          'Metadata for a replay scrubber — never payloads. Requires PERSIST_UPDATE_LOG=true, otherwise refused. Public rooms are readable anonymously, like room metadata.',
         security: [{ bearerAuth: [] }],
         responses: {
           200: {
@@ -414,7 +416,8 @@ export const openapiDocument = {
       get: {
         tags: ['Replay'],
         summary: 'Binary document state at a point in time',
-        description: 'A Yjs update stream ready for `Y.applyUpdate`. The `X-Updates-Applied` header counts the folded entries.',
+        description:
+          'A Yjs update stream ready for `Y.applyUpdate`. The `X-Updates-Applied` header counts the folded entries. Public rooms are readable anonymously, like room metadata.',
         security: [{ bearerAuth: [] }],
         responses: {
           200: {
@@ -466,8 +469,46 @@ export const openapiDocument = {
           },
           ...validationError(),
           ...error(400, 'The language has no runner on this machine', 'language_not_runnable', 'cobol has no runner here — it can be edited and shared, but not run'),
-          ...error(403, 'Private room you cannot read, or execution switched off', 'room_forbidden', 'You do not have access to this room'),
-          ...rateLimited('Too many runs from this address, try again later'),
+          ...{
+            403: {
+              description:
+                'Either the room is private and you cannot read it (`room_forbidden`), or this server has code execution switched off entirely (`execution_disabled`, ALLOW_CODE_EXECUTION=false).',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    room_forbidden: {
+                      summary: 'No access to the room',
+                      value: { error: { code: 'room_forbidden', message: 'You do not have access to this room' } },
+                    },
+                    execution_disabled: {
+                      summary: 'Running code is switched off server-wide',
+                      value: { error: { code: 'execution_disabled', message: 'Running code is switched off on this server' } },
+                    },
+                  },
+                },
+              },
+            },
+            429: {
+              description:
+                'Two independent budgets: the per-IP run limiter (`rate_limited`, see RateLimit headers) or the server-wide concurrency cap on simultaneously running programs (`runner_busy`). The latter clears as other runs finish.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    rate_limited: {
+                      summary: 'Too many runs from this address',
+                      value: { error: { code: 'rate_limited', message: 'Too many runs from this address, try again later' } },
+                    },
+                    runner_busy: {
+                      summary: 'Server is at its concurrent-run limit',
+                      value: { error: { code: 'runner_busy', message: 'Too many programs are running right now, try again in a moment' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
           ...error(501, 'Toolchain not installed', 'toolchain_missing', 'g++ is not installed on the server, so cpp cannot run here'),
         },
       },
