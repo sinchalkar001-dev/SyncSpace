@@ -40,6 +40,13 @@ export function createRateLimiters() {
       max: env.RUN_RATE_LIMIT_MAX,
       message: 'Too many runs from this address, try again later',
     }),
+
+    /** File uploads are expensive (disk I/O, bandwidth); cap them separately. */
+    uploadLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.UPLOAD_RATE_LIMIT_MAX,
+      message: 'Too many file uploads from this address, try again later',
+    }),
   }
 
   // Credential endpoints share one window but each has its own budget, so a
