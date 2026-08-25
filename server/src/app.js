@@ -8,6 +8,7 @@ import { logger } from './config/logger.js'
 import { createAuthRouter } from './routes/auth.routes.js'
 import { createRoomsRouter } from './routes/rooms.routes.js'
 import { createRunnersRouter } from './routes/runners.routes.js'
+import { createFilesRouter } from './routes/files.routes.js'
 import { mountDocs } from './docs/docs.routes.js'
 import { createRateLimiters } from './middleware/rateLimit.js'
 import { errorHandler, notFoundHandler } from './middleware/error.js'
@@ -52,6 +53,7 @@ export function createApp() {
   api.use(apiLimiter)
   api.use('/auth', createAuthRouter())
   api.use('/rooms', createRoomsRouter())
+  api.use('/rooms/:roomId/files', createFilesRouter())
   api.use('/runners', createRunnersRouter())
 
   app.use('/api/v1', api)
