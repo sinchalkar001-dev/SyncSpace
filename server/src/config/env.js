@@ -143,6 +143,12 @@ const schema = z
     // Invites grant room access, so cap them well below the general budget
     // while leaving normal collaboration untouched.
     INVITE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+
+    // File uploads. A dedicated budget prevents disk-filling abuse.
+    UPLOAD_DIR: z.string().default('./uploads'),
+    UPLOAD_MAX_SIZE: z.coerce.number().int().positive().default(10485760), // 10 MB
+    UPLOAD_ALLOWED_TYPES: csv.default('image/*,application/pdf,text/*'),
+    UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production') return
