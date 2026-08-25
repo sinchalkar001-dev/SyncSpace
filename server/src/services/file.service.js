@@ -17,6 +17,13 @@ async function ensureUploadDir(subdir) {
 }
 
 /**
+ * Computes the on-disk relative path for a file document.
+ */
+function storagePath(file) {
+  return file.roomId + '/' + file.storedName
+}
+
+/**
  * Uploads a file to a room. Validates room access, sanitises the filename,
  * writes to disk, and persists metadata.
  *
@@ -47,7 +54,6 @@ export async function uploadFile({ roomId, userId, file }) {
   const storedName = generateStoredName(originalName)
   const subdir = roomId
   const dir = await ensureUploadDir(subdir)
-  const storagePath = path.join(subdir, storedName)
   const absolutePath = path.join(dir, storedName)
 
   await fs.writeFile(absolutePath, file.buffer)
@@ -59,7 +65,6 @@ export async function uploadFile({ roomId, userId, file }) {
     storedName,
     mimeType: file.mimetype,
     size: file.size,
-    storagePath,
   })
 
   return doc.toPublic()
@@ -78,8 +83,8 @@ export async function listFiles(roomId, { userId, limit = 50, offset = 0 } = {})
   }
 
   const [files, total] = await Promise.all([
-    File.find({ roomId }).sort({ createdAt: -1 }).skip(offset).limit(limit).lean(),
-    File.countDocuments({ roomId }),
+    File.findByRoom(roomId, { limit, offset }),
+    File.countByRoom(roomId),
   ])
 
   return {
@@ -138,7 +143,7 @@ export async function getFilePath(fileId, { userId }) {
   }
 
   return {
-    absolutePath: path.join(UPLOAD_DIR, file.storagePath),
+    absolutePath: path.join(UPLOAD_DIR, storagePath(file)),
     mimeType: file.mimeType,
     originalName: file.originalName,
     size: file.size,
@@ -167,7 +172,7 @@ export async function deleteFile(fileId, { userId }) {
     throw forbidden('Only the uploader or room owner can delete files', 'forbidden')
   }
 
-  const absolutePath = path.join(UPLOAD_DIR, file.storagePath)
+  const absolutePath = path.join(UPLOAD_DIR, storagePath(file))
   await fs.unlink(absolutePath).catch(() => {
     // File may already be gone from disk — proceed with DB cleanup
   })
