@@ -21,36 +21,37 @@ export function onAuthExpired(handler) {
   expiredHandler = handler
 }
 
-/**
- * Statuses that mean the request never got an answer from the app itself —
- * the dev proxy or a gateway replied instead, usually because the backend was
- * not listening yet.
- */
-const GATEWAY = new Set([502, 503, 504])
-
 const UNREACHABLE =
-  'Could not reach the server. If it is still starting up, give it a moment and try again.'
+  'Could not reach the server. If it is restarting, give it a moment and try again.'
 
 /**
- * Turns an error response into something worth reading.
+ * Turns an error response into something worth reading, and says whether the
+ * application ever saw the request.
  *
- * The API answers failures as { error: { code, message } }, so anything else
- * did not come from the API: the backend binds its port only after the
- * database connects, and a request sent in that window is answered by the dev
- * proxy with a status and no JSON at all. Reporting that as "Something went
- * wrong" is how a working sign-in looks broken on the first attempt — the
- * second attempt, a second later, succeeds.
+ * Every failure this API produces is { error: { code, message } }. A 5xx
+ * without that envelope did not come from the API at all — the dev proxy
+ * answers a backend that is restarting or not yet listening with exactly a
+ * 500 and an empty body. Reporting that as "Something went wrong" is how a
+ * sign-in with perfectly good credentials looks broken on the first attempt
+ * and works on the second.
  */
 function describeFailure(status, payload) {
   if (payload?.error?.message) {
-    return { code: payload.error.code || 'request_failed', message: payload.error.message }
+    return {
+      code: payload.error.code || 'request_failed',
+      message: payload.error.message,
+      answered: true,
+    }
   }
-  if (GATEWAY.has(status)) {
-    return { code: 'server_unreachable', message: UNREACHABLE }
+
+  if (status >= 500) {
+    return { code: 'server_unreachable', message: UNREACHABLE, answered: false }
   }
+
   return {
     code: 'unexpected_response',
     message: 'The server returned an unexpected response (HTTP ' + status + ').',
+    answered: true,
   }
 }
 
@@ -59,20 +60,31 @@ const BACKOFF_MS = [400, 900]
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Whether a failed attempt can simply be repeated.
+ * Whether a failed attempt is worth repeating: the connection failed outright,
+ * or something other than the application answered.
  *
- * Only when the request provably never reached the application: the socket
- * was refused, or the server answered 503 before routing anything. A 502 or a
- * 504 is not included — the upstream may have done the work and lost only the
- * reply, and repeating that would sign someone up twice.
+ * Anything the API itself said is final and is never repeated — a rejected
+ * password does not become right on a second try.
  */
-const neverArrived = (error) =>
-  error instanceof ApiError && (error.status === 0 || error.status === 503)
+const REPEATABLE = new Set(['network_error', 'server_unreachable'])
+
+const worthRepeating = (error) => error instanceof ApiError && REPEATABLE.has(error.code)
 
 export async function apiFetch(path, { method = 'GET', body, signal, retry = 0 } = {}) {
   const headers = { Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (authToken) headers.Authorization = 'Bearer ' + authToken
+
+  /**
+   * A restarting backend is a moment, not a verdict. Waiting and asking again
+   * is the difference between "sign in twice" and "sign in".
+   */
+  const again = (failure) => {
+    if (retry <= 0 || !worthRepeating(failure)) throw failure
+    return wait(BACKOFF_MS[BACKOFF_MS.length - retry] ?? 900).then(() =>
+      apiFetch(path, { method, body, signal, retry: retry - 1 })
+    )
+  }
 
   let response
   try {
@@ -84,16 +96,7 @@ export async function apiFetch(path, { method = 'GET', body, signal, retry = 0 }
     })
   } catch (cause) {
     if (cause?.name === 'AbortError') throw cause
-    const failure = new ApiError(0, 'network_error', UNREACHABLE)
-
-    // The backend opens its port only once the database is connected, so the
-    // first request of a session can land in that window. Waiting a moment
-    // and asking again is the difference between "sign in twice" and "sign in".
-    if (retry > 0 && neverArrived(failure)) {
-      await wait(BACKOFF_MS[BACKOFF_MS.length - retry] ?? 900)
-      return apiFetch(path, { method, body, signal, retry: retry - 1 })
-    }
-    throw failure
+    return again(new ApiError(0, 'network_error', UNREACHABLE))
   }
 
   if (response.status === 204) return null
@@ -104,7 +107,7 @@ export async function apiFetch(path, { method = 'GET', body, signal, retry = 0 }
     // Only a request that carried a token can have had it expire.
     if (response.status === 401 && authToken) expiredHandler?.()
     const { code, message } = describeFailure(response.status, payload)
-    throw new ApiError(response.status, code, message)
+    return again(new ApiError(response.status, code, message))
   }
 
   return payload

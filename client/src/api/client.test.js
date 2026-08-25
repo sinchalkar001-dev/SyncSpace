@@ -74,16 +74,34 @@ describe('apiFetch', () => {
    * "Something went wrong" on a sign-in that worked perfectly a second later.
    */
   describe('a server that is not up yet', () => {
-    it('says so, rather than blaming the request', async () => {
+    /**
+     * What the dev proxy actually answers when the backend is restarting:
+     * status 500, zero bytes. Nothing distinguishes it from an application
+     * error except the missing { error: { ... } } envelope.
+     */
+    it('recognises a proxy 500 with an empty body as the server being away', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue({
         ok: false,
-        status: 502,
-        json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+        status: 500,
+        json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
       })
 
       const error = await apiFetch('/rooms').catch((cause) => cause)
       expect(error.code).toBe('server_unreachable')
-      expect(error.message).toMatch(/still starting up/i)
+      expect(error.message).toMatch(/restarting/i)
+    })
+
+    it('leaves a 500 the API itself reported alone', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        jsonResponse({ error: { code: 'internal_error', message: 'Snapshot store failed' } }, 500)
+      )
+
+      const error = await apiFetch('/rooms', { retry: 2 }).catch((cause) => cause)
+
+      // It answered, so it is an answer: reported as given and not repeated.
+      expect(error.code).toBe('internal_error')
+      expect(error.message).toBe('Snapshot store failed')
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
     })
 
     it('names the status for any other answer it cannot read', async () => {
@@ -121,19 +139,31 @@ describe('apiFetch', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(3)
     })
 
-    /**
-     * A 502 or 504 means something upstream answered — the work may already be
-     * done and only the reply lost. Repeating that could create a second room
-     * or a second account.
-     */
-    it('does not repeat a call that may have been carried out', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-        ok: false,
-        status: 502,
-        json: () => Promise.reject(new SyntaxError('not json')),
-      })
+    it('retries a proxy 500 too, and succeeds once the server is back', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+        })
+        .mockResolvedValue(jsonResponse({ token: 'welcome' }))
 
-      await apiFetch('/auth/register', { method: 'POST', retry: 2 }).catch(() => {})
+      const payload = await apiFetch('/auth/login', { method: 'POST', retry: 2 })
+
+      expect(payload).toEqual({ token: 'welcome' })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    /** Wrong credentials are an answer, and answers are not retried. */
+    it('does not repeat a refusal the API gave on purpose', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        jsonResponse({ error: { code: 'bad_credentials', message: 'Incorrect email or password' } }, 401)
+      )
+
+      const error = await apiFetch('/auth/login', { method: 'POST', retry: 2 }).catch((c) => c)
+
+      expect(error.code).toBe('bad_credentials')
       expect(fetchSpy).toHaveBeenCalledTimes(1)
     })
 
