@@ -35,7 +35,7 @@ async function createRoom(token, name = 'Test Room') {
   return res.body.room
 }
 
-function makePngBuffer(width = 1, height = 1) {
+function makePngBuffer(_width = 1, _height = 1) {
   // Minimal valid 1x1 PNG (67 bytes)
   return Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
@@ -383,10 +383,6 @@ describe('file uploads', () => {
         .attach('file', makePngBuffer(), { filename: 'test.png', contentType: 'image/png' })
 
       const storedName = upload.body.file.id
-      // Find the actual stored path
-      const infoRes = await request(app)
-        .get(`/api/v1/rooms/${room.roomId}/files/${storedName}`)
-        .set(auth(body.token))
       // The stored file is in uploads/<roomId>/
 
       await request(app)
@@ -398,6 +394,177 @@ describe('file uploads', () => {
         .get(`/api/v1/rooms/${room.roomId}/files/${storedName}/download`)
         .set(auth(body.token))
       expect(dlRes.status).toBe(404)
+    })
+  })
+})
+
+describe('room permission checks', () => {
+  let alice, bob, carol, room
+
+  beforeEach(async () => {
+    alice = await registerUser(ALICE)
+    bob = await registerUser(BOB)
+    carol = await registerUser({ email: 'carol@syncspace.test', password: 'yet-another-passphrase', name: 'Carol' })
+    room = await createRoom(alice.body.token, 'Private Room')
+
+    // Alice (owner) invites Bob (member)
+    await request(app)
+      .post(`/api/v1/rooms/${room.roomId}/invite`)
+      .set(auth(alice.body.token))
+      .send({ userId: bob.body.user.id, role: 'editor' })
+  })
+
+  describe('upload permission tiers', () => {
+    it('owner can upload', async () => {
+      const res = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(alice.body.token))
+        .attach('file', makePngBuffer(), { filename: 'owner.png', contentType: 'image/png' })
+
+      expect(res.status).toBe(201)
+      expect(res.body.file.originalName).toBe('owner.png')
+    })
+
+    it('member can upload', async () => {
+      const res = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(bob.body.token))
+        .attach('file', makePngBuffer(), { filename: 'member.png', contentType: 'image/png' })
+
+      expect(res.status).toBe(201)
+      expect(res.body.file.originalName).toBe('member.png')
+    })
+
+    it('unauthorized user cannot upload', async () => {
+      const res = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(carol.body.token))
+        .attach('file', makePngBuffer(), { filename: 'intruder.png', contentType: 'image/png' })
+
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe('room_forbidden')
+    })
+
+    it('unauthenticated user cannot upload', async () => {
+      const res = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .attach('file', makePngBuffer(), { filename: 'anon.png', contentType: 'image/png' })
+
+      expect(res.status).toBe(401)
+    })
+  })
+
+  describe('list permission tiers', () => {
+    beforeEach(async () => {
+      // Owner uploads a file so the list is non-empty
+      await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(alice.body.token))
+        .attach('file', makePngBuffer(), { filename: 'owner-file.png', contentType: 'image/png' })
+    })
+
+    it('owner can list files', async () => {
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(alice.body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.files).toHaveLength(1)
+      expect(res.body.files[0].originalName).toBe('owner-file.png')
+    })
+
+    it('member can list files', async () => {
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(bob.body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.files).toHaveLength(1)
+    })
+
+    it('unauthorized user cannot list files', async () => {
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(carol.body.token))
+
+      expect(res.status).toBe(403)
+    })
+
+    it('unauthenticated user cannot list files', async () => {
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/files`)
+
+      expect(res.status).toBe(401)
+    })
+  })
+
+  describe('delete permission tiers', () => {
+    let ownerFileId, memberFileId
+
+    beforeEach(async () => {
+      // Owner uploads a file
+      const ownerUpload = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(alice.body.token))
+        .attach('file', makePngBuffer(), { filename: 'owner-file.png', contentType: 'image/png' })
+      ownerFileId = ownerUpload.body.file.id
+
+      // Member uploads a file
+      const memberUpload = await request(app)
+        .post(`/api/v1/rooms/${room.roomId}/files`)
+        .set(auth(bob.body.token))
+        .attach('file', makePngBuffer(), { filename: 'member-file.png', contentType: 'image/png' })
+      memberFileId = memberUpload.body.file.id
+    })
+
+    it('owner can delete their own file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${ownerFileId}`)
+        .set(auth(alice.body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.deleted).toBe(true)
+    })
+
+    it('owner can delete a member\'s file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${memberFileId}`)
+        .set(auth(alice.body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.deleted).toBe(true)
+    })
+
+    it('member can delete their own file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${memberFileId}`)
+        .set(auth(bob.body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.deleted).toBe(true)
+    })
+
+    it('member cannot delete owner\'s file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${ownerFileId}`)
+        .set(auth(bob.body.token))
+
+      expect(res.status).toBe(403)
+    })
+
+    it('unauthorized user cannot delete any file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${ownerFileId}`)
+        .set(auth(carol.body.token))
+
+      expect(res.status).toBe(403)
+    })
+
+    it('unauthenticated user cannot delete any file', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/rooms/${room.roomId}/files/${ownerFileId}`)
+
+      expect(res.status).toBe(401)
     })
   })
 })
