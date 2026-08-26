@@ -1,8 +1,11 @@
 import * as Y from 'yjs'
+import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
+import { createApp } from '../src/app.js'
 import { DocUpdate } from '../src/models/DocUpdate.js'
 import { listTimeline, snapshotJsonAt, stateAt } from '../src/services/replay.service.js'
+import { env } from '../src/config/env.js'
 
 const ROOM = 'replay-room'
 
@@ -132,5 +135,188 @@ describe('append-only enforcement', () => {
     await expect(
       DocUpdate.create({ roomId: ROOM, seq: 1, update: Buffer.from([9]), size: 1 })
     ).rejects.toThrow()
+  })
+})
+
+describe('replay HTTP edge cases', () => {
+  let app
+
+  const ALICE = { email: 'alice@replay.test', password: 'correct-horse-battery', name: 'Alice' }
+  const BOB = { email: 'bob@replay.test', password: 'another-good-passphrase', name: 'Bob' }
+
+  const register = (who) => request(app).post('/api/v1/auth/register').send(who)
+  const auth = (token) => ({ Authorization: 'Bearer ' + token })
+
+  async function makeRoom(token, name = 'Replay Room', isPublic = false) {
+    const res = await request(app).post('/api/v1/rooms').set(auth(token)).send({ name, isPublic })
+    return res.body.room
+  }
+
+  beforeEach(async () => {
+    await clearDatabase()
+    app = createApp()
+  })
+
+  describe('GET /api/v1/rooms/:roomId/replay', () => {
+    it('returns empty timeline for a room with no updates', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.body.timeline).toEqual([])
+    })
+
+    it('returns 404 for a nonexistent room', async () => {
+      const { body } = await register(ALICE)
+      const res = await request(app)
+        .get('/api/v1/rooms/no-such-room/replay')
+        .set(auth(body.token))
+
+      expect(res.status).toBe(404)
+    })
+
+    it('denies access to a private room for non-members', async () => {
+      const alice = await register(ALICE)
+      const bob = await register(BOB)
+      const room = await makeRoom(alice.body.token, 'Private')
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay`)
+        .set(auth(bob.body.token))
+
+      expect(res.status).toBe(403)
+    })
+
+    it('allows access to a public room for unauthenticated users', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token, 'Public', true)
+
+      const res = await request(app).get(`/api/v1/rooms/${room.roomId}/replay`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.timeline).toEqual([])
+    })
+
+    it('returns replay_disabled when PERSIST_UPDATE_LOG is false', async () => {
+      const original = env.PERSIST_UPDATE_LOG
+      env.PERSIST_UPDATE_LOG = false
+      try {
+        const { body } = await register(ALICE)
+        const room = await makeRoom(body.token)
+
+        const res = await request(app)
+          .get(`/api/v1/rooms/${room.roomId}/replay`)
+          .set(auth(body.token))
+
+        expect(res.status).toBe(400)
+        expect(res.body.error.code).toBe('replay_disabled')
+      } finally {
+        env.PERSIST_UPDATE_LOG = original
+      }
+    })
+  })
+
+  describe('GET /api/v1/rooms/:roomId/replay/:seq', () => {
+    it('returns 404 for a nonexistent room', async () => {
+      const { body } = await register(ALICE)
+      const res = await request(app)
+        .get('/api/v1/rooms/no-such-room/replay/0')
+        .set(auth(body.token))
+
+      expect(res.status).toBe(404)
+    })
+
+    it('denies access to a private room for non-members', async () => {
+      const alice = await register(ALICE)
+      const bob = await register(BOB)
+      const room = await makeRoom(alice.body.token, 'Private')
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/0`)
+        .set(auth(bob.body.token))
+
+      expect(res.status).toBe(403)
+    })
+
+    it('returns 400 for negative seq', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/-1`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('bad_seq')
+    })
+
+    it('returns 400 for non-numeric seq', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/abc`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('bad_seq')
+    })
+
+    it('returns 400 for floating point seq', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/1.5`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('bad_seq')
+    })
+
+    it('returns an empty state for seq 0 on a room with no updates', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/0`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(200)
+      expect(res.headers['content-type']).toBe('application/octet-stream')
+      expect(Number(res.headers['x-updates-applied'])).toBe(0)
+    })
+
+    it('allows access to a public room for unauthenticated users', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token, 'Public', true)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/0`)
+
+      expect(res.status).toBe(200)
+    })
+
+    it('returns replay_disabled when PERSIST_UPDATE_LOG is false', async () => {
+      const original = env.PERSIST_UPDATE_LOG
+      env.PERSIST_UPDATE_LOG = false
+      try {
+        const { body } = await register(ALICE)
+        const room = await makeRoom(body.token)
+
+        const res = await request(app)
+          .get(`/api/v1/rooms/${room.roomId}/replay/0`)
+          .set(auth(body.token))
+
+        expect(res.status).toBe(400)
+        expect(res.body.error.code).toBe('replay_disabled')
+      } finally {
+        env.PERSIST_UPDATE_LOG = original
+      }
+    })
   })
 })
