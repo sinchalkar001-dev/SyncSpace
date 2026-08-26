@@ -178,6 +178,9 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/replay/:seq', optionalAuth, async (req, res, next) => {
     try {
       await loadAccessibleRoom(req)
+      if (!env.PERSIST_UPDATE_LOG) {
+        throw badRequest('Replay is disabled (PERSIST_UPDATE_LOG=false)', 'replay_disabled')
+      }
       const { state, applied } = await stateAt(req.params.roomId, req.params.seq)
 
       res.setHeader('Content-Type', 'application/octet-stream')
