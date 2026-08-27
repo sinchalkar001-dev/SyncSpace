@@ -260,4 +260,50 @@ describe('room roster', () => {
       (await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(other.token))).status
     ).toBe(200)
   })
+
+  it('keeps two anonymous visitors with the same name as separate records', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+
+    const alice1 = await recordParticipant({ roomId, user: { id: 'anon-id-1', name: 'Alice', anonymous: true } })
+    const alice2 = await recordParticipant({ roomId, user: { id: 'anon-id-2', name: 'Alice', anonymous: true } })
+
+    expect(String(alice1._id)).not.toBe(String(alice2._id))
+    expect(alice1.userKey).toBe('guest:anon-id-1')
+    expect(alice2.userKey).toBe('guest:anon-id-2')
+
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(owner.token))
+    const alices = res.body.participants.filter((p) => p.name === 'Alice')
+    expect(alices).toHaveLength(2)
+    expect(alices.every((p) => p.guest === true)).toBe(true)
+  })
+
+  it('uses the name fallback when a guest has no socket id', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+
+    await recordParticipant({ roomId, user: { name: 'Fallback', anonymous: true } })
+    await recordParticipant({ roomId, user: { name: 'Fallback', anonymous: true } })
+
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(owner.token))
+    const rows = res.body.participants.filter((p) => p.name === 'Fallback')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].visits).toBe(2)
+    expect(rows[0].guest).toBe(true)
+    expect(rows[0].userId).toBeNull()
+  })
+
+  it('tracks authenticated users with guest=false and links to their account', async () => {
+    const owner = (await register(OWNER)).body
+    const other = (await register(OTHER)).body
+    const roomId = await makeRoom(owner.token)
+
+    await recordParticipant({ roomId, user: { id: other.user.id, name: 'Other', anonymous: false } })
+
+    const res = await request(app).get('/api/v1/rooms/' + roomId + '/people').set(auth(owner.token))
+    const row = res.body.participants.find((p) => p.name === 'Other')
+    expect(row).toBeDefined()
+    expect(row.guest).toBe(false)
+    expect(row.userId).toBe(other.user.id)
+  })
 })
