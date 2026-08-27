@@ -1,3 +1,4 @@
+import request from 'supertest'
 import { io as ioClient } from 'socket.io-client'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMemoryMongo, stopMemoryMongo, waitFor } from './helpers/db.js'
@@ -192,6 +193,115 @@ describe('socket.io room lifecycle', () => {
     } finally {
       stayer.disconnect()
       leaver.disconnect()
+    }
+  })
+})
+
+const OWNER = { email: 'sock-owner@test.com', password: 'pass-1234', name: 'Owner' }
+const MEMBER = { email: 'sock-member@test.com', password: 'pass-5678', name: 'Member' }
+
+const auth = (token) => ({ Authorization: 'Bearer ' + token })
+
+async function register(user) {
+  const res = await request(server.app).post('/api/v1/auth/register').send(user)
+  if (res.status !== 201) throw new Error('register failed: ' + res.status + ' ' + JSON.stringify(res.body))
+  return res.body
+}
+
+async function createRoom(token, overrides = {}) {
+  const res = await request(server.app)
+    .post('/api/v1/rooms')
+    .set(auth(token))
+    .send({ name: 'Auth test room', ...overrides })
+  if (res.status !== 201) throw new Error('createRoom failed: ' + res.status + ' ' + JSON.stringify(res.body))
+  return res.body.room
+}
+
+async function patchRoom(token, roomId, patch) {
+  return request(server.app).patch('/api/v1/rooms/' + roomId).set(auth(token)).send(patch)
+}
+
+async function deleteRoom(token, roomId) {
+  return request(server.app).delete('/api/v1/rooms/' + roomId).set(auth(token))
+}
+
+describe('room authorization on visibility change', () => {
+  it('kicks non-member socket users when room goes private', async () => {
+    const owner = await register(OWNER)
+    const room = await createRoom(owner.token, { isPublic: true })
+
+    const stranger = connectSocket()
+    const kicked = []
+
+    try {
+      await connected(stranger)
+      stranger.on('room:kicked', (payload) => kicked.push(payload))
+
+      const ack = await join(stranger, room.roomId, { name: 'Stranger' })
+      expect(ack.ok).toBe(true)
+
+      await patchRoom(owner.token, room.roomId, { isPublic: false })
+
+      const event = await waitFor(() => kicked[0], { label: 'stranger kicked' })
+      expect(event.reason).toBe('room_became_private')
+      expect(event.roomId).toBe(room.roomId)
+    } finally {
+      stranger.disconnect()
+    }
+  })
+
+  it('keeps member socket users connected when room goes private', async () => {
+    const owner = await register({ email: 'sock-owner2@test.com', password: 'pass-1234', name: 'Owner' })
+    const member = await register({ email: 'sock-member2@test.com', password: 'pass-5678', name: 'Member' })
+    const room = await createRoom(owner.token, { isPublic: true })
+
+    await request(server.app)
+      .post('/api/v1/rooms/' + room.roomId + '/invite')
+      .set(auth(owner.token))
+      .send({ userId: member.user.id })
+      .expect(200)
+
+    const memberSocket = connectSocket({ token: member.token })
+    const kicked = []
+
+    try {
+      await connected(memberSocket)
+      memberSocket.on('room:kicked', (payload) => kicked.push(payload))
+
+      const ack = await join(memberSocket, room.roomId)
+      expect(ack.ok).toBe(true)
+
+      await patchRoom(owner.token, room.roomId, { isPublic: false })
+
+      // Wait briefly to ensure no kick event arrives
+      await new Promise((r) => setTimeout(r, 200))
+      expect(kicked).toHaveLength(0)
+    } finally {
+      memberSocket.disconnect()
+    }
+  })
+
+  it('disconnects socket users when room is deleted', async () => {
+    const owner = await register({ email: 'sock-owner3@test.com', password: 'pass-1234', name: 'Owner' })
+    const room = await createRoom(owner.token, { isPublic: true })
+
+    const visitor = connectSocket()
+    const kicked = []
+
+    try {
+      await connected(visitor)
+      visitor.on('room:kicked', (payload) => kicked.push(payload))
+
+      const ack = await join(visitor, room.roomId, { name: 'Visitor' })
+      expect(ack.ok).toBe(true)
+
+      await deleteRoom(owner.token, room.roomId)
+
+      const event = await waitFor(() => kicked[0], { label: 'visitor kicked on delete' })
+      expect(event.reason).toBe('room_deleted')
+      expect(event.roomId).toBe(room.roomId)
+    } finally {
+      visitor.disconnect()
     }
   })
 })
