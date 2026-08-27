@@ -65,18 +65,23 @@ export async function listRoomsForUser(userId) {
 /**
  * Notes that someone opened a room. Idempotent per visitor, so a person who
  * rejoins updates their row rather than adding another.
+ *
+ * The userKey uses the account id for authenticated users and a per-socket
+ * unique id for anonymous visitors so two guests who happen to pick the same
+ * display name do not share a row.
  */
 export async function recordParticipant({ roomId, user }) {
   if (!roomId || !user) return null
 
   const name = String(user.name || 'Guest').slice(0, 64)
-  const userKey = user.id ? 'user:' + user.id : 'guest:' + name
+  const isGuest = user.anonymous === true || (user.anonymous === undefined && !user.id)
+  const userKey = isGuest ? 'guest:' + (user.id || name) : 'user:' + user.id
   const now = new Date()
 
   return Participant.findOneAndUpdate(
     { roomId, userKey },
     {
-      $set: { name, guest: !user.id, user: user.id || null, lastSeenAt: now },
+      $set: { name, guest: isGuest, user: isGuest ? null : user.id, lastSeenAt: now },
       $setOnInsert: { roomId, userKey, firstSeenAt: now },
       $inc: { visits: 1 },
     },
