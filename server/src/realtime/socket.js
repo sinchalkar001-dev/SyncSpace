@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Server as SocketServer } from 'socket.io'
 import { z } from 'zod'
 import { verifyToken } from '../services/auth.service.js'
@@ -55,7 +56,7 @@ export function createSocketServer(httpServer) {
     const claimed = socket.handshake.auth?.user || {}
     socket.data.user = payload
       ? { id: payload.sub, name: payload.name, anonymous: false }
-      : { id: null, name: String(claimed.name || 'Guest').slice(0, 32), anonymous: true }
+      : { id: randomUUID(), name: String(claimed.name || 'Guest').slice(0, 32), anonymous: true }
 
     next()
   })
