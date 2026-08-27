@@ -4,6 +4,7 @@ import { Snapshot } from '../models/Snapshot.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
 import { getHocuspocus } from '../collab/registry.js'
+import { getIo } from '../realtime/registry.js'
 import { logger } from '../config/logger.js'
 import { forbidden, notFound } from '../errors.js'
 
@@ -64,18 +65,23 @@ export async function listRoomsForUser(userId) {
 /**
  * Notes that someone opened a room. Idempotent per visitor, so a person who
  * rejoins updates their row rather than adding another.
+ *
+ * The userKey uses the account id for authenticated users and a per-socket
+ * unique id for anonymous visitors so two guests who happen to pick the same
+ * display name do not share a row.
  */
 export async function recordParticipant({ roomId, user }) {
   if (!roomId || !user) return null
 
   const name = String(user.name || 'Guest').slice(0, 64)
-  const userKey = user.id ? 'user:' + user.id : 'guest:' + name
+  const isGuest = user.anonymous === true || (user.anonymous === undefined && !user.id)
+  const userKey = isGuest ? 'guest:' + (user.id || name) : 'user:' + user.id
   const now = new Date()
 
   return Participant.findOneAndUpdate(
     { roomId, userKey },
     {
-      $set: { name, guest: !user.id, user: user.id || null, lastSeenAt: now },
+      $set: { name, guest: isGuest, user: isGuest ? null : user.id, lastSeenAt: now },
       $setOnInsert: { roomId, userKey, firstSeenAt: now },
       $inc: { visits: 1 },
     },
@@ -134,6 +140,45 @@ export async function updateRoom({ roomId, actorId, patch }) {
     } catch (error) {
       logger.warn({ err: error, room: roomId }, 'could not close connections after going private')
     }
+
+    // Kick non-member users from Socket.io so they lose real-time access
+    // immediately, matching the documented intent: "Going private closes every
+    // live connection so anyone who just lost access is forced to
+    // re-authenticate; members reconnect on their own."
+    try {
+      const io = getIo()
+      if (io) {
+        const sockets = await io.in(roomId).fetchSockets()
+        const toKick = []
+        const remaining = []
+
+        for (const socket of sockets) {
+          if (!room.hasMember(socket.data.user?.id)) {
+            toKick.push(socket)
+          } else {
+            remaining.push(socket)
+          }
+        }
+
+        for (const socket of toKick) {
+          socket.emit('room:kicked', { roomId, reason: 'room_became_private' })
+          socket.leave(roomId)
+        }
+
+        if (toKick.length > 0) {
+          const members = remaining.map((s) => ({
+            socketId: s.id,
+            user: s.data.user,
+          }))
+          io.to(roomId).emit('room:presence', { roomId, members })
+        }
+      }
+    } catch (error) {
+      logger.warn(
+        { err: error, room: roomId },
+        'could not close socket connections after going private'
+      )
+    }
   }
 
   logger.info({ room: roomId, patch }, 'room updated')
@@ -160,6 +205,21 @@ export async function deleteRoom({ roomId, actorId }) {
     getHocuspocus()?.closeConnections(roomId)
   } catch (error) {
     logger.warn({ err: error, room: roomId }, 'could not close collab connections on delete')
+  }
+
+  // Also disconnect Socket.io users from the deleted room
+  try {
+    const io = getIo()
+    if (io) {
+      const sockets = await io.in(roomId).fetchSockets()
+      for (const socket of sockets) {
+        socket.emit('room:kicked', { roomId, reason: 'room_deleted' })
+        socket.leave(roomId)
+        socket.data.roomId = null
+      }
+    }
+  } catch (error) {
+    logger.warn({ err: error, room: roomId }, 'could not close socket connections on delete')
   }
 
   const [updates] = await Promise.all([
