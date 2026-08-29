@@ -149,6 +149,11 @@ const schema = z
     UPLOAD_MAX_SIZE: z.coerce.number().int().positive().default(10485760), // 10 MB
     UPLOAD_ALLOWED_TYPES: csv.default('image/*,application/pdf,text/*'),
     UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+
+    // Optional Redis instance for shared rate-limit counters across multiple
+    // server processes. When unset the in-memory default store is used instead,
+    // which is fine for single-node deployments.
+    REDIS_URL: z.string().url().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production') return

@@ -26,6 +26,8 @@ const userSchema = new mongoose.Schema(
   }
 )
 
+userSchema.index({ verificationTokenHash: 1, verificationTokenExpiresAt: -1 })
+
 userSchema.methods.toPublic = function toPublic() {
   return {
     id: this._id.toString(),

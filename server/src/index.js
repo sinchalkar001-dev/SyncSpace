@@ -10,6 +10,7 @@ import { connectDatabase, disconnectDatabase } from './db/connect.js'
 import { env } from './config/env.js'
 import { isAllowedOrigin } from './config/cors.js'
 import { logger } from './config/logger.js'
+import { initRateLimitStore } from './middleware/rateLimit.js'
 
 const COLLAB_PATH = '/collab'
 
@@ -21,6 +22,7 @@ const COLLAB_PATH = '/collab'
  */
 export async function startServer({ port = env.PORT, host = env.HOST, connectDb = true } = {}) {
   if (connectDb) await connectDatabase()
+  await initRateLimitStore()
 
   const app = createApp()
   const httpServer = http.createServer(app)

@@ -1,14 +1,40 @@
 import rateLimit from 'express-rate-limit'
 import { env } from '../config/env.js'
+import { getRedisClient } from '../config/redis.js'
+import { logger } from '../config/logger.js'
 
 /**
  * Every limiter in the app is built here so headers, keying and the error
  * body stay identical. All budgets are per IP within the window.
  *
- * Limiters hold their counters in memory, so they must be created once per
- * app instance (not at module scope): rebuilding the app starts every
- * budget from zero again.
+ * When REDIS_URL is set, counters are stored in Redis so multiple server
+ * processes share a single budget per IP. Without Redis the default
+ * in-memory store is used instead.
  */
+let sharedStore = undefined
+
+/**
+ * Connects to Redis (if REDIS_URL is set) and creates a shared rate-limit
+ * store. Must be called once before createApp(); safe to call when REDIS_URL
+ * is not configured — it becomes a no-op.
+ */
+export async function initRateLimitStore() {
+  if (!env.REDIS_URL) return
+
+  try {
+    const client = await getRedisClient()
+    if (!client) return
+
+    const { RedisStore } = await import('rate-limit-redis')
+    sharedStore = new RedisStore({
+      sendCommand: (...args) => client.sendCommand(args),
+    })
+    logger.info('rate-limit store: redis')
+  } catch (err) {
+    logger.warn({ err }, 'failed to initialise Redis rate-limit store; using in-memory')
+  }
+}
+
 export function createRateLimiters() {
   const build = ({ windowMs, max, message }) =>
     rateLimit({
@@ -17,6 +43,7 @@ export function createRateLimiters() {
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: { code: 'rate_limited', message } },
+      store: sharedStore,
     })
 
   const general = {
