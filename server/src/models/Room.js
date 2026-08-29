@@ -10,7 +10,7 @@ const memberSchema = new mongoose.Schema(
 
 const roomSchema = new mongoose.Schema(
   {
-    roomId: { type: String, required: true, unique: true, index: true },
+    roomId: { type: String, required: true, unique: true },
     name: { type: String, trim: true, maxlength: 80, default: 'Untitled room' },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     members: { type: [memberSchema], default: [] },
@@ -22,6 +22,9 @@ const roomSchema = new mongoose.Schema(
   },
   { timestamps: true }
 )
+
+roomSchema.index({ owner: 1, lastActivityAt: -1 })
+roomSchema.index({ 'members.user': 1, lastActivityAt: -1 })
 
 roomSchema.methods.hasMember = function hasMember(userId) {
   if (!userId) return false
