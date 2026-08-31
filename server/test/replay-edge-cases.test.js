@@ -88,7 +88,7 @@ describe('stateAt edge cases', () => {
       ])
     )
 
-    const { state, applied } = await stateAt(ROOM, 999)
+    const { state: _state, applied } = await stateAt(ROOM, 999)
     expect(applied).toBe(2)
     const json = await snapshotJsonAt(ROOM, 999)
     expect(json.code).toBe('hello world')

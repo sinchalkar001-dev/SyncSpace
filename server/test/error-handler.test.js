@@ -1,8 +1,7 @@
 import request from 'supertest'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { createApp } from '../src/app.js'
-import { isProduction } from '../src/config/env.js'
 
 let app
 
@@ -41,7 +40,6 @@ describe('errorHandler', () => {
   })
 
   it('masks the message for 500 errors in production', async () => {
-    const original = isProduction
     // We can't easily change the module-level isProduction, but we can verify
     // the current behavior: in test/development mode, messages are exposed
     const res = await request(app).post('/api/v1/auth/register').send({})
