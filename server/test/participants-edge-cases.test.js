@@ -1,10 +1,8 @@
-import mongoose from 'mongoose'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { createApp } from '../src/app.js'
 import { recordParticipant, listPeople } from '../src/services/room.service.js'
-import { Participant } from '../src/models/Participant.js'
 
 let app
 
@@ -12,8 +10,6 @@ const ALICE = { email: 'alice@part.test', password: 'correct-horse-battery', nam
 
 const register = (who) => request(app).post('/api/v1/auth/register').send(who)
 const auth = (token) => ({ Authorization: 'Bearer ' + token })
-
-const fakeId = () => new mongoose.Types.ObjectId()
 
 beforeAll(startMemoryMongo)
 afterAll(stopMemoryMongo)

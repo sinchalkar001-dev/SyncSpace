@@ -80,11 +80,11 @@ export function createAuthRouter() {
     async (req, res, next) => {
       try {
         const { currentPassword, newPassword } = req.body
-      res.json(await changePassword(req.user.id, currentPassword, newPassword))
-    } catch (err) {
-      next(err)
-    }
-  })
+        res.json(await changePassword(req.user.id, currentPassword, newPassword))
+      } catch (err) {
+        next(err)
+      }
+    })
 
   // Authenticated: re-sending needs to know which account, but must not leak
   // whether an arbitrary address is registered.

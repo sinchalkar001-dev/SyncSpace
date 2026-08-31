@@ -198,7 +198,7 @@ describe('socket.io room lifecycle', () => {
 })
 
 const OWNER = { email: 'sock-owner@test.com', password: 'pass-1234', name: 'Owner' }
-const MEMBER = { email: 'sock-member@test.com', password: 'pass-5678', name: 'Member' }
+const _MEMBER = { email: 'sock-member@test.com', password: 'pass-5678', name: 'Member' }
 
 const auth = (token) => ({ Authorization: 'Bearer ' + token })
 
