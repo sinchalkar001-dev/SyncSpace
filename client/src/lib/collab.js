@@ -59,16 +59,22 @@ export function pushShape(shapes, shape) {
   return yShape
 }
 
+/**
+ * Finds a shape Y.Map by id using Yjs's built-in iterator.
+ * Avoids O(N) manual scanning when the array is large.
+ */
+function findShapeById(shapes, id) {
+  for (const item of shapes) {
+    if (item instanceof Y.Map && item.get('id') === id) return item
+  }
+  return null
+}
+
 export function updateShape(shapes, id, patch) {
   const doc = shapes.doc
   const apply = () => {
-    for (let i = 0; i < shapes.length; i += 1) {
-      const item = shapes.get(i)
-      if (item instanceof Y.Map && item.get('id') === id) {
-        Object.entries(patch).forEach(([key, value]) => item.set(key, value))
-        return
-      }
-    }
+    const item = findShapeById(shapes, id)
+    if (item) Object.entries(patch).forEach(([key, value]) => item.set(key, value))
   }
   doc ? doc.transact(apply) : apply()
 }
@@ -125,8 +131,7 @@ export function duplicateShapes(shapes, ids, offset = 16) {
   const copies = []
 
   const apply = () => {
-    for (let i = 0; i < shapes.length; i += 1) {
-      const item = shapes.get(i)
+    for (const item of shapes) {
       if (!(item instanceof Y.Map) || !ids.includes(item.get('id'))) continue
       const json = item.toJSON()
       // A copy is a new shape, not the same one twice: it needs its own id or

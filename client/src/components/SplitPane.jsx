@@ -74,9 +74,9 @@ export function SplitPane({ left, right, id }) {
 
   const columns =
     paneMode === 'board'
-      ? '1fr 0 0'
+      ? '1fr'
       : paneMode === 'code'
-        ? '0 0 1fr'
+        ? '1fr'
         : (ratio * 100).toFixed(2) + '% 6px 1fr' 
 
   return (
