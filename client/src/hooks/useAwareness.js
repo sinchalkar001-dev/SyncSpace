@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import throttle from 'lodash.throttle'
 
 /** Live list of everyone in the room, split into `self` and `peers`. */
 export function useAwareness(provider) {
   const [peers, setPeers] = useState([])
   const [self, setSelf] = useState(null)
+  const peersRef = useRef(peers)
+  const selfRef = useRef(self)
 
   useEffect(() => {
     const awareness = provider?.awareness
@@ -19,8 +21,32 @@ export function useAwareness(provider) {
         if (clientId === awareness.clientID) mine = entry
         else next.push(entry)
       })
-      setPeers(next)
-      setSelf(mine)
+
+      // Only update state if identity (not cursor) actually changed
+      const prevPeers = peersRef.current
+      const identityChanged =
+        prevPeers.length !== next.length ||
+        prevPeers.some((p, i) => {
+          const n = next[i]
+          return p.clientId !== n.clientId || p.user?.name !== n.user?.name || p.user?.color !== n.user?.color
+        })
+
+      if (identityChanged) {
+        peersRef.current = next
+        setPeers(next)
+      } else {
+        // Update cursor data in-place without triggering re-renders
+        for (let i = 0; i < next.length; i++) {
+          if (peersRef.current[i]) peersRef.current[i].cursor = next[i].cursor
+        }
+      }
+
+      if (selfRef.current?.clientId !== mine?.clientId || selfRef.current?.user?.name !== mine?.user?.name) {
+        selfRef.current = mine
+        setSelf(mine)
+      } else if (selfRef.current && mine) {
+        selfRef.current.cursor = mine.cursor
+      }
     }
 
     read()
