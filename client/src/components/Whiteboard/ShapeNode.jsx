@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import { Arrow, Ellipse, Line, Rect, Text } from 'react-konva'
 
 /** Diamond points, relative to the shape's own origin. */
@@ -6,7 +7,7 @@ function diamondPoints(width, height) {
 }
 
 /** Renders one shared shape. Geometry always comes from the Yjs document. */
-export function ShapeNode({
+export const ShapeNode = memo(function ShapeNode({
   shape,
   draggable,
   isSelected,
@@ -15,6 +16,11 @@ export function ShapeNode({
   onHoverStart,
   onHoverEnd,
 }) {
+  const points = useMemo(
+    () => (shape.type === 'diamond' ? diamondPoints(shape.width, shape.height) : undefined),
+    [shape.type, shape.width, shape.height]
+  )
+
   const common = {
     id: shape.id,
     x: shape.x || 0,
@@ -68,7 +74,7 @@ export function ShapeNode({
       return (
         <Line
           {...common}
-          points={diamondPoints(shape.width, shape.height)}
+          points={points}
           closed
           lineJoin="round"
           hitStrokeWidth={hitStrokeWidth}
@@ -90,4 +96,4 @@ export function ShapeNode({
     default:
       return null
   }
-}
+})
