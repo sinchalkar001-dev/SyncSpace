@@ -128,6 +128,22 @@ export const api = {
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
   roomPeople: (roomId, signal) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/people', { signal }),
+
+  /** Grants access. `who` is { email } or { userId }, plus an optional role. */
+  invite: (roomId, who) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/invite', { method: 'POST', body: who }),
+
+  /** Withdraws access and keeps the person out, link or no link. */
+  removeMember: (roomId, userId) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/members/' + encodeURIComponent(userId), {
+      method: 'DELETE',
+    }),
+
+  /** Undoes a removal. */
+  unblockMember: (roomId, userId) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/blocked/' + encodeURIComponent(userId), {
+      method: 'DELETE',
+    }),
   updateRoom: (roomId, patch) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'PATCH', body: patch }),
   deleteRoom: (roomId) =>
