@@ -62,9 +62,12 @@ room invitation. With no relay configured both are written to the server log ins
 development needs — the invite toast says as much and hands you the room code to pass on yourself.
 
 Copy `server/.env.example` to `server/.env` and fill in the relay. For Gmail that means turning on
-2-Step Verification, generating an [app password](https://myaccount.google.com/apppasswords), and
-pasting the sixteen characters exactly as Google prints them — the spaces are display only and are
-stripped for you. Then prove it before an invitation depends on it:
+[2-Step Verification](https://myaccount.google.com/signinoptions/twosv) first — app passwords do not
+exist as an option until it is on, and the page offers no hint that this is why — then generating an
+[app password](https://myaccount.google.com/apppasswords) and pasting the sixteen characters exactly
+as Google prints them; the spaces are display only and are stripped for you. Nothing here is
+Gmail-specific, so an account whose administrator has switched app passwords off can point the same
+four settings at any SMTP provider. Then prove it before an invitation depends on it:
 
 ```bash
 cd server && npm run mail:check -- you@example.com
