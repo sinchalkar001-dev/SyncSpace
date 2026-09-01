@@ -102,6 +102,65 @@ describe('environment validation', () => {
     )
   })
 
+  /**
+   * The parts exist because the URL form does not survive a real password: an
+   * app password with an @ or a : in it has to be percent-encoded, and nobody
+   * discovers that until mail silently stops.
+   */
+  describe('a relay given as parts rather than a URL', () => {
+    const GMAIL = {
+      SMTP_HOST: 'smtp.gmail.com',
+      SMTP_USER: 'someone@gmail.com',
+      SMTP_PASS: 'abcd efgh ijkl mnop',
+    }
+
+    it('strips the spaces Google prints an app password with', () => {
+      // Copied from the screen it is shown on, spaces and all — which is what
+      // everybody does, and what the relay refuses.
+      expect(loadEnv(GMAIL).SMTP_PASS).toBe('abcdefghijklmnop')
+    })
+
+    it('takes the From from the account when none is given', () => {
+      expect(loadEnv(GMAIL).MAIL_FROM).toBe('someone@gmail.com')
+    })
+
+    it('still wants a From when the login is not an address', () => {
+      expect(() => loadEnv({ ...GMAIL, SMTP_USER: 'apikey' })).toThrow(/MAIL_FROM is required/)
+      expect(loadEnv({ ...GMAIL, SMTP_USER: 'apikey', MAIL_FROM: 'a@b.test' }).MAIL_FROM).toBe('a@b.test')
+    })
+
+    it('reads implicit TLS off the port unless told otherwise', () => {
+      expect(loadEnv({ ...GMAIL, SMTP_PORT: '465' }).SMTP_SECURE).toBe(true)
+      expect(loadEnv({ ...GMAIL, SMTP_PORT: '587' }).SMTP_SECURE).toBe(false)
+      expect(loadEnv({ ...GMAIL, SMTP_PORT: '465', SMTP_SECURE: 'false' }).SMTP_SECURE).toBe(false)
+    })
+
+    it('defaults to the submission port', () => {
+      expect(loadEnv(GMAIL).SMTP_PORT).toBe(587)
+    })
+
+    it('refuses half a login, which fails at the relay and looks like a bad password', () => {
+      expect(() => loadEnv({ SMTP_HOST: 'mail.test', SMTP_USER: 'me@mail.test' })).toThrow(
+        /SMTP_USER and SMTP_PASS go together/
+      )
+      expect(() => loadEnv({ SMTP_HOST: 'mail.test', SMTP_PASS: 'secret', MAIL_FROM: 'a@b.test' })).toThrow(
+        /SMTP_USER and SMTP_PASS go together/
+      )
+    })
+
+    it('allows a relay that wants no login at all', () => {
+      const env = loadEnv({ SMTP_HOST: 'mailhog', SMTP_PORT: '1025', MAIL_FROM: 'dev@syncspace.test' })
+      expect(env.SMTP_HOST).toBe('mailhog')
+      expect(env.SMTP_USER).toBeUndefined()
+    })
+
+    it('refuses both forms at once, since which one would win is nobody’s guess', () => {
+      expect(() =>
+        loadEnv({ ...GMAIL, SMTP_URL: 'smtps://user:pass@mail.test:465' })
+      ).toThrow(/either SMTP_URL or SMTP_HOST/)
+    })
+  })
+
   it('accepts a complete email configuration', () => {
     const env = loadEnv({
       SMTP_URL: 'smtps://user:pass@mail.test:465',

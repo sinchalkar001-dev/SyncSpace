@@ -22,6 +22,67 @@ describe('maskEmail', () => {
   })
 })
 
+/**
+ * What nodemailer ends up holding. The app and the mail-check script both ask
+ * this one function, so a relay that works in the diagnostic is the same relay
+ * that sends the invitations.
+ */
+describe('relayOptions', () => {
+  /** env reads process.env once at import, so each case needs a fresh graph. */
+  async function relayFor(settings) {
+    vi.resetModules()
+    const restore = Object.fromEntries(Object.keys(settings).map((key) => [key, process.env[key]]))
+    Object.assign(process.env, settings)
+    try {
+      return (await import('../src/services/email.service.js')).relayOptions()
+    } finally {
+      for (const [key, was] of Object.entries(restore)) {
+        if (was === undefined) delete process.env[key]
+        else process.env[key] = was
+      }
+      vi.resetModules()
+    }
+  }
+
+  it('is null when nothing is configured, which is what makes development quiet', async () => {
+    expect(await relayFor({})).toBeNull()
+  })
+
+  it('hands a relay URL straight through', async () => {
+    const relay = await relayFor({
+      SMTP_URL: 'smtps://user:pass@mail.test:465',
+      MAIL_FROM: 'a@b.test',
+    })
+    expect(relay).toBe('smtps://user:pass@mail.test:465')
+  })
+
+  it('builds the connection from the parts a provider gives you', async () => {
+    const relay = await relayFor({
+      SMTP_HOST: 'smtp.gmail.com',
+      SMTP_USER: 'someone@gmail.com',
+      SMTP_PASS: 'abcd efgh ijkl mnop',
+    })
+
+    expect(relay).toEqual({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: { user: 'someone@gmail.com', pass: 'abcdefghijklmnop' },
+    })
+  })
+
+  it('sends no login at all rather than an empty one', async () => {
+    const relay = await relayFor({
+      SMTP_HOST: 'mailhog',
+      SMTP_PORT: '1025',
+      MAIL_FROM: 'dev@syncspace.test',
+    })
+
+    expect(relay.auth).toBeUndefined()
+    expect(relay.port).toBe(1025)
+  })
+})
+
 describe('createMailer', () => {
   it('hands the composed message to the configured transport', async () => {
     const sent = []

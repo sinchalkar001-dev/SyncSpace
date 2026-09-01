@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "dev:memory": "node scripts/dev-memory.js"
+    "dev:memory": "node scripts/dev-memory.js",
+    "mail:check": "node scripts/mail-check.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -57,20 +57,38 @@ production with `ALLOW_ANONYMOUS=true`.
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
 
-**Email verification.** Sign-up issues a confirmation link valid for 24 hours; confirming is a
-single `POST` with the token from the email, and signed-in users can have it re-sent. With no mail
-relay configured the message is logged instead of sent, which is all development needs. A relay
-outage never fails sign-up — the account exists and "resend" retries delivery.
+**Outgoing mail.** Two things are sent: the sign-up confirmation link, valid for 24 hours, and a
+room invitation. With no relay configured both are written to the server log instead, which is all
+development needs — the invite toast says as much and hands you the room code to pass on yourself.
+
+Copy `server/.env.example` to `server/.env` and fill in the relay. For Gmail that means turning on
+2-Step Verification, generating an [app password](https://myaccount.google.com/apppasswords), and
+pasting the sixteen characters exactly as Google prints them — the spaces are display only and are
+stripped for you. Then prove it before an invitation depends on it:
+
+```bash
+cd server && npm run mail:check -- you@example.com
+```
+
+That connects, sends a real message, and on failure prints the provider's own answer rather than a
+masked summary — a wrong app password says `535 Username and Password not accepted`, which is the
+one thing the app itself will never tell you.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SMTP_URL` | *(unset)* | Relay for outgoing mail (`smtp://host[:port]`, `smtps://user:pass@host:465`). Unset = log emails instead of sending |
-| `MAIL_FROM` | *(required with `SMTP_URL`)* | From-header for outgoing mail, e.g. `SyncSpace <no-reply@syncspace.example>` |
+| `SMTP_HOST` | *(unset)* | Relay hostname, e.g. `smtp.gmail.com`. Unset (and no `SMTP_URL`) = log emails instead of sending |
+| `SMTP_PORT` | `587` | `587` for STARTTLS, `465` for implicit TLS |
+| `SMTP_USER` | *(unset)* | Login. Whitespace-insensitive password below; both or neither |
+| `SMTP_PASS` | *(unset)* | App password. Spaces are stripped, so paste it as shown |
+| `SMTP_SECURE` | port is `465` | Override TLS-from-the-first-byte if your relay is unusual |
+| `SMTP_URL` | *(unset)* | The whole relay as one URL instead of the parts above. Use one form or the other, never both; a password containing `@` or `:` must be percent-encoded here |
+| `MAIL_FROM` | `SMTP_USER` | From-header, e.g. `SyncSpace <no-reply@syncspace.example>`. Required when the login is not itself an address |
 | `CLIENT_URL` | first `CORS_ORIGIN` | Absolute origin the emailed links point at |
 
-Credentials live only in `SMTP_URL` in the environment — never in code or logs. Delivery failures
-are logged with a masked recipient and an error code only, and the resend endpoint reports
-"sent" without exposing provider state.
+Credentials live only in the environment — never in code or logs. Delivery failures are logged with
+a masked recipient and an error code only, and the resend endpoint reports "sent" without exposing
+provider state. A relay outage never fails sign-up or an invite: the account and the membership
+exist either way.
 
 A room created without a name leads with its code and an `Unnamed` chip rather than a shared
 "Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
@@ -79,7 +97,9 @@ stable identity stripe derived from its code.
 Each room on the dashboard has its own menu. **People** shows the owner and invited members
 alongside everyone who has actually opened the room — guests included, since they are recorded by
 visit rather than by invitation. The owner can invite someone by email address there, or put them
-out again. **Rename** names a room, or renames one created without a name. **Make public / Make private**
+out again. An invite emails the person a link to the room and the room code on its own line, since a
+private room is otherwise invisible to them; inviting somebody already in the room sends it again,
+which is how an owner re-sends a code that never arrived. **Rename** names a room, or renames one created without a name. **Make public / Make private**
 flips visibility in place — going private also closes every live connection, so anyone who just lost
 access has to re-authenticate. **Delete room** is owner-only and asks first; it removes the
 whiteboard, the code, the snapshot and the whole update log, and hangs up anyone still connected.
@@ -231,7 +251,7 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
 | `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
-| `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId` |
+| `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId`. Emails the invitee the room code; answers `{ room, invited }` where `invited.notified` says whether the relay took it |
 | `DELETE` | `/api/rooms/:roomId/members/:userId` | Owner only; removes someone and keeps them out |
 | `DELETE` | `/api/rooms/:roomId/blocked/:userId` | Owner only; undoes a removal |
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
