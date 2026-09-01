@@ -88,9 +88,28 @@ const schema = z
     JWT_SECRET: z.string().min(32).optional(),
     JWT_EXPIRES_IN: z.string().default('7d'),
 
-    // Outbound email. Unset means verification links are logged instead of
-    // sent — enough for development; production sets a real relay.
+    // Outbound email, given either way round: one relay URL, or the four
+    // parts a provider actually hands you. Neither set means messages are
+    // logged instead of sent — enough for development; production sets a relay.
     SMTP_URL: z.string().optional(),
+
+    SMTP_HOST: z.string().trim().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
+    SMTP_USER: z.string().trim().min(1).optional(),
+    /**
+     * Gmail prints an app password in four groups of four. The spaces are
+     * presentation — the relay refuses them — and everybody pastes what they
+     * were shown, so they come off here rather than in a support thread.
+     */
+    SMTP_PASS: z
+      .string()
+      .transform((value) => value.replace(/\s+/g, ''))
+      .pipe(z.string().min(1))
+      .optional(),
+    // TLS from the first byte (port 465). Left unset it follows the port,
+    // which is what every provider's instructions assume.
+    SMTP_SECURE: booleanish.optional(),
+
     MAIL_FROM: z.string().optional(),
     CLIENT_URL: z.string().optional(),
 
@@ -182,35 +201,41 @@ const schema = z
     }
   })
   .superRefine((value, ctx) => {
-    // The mail relay is a URL that carries credentials, so it is parsed here
-    // rather than trusted: a typo fails at boot with a readable report
-    // instead of at first send inside nodemailer internals.
+    const issue = (path, message) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message })
+
+    // The relay URL carries credentials, so it is parsed here rather than
+    // trusted: a typo fails at boot with a readable report instead of at first
+    // send inside nodemailer internals.
     if (value.SMTP_URL) {
       let relay
       try {
         relay = new URL(value.SMTP_URL)
       } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['SMTP_URL'],
-          message: 'SMTP_URL must be a URL (smtp://host[:port] or smtps://user:pass@host[:port])',
-        })
+        issue('SMTP_URL', 'SMTP_URL must be a URL (smtp://host[:port] or smtps://user:pass@host[:port])')
         relay = null
       }
       if (relay && relay.protocol !== 'smtp:' && relay.protocol !== 'smtps:') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['SMTP_URL'],
-          message: 'SMTP_URL must use the smtp: or smtps: scheme',
-        })
+        issue('SMTP_URL', 'SMTP_URL must use the smtp: or smtps: scheme')
       }
-      if (relay && !value.MAIL_FROM) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['MAIL_FROM'],
-          message: 'MAIL_FROM is required when SMTP_URL is set',
-        })
-      }
+    }
+
+    // Two relays are not better than one, and which would win is nobody's
+    // guess but this file's.
+    if (value.SMTP_URL && value.SMTP_HOST) {
+      issue('SMTP_HOST', 'set either SMTP_URL or SMTP_HOST, not both')
+    }
+
+    // Half a login fails at the relay rather than at boot, and looks from the
+    // outside exactly like a wrong password.
+    if (Boolean(value.SMTP_USER) !== Boolean(value.SMTP_PASS)) {
+      issue('SMTP_PASS', 'SMTP_USER and SMTP_PASS go together — set both, or neither')
+    }
+
+    // Every relay needs a From it will accept. A username that is already an
+    // address stands in for one, which covers Gmail and most of the rest.
+    if ((value.SMTP_URL || value.SMTP_HOST) && !value.MAIL_FROM && !value.SMTP_USER?.includes('@')) {
+      issue('MAIL_FROM', 'MAIL_FROM is required unless SMTP_USER is itself an address')
     }
 
     // Where emailed links point. Optional because it defaults to the first
@@ -260,6 +285,12 @@ export function loadEnv(source = process.env) {
     ...parsed.data,
     JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET,
     CORS_ORIGIN: corsOrigin,
+    // Implicit TLS is port 465's whole distinction; everything else starts
+    // plain and upgrades with STARTTLS.
+    SMTP_SECURE: parsed.data.SMTP_SECURE ?? parsed.data.SMTP_PORT === 465,
+    // A relay will only accept a From it recognises, and for a personal
+    // account that is the account itself.
+    MAIL_FROM: parsed.data.MAIL_FROM || parsed.data.SMTP_USER,
     // Emailed links land on the client; the first allowed origin is the same
     // app in every deployment we run.
     CLIENT_URL: parsed.data.CLIENT_URL || corsOrigin[0],

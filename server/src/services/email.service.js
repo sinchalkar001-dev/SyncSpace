@@ -12,16 +12,38 @@ export function maskEmail(address) {
 }
 
 /**
- * Builds the SMTP client from SMTP_URL when one is configured. The import is
+ * What nodemailer should be handed, or null when no relay is configured.
+ *
+ * Exported because the mail-check script asks the same question, and a
+ * diagnostic that built its own idea of the relay could pass while the app
+ * it is meant to vouch for goes on failing.
+ */
+export function relayOptions() {
+  if (env.SMTP_URL) return env.SMTP_URL
+  if (!env.SMTP_HOST) return null
+
+  return {
+    host: env.SMTP_HOST,
+    port: env.SMTP_PORT,
+    secure: env.SMTP_SECURE,
+    // Relays on a private network often want no login at all; sending an
+    // empty one is not the same as sending none.
+    auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+  }
+}
+
+/**
+ * Builds the SMTP client from whatever relay is configured. The import is
  * dynamic so environments without the package (or without a relay at all)
  * pay nothing; a transport that cannot start degrades to logged email rather
  * than taking the API down.
  */
 function loadTransport() {
-  if (!env.SMTP_URL) return Promise.resolve(null)
+  const relay = relayOptions()
+  if (!relay) return Promise.resolve(null)
 
   return import('nodemailer')
-    .then((nodemailer) => nodemailer.createTransport(env.SMTP_URL))
+    .then((nodemailer) => nodemailer.createTransport(relay))
     .catch((err) => {
       // Only the error class is logged: connection errors can echo relay
       // banners, and the URL itself carries the credentials.
