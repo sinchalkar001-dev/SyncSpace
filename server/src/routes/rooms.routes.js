@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
 import { optionalAuth, requireAuth } from '../middleware/auth.js'
 import {
+  cancelPendingInvite,
   canAccess,
   createRoom,
   deleteRoom,
@@ -207,6 +208,25 @@ export function createRoomsRouter() {
         userId: userIdParam(req),
       })
       res.json({ room: room.toPublic(), removed })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /**
+   * Withdraws an invitation sent to an address that never signed up.
+   *
+   * Not the same as removing a member: there is no account to put out and
+   * nobody to keep away, so this only stops the address being expected.
+   */
+  roomsRouter.delete('/:roomId/invites/:email', requireAuth, async (req, res, next) => {
+    try {
+      const { room, cancelled } = await cancelPendingInvite({
+        roomId: req.params.roomId,
+        actorId: req.user.id,
+        email: req.params.email,
+      })
+      res.json({ room: room.toPublic(), cancelled })
     } catch (err) {
       next(err)
     }

@@ -31,7 +31,7 @@ function PeopleSkeleton() {
  */
 export function RoomPeopleDialog({ room, open, onClose }) {
   const { user } = useAuth()
-  const { state, people, error, pending, invite, remove, allow } = useRoomPeople(room?.roomId, {
+  const { state, people, error, pending, invite, remove, allow, cancelInvite } = useRoomPeople(room?.roomId, {
     enabled: open && Boolean(room),
   })
 
@@ -90,8 +90,32 @@ export function RoomPeopleDialog({ room, open, onClose }) {
               <InviteForm
                 onInvite={invite}
                 pending={pending === 'invite'}
-                hint="They need a SyncSpace account under that address. We email them the room code and a link straight to this room."
+                hint="We email them the room code and a link straight to this room. If they have no account yet, they are asked to sign up with that address and the room is waiting when they do."
               />
+            </section>
+          )}
+
+          {isOwner && people.pending?.length > 0 && (
+            <section>
+              <h3 className="people__heading">Invited, no account yet</h3>
+              <ul className="people__list">
+                {people.pending.map((person) => (
+                  <PersonRow
+                    key={person.email}
+                    name={person.email}
+                    detail={'Invited ' + formatWhen(person.at) + ' · waiting for them to sign up'}
+                    tag={person.role}
+                    muted
+                    action={{
+                      label: 'Withdraw',
+                      icon: 'close',
+                      title: 'Stop expecting this address',
+                      loading: pending === 'invite:' + person.email,
+                      onClick: () => cancelInvite(person.email),
+                    }}
+                  />
+                ))}
+              </ul>
             </section>
           )}
 

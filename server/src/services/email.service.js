@@ -140,30 +140,62 @@ function escapeHtml(value) {
  * link for one click, and the code underneath it, because a code can be typed
  * into the dashboard by someone who would rather not follow a link in an
  * email — and because it is what gets read out loud over a call.
+ *
+ * `signUpUrl` is set when nobody has signed up under this address yet. The
+ * room link would only turn such a person away, so their copy leads with
+ * creating the account that the invitation is already waiting on.
  */
-export function sendRoomInviteEmail(to, { inviter, room, code, url }) {
+export function sendRoomInviteEmail(to, { inviter, room, code, url, signUpUrl = null }) {
   const who = inviter || 'Someone'
   const what = room || code
 
+  const opening = who + ' invited you to collaborate on "' + what + '" in SyncSpace.'
   const subject = who + ' invited you to ' + what + ' on SyncSpace'
-  const text = [
-    who + ' invited you to collaborate on "' + what + '" in SyncSpace.',
-    '',
-    'Open the room:',
-    url,
-    '',
-    'Or go to your dashboard and join with this room code: ' + code,
-    '',
-    'The room is private, so sign in with this address to get in.',
-  ].join('\n')
 
-  const html =
-    '<p><strong>' + escapeHtml(who) + '</strong> invited you to collaborate on ' +
-    '<strong>' + escapeHtml(what) + '</strong> in SyncSpace.</p>' +
-    '<p><a href="' + escapeHtml(url) + '">Open the room</a></p>' +
-    '<p>Or join from your dashboard with the room code ' +
-    '<strong>' + escapeHtml(code) + '</strong>.</p>' +
-    '<p>The room is private, so sign in with this address to get in.</p>'
+  const text = (
+    signUpUrl
+      ? [
+          opening,
+          '',
+          'Create an account with this address and the room is waiting for you:',
+          signUpUrl,
+          '',
+          'The room itself:',
+          url,
+          '',
+          'Or join from your dashboard with this room code: ' + code,
+          '',
+          'The invitation is tied to this address, so sign up with it.',
+        ]
+      : [
+          opening,
+          '',
+          'Open the room:',
+          url,
+          '',
+          'Or go to your dashboard and join with this room code: ' + code,
+          '',
+          'The room is private, so sign in with this address to get in.',
+        ]
+  ).join('\n')
+
+  const lead = '<p><strong>' + escapeHtml(who) + '</strong> invited you to collaborate on ' +
+    '<strong>' + escapeHtml(what) + '</strong> in SyncSpace.</p>'
+
+  const code_ = '<p>Or join from your dashboard with the room code ' +
+    '<strong>' + escapeHtml(code) + '</strong>.</p>'
+
+  const html = signUpUrl
+    ? lead +
+      '<p><a href="' + escapeHtml(signUpUrl) + '">Create an account</a> with this address and the ' +
+      'room is waiting for you.</p>' +
+      '<p>The room itself: <a href="' + escapeHtml(url) + '">' + escapeHtml(code) + '</a></p>' +
+      code_ +
+      '<p>The invitation is tied to this address, so sign up with it.</p>'
+    : lead +
+      '<p><a href="' + escapeHtml(url) + '">Open the room</a></p>' +
+      code_ +
+      '<p>The room is private, so sign in with this address to get in.</p>'
 
   return mailer.send({ to, subject, text, html })
 }

@@ -109,7 +109,7 @@ async function hangUp({ roomId, reason, matches }) {
 /** The account being invited or removed, by id or by the email people know. */
 async function findAccount({ userId, email }) {
   const user = email
-    ? await User.findOne({ email: String(email).trim().toLowerCase() })
+    ? await User.findOne({ email: normaliseEmail(email) })
     : await User.findById(userId)
 
   if (!user) {
@@ -120,6 +120,9 @@ async function findAccount({ userId, email }) {
   }
   return user
 }
+
+/** One spelling of an address, so the same person is never two people. */
+const normaliseEmail = (value) => String(value).trim().toLowerCase()
 
 /**
  * How long an invite waits on the mail relay before answering anyway.
@@ -146,14 +149,17 @@ const NOTIFY_TIMEOUT_MS = 10000
  * answer matters: reporting a slow send as a failure sends the owner chasing
  * their guest with a code that is already in their inbox.
  */
-async function notifyInvitee({ room, invitee, inviter }) {
+async function notifyInvitee({ room, address, inviter, newcomer = false }) {
   const PENDING = Symbol('still sending')
 
-  const sent = sendRoomInviteEmail(invitee.email, {
+  const sent = sendRoomInviteEmail(address, {
     inviter: inviter?.name,
     room: room.name,
     code: room.roomId,
     url: env.CLIENT_URL + '/room/' + encodeURIComponent(room.roomId),
+    // Somebody without an account cannot be let into a private room by the
+    // link alone, so their copy leads with signing up instead.
+    signUpUrl: newcomer ? env.CLIENT_URL + '/register' : null,
   }).catch((error) => {
     logger.warn({ err: error, room: room.roomId }, 'could not send the invite email')
     return { delivered: false }
@@ -181,9 +187,17 @@ async function notifyInvitee({ room, invitee, inviter }) {
  */
 export async function inviteMember({ roomId, actorId, userId, email, role = 'editor' }) {
   const room = await ownedRoom(roomId, actorId, 'Only the room owner can invite people')
-  const invitee = await findAccount({ userId, email })
-  const inviteeId = invitee._id.toString()
+  const inviter = await User.findById(actorId)
 
+  // An id can only ever mean an existing account. An address is what a host
+  // actually knows about their guest, and most guests have not signed up yet.
+  const invitee = email
+    ? await User.findOne({ email: normaliseEmail(email) })
+    : await findAccount({ userId })
+
+  if (!invitee) return holdInviteFor({ room, address: normaliseEmail(email), role, inviter })
+
+  const inviteeId = invitee._id.toString()
   const blocked = room.isBlocked(inviteeId)
   const member = room.hasMember(inviteeId)
 
@@ -197,12 +211,85 @@ export async function inviteMember({ roomId, actorId, userId, email, role = 'edi
   // Sent even when the membership was already there, so pressing Invite again
   // is how an owner re-sends a code their guest never received. The invite
   // limiter is what stops that becoming a way to mail somebody at will.
-  const notified = await notifyInvitee({ room, invitee, inviter: await User.findById(actorId) })
+  const notified = await notifyInvitee({ room, address: invitee.email, inviter })
 
   return {
     room,
-    invited: { id: inviteeId, name: invitee.name, email: invitee.email, notified },
+    invited: { id: inviteeId, name: invitee.name, email: invitee.email, pending: false, notified },
   }
+}
+
+/**
+ * Invites an address that nobody has signed up with yet.
+ *
+ * The address is held on the room until an account exists to attach it to.
+ * Nothing about the room is disclosed by this: the invitation email is the
+ * only thing that goes anywhere, and it goes to the address the owner typed.
+ */
+async function holdInviteFor({ room, address, role, inviter }) {
+  const held = room.pendingInviteFor(address)
+
+  if (held) held.role = role
+  else room.pendingInvites.push({ email: address, role, invitedBy: inviter?._id ?? null })
+  await room.save()
+
+  logger.info({ room: room.roomId }, 'invite held for an address with no account')
+  const notified = await notifyInvitee({ room, address, inviter, newcomer: true })
+
+  return {
+    room,
+    invited: { id: null, name: null, email: address, pending: true, notified },
+  }
+}
+
+/**
+ * Turns every invitation waiting on this address into a real membership.
+ *
+ * Called as an account is created, which is the moment the address stops being
+ * just an address. Returns the rooms joined so the caller can say so.
+ */
+export async function claimPendingInvites(user) {
+  const address = normaliseEmail(user.email)
+  const waiting = await Room.find({ 'pendingInvites.email': address })
+  const joined = []
+
+  for (const room of waiting) {
+    const invite = room.pendingInviteFor(address)
+    room.pendingInvites = room.pendingInvites.filter((entry) => entry.email !== address)
+
+    // A room they had already been let into by other means needs no second
+    // membership, but the held invite still goes.
+    if (!room.hasMember(user._id)) {
+      room.members.push({ user: user._id, role: invite?.role ?? 'editor' })
+    }
+
+    await room.save()
+    joined.push(room.roomId)
+  }
+
+  if (joined.length) logger.info({ user: String(user._id), rooms: joined }, 'pending invites claimed')
+  return joined
+}
+
+/**
+ * Withdraws an invitation that was never taken up. Owner only.
+ *
+ * Separate from removeMember because there is no account to remove or to keep
+ * out — the address simply stops being expected.
+ */
+export async function cancelPendingInvite({ roomId, actorId, email }) {
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const address = normaliseEmail(email)
+
+  if (!room.pendingInviteFor(address)) {
+    throw notFound('No invitation is waiting for that address', 'invite_not_found')
+  }
+
+  room.pendingInvites = room.pendingInvites.filter((entry) => entry.email !== address)
+  await room.save()
+
+  logger.info({ room: roomId }, 'pending invite withdrawn')
+  return { room, cancelled: { email: address } }
 }
 
 /**
@@ -326,6 +413,11 @@ export async function listPeople(roomId) {
         email: entry.user.email,
         at: entry.at,
       })),
+    pending: room.pendingInvites.map((invite) => ({
+      email: invite.email,
+      role: invite.role,
+      at: invite.at,
+    })),
     participants: participants.map((participant) => participant.toPublic()),
   }
 }

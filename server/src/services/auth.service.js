@@ -4,6 +4,8 @@ import { User } from '../models/User.js'
 import { env } from '../config/env.js'
 import { conflict, unauthorized } from '../errors.js'
 import { sendVerificationEmail } from './verification.service.js'
+import { claimPendingInvites } from './room.service.js'
+import { logger } from '../config/logger.js'
 
 const ROUNDS = 10
 
@@ -41,7 +43,20 @@ export async function register({ email, password, name }) {
   // than no account.
   await sendVerificationEmail(user)
 
-  return { user: user.toPublic(), token: issueToken(user) }
+  /**
+   * Anyone invited to a room by this address has been waiting for exactly
+   * this moment. Failing here would be the wrong trade — the account is
+   * already real, and an invitation the owner can re-send is a smaller loss
+   * than a sign-up that appears to have failed.
+   */
+  let rooms = []
+  try {
+    rooms = await claimPendingInvites(user)
+  } catch (error) {
+    logger.error({ err: error, user: user.id }, 'could not claim pending room invites')
+  }
+
+  return { user: user.toPublic(), token: issueToken(user), rooms }
 }
 
 export async function login({ email, password }) {

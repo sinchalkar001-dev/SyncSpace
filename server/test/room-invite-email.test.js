@@ -108,6 +108,7 @@ describe('the invitation email', () => {
       id: guest.user.id,
       name: 'Sam',
       email: GUEST.email,
+      pending: false,
       notified: true,
     })
   })
@@ -232,11 +233,16 @@ describe('when the invitation cannot be sent', () => {
 })
 
 describe('what never sends an invitation', () => {
-  it('an address nobody has signed up with', async () => {
+  /**
+   * An address with no account behind it does get one — that is the point of a
+   * held invitation — so what is left here is a user id, which can only ever
+   * mean an account that already exists.
+   */
+  it('a user id matching nobody', async () => {
     const owner = (await register(OWNER)).body
     const room = await makeRoom(owner.token)
 
-    const res = await invite(owner.token, room.roomId, { email: 'nobody@invite.test' })
+    const res = await invite(owner.token, room.roomId, { userId: 'f'.repeat(24) })
 
     expect(res.status).toBe(404)
     expect(invitations()).toHaveLength(0)

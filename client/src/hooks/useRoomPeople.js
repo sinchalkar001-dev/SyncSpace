@@ -96,6 +96,25 @@ export function useRoomPeople(roomId, { enabled = true } = {}) {
         const invited = payload?.invited
         const who = invited?.name || address
 
+        // Nobody has signed up under that address yet. The invitation is held
+        // and becomes a membership when they do, which the owner should be
+        // told outright — otherwise the roster looks like the invite failed.
+        if (invited?.pending) {
+          return invited.notified === false
+            ? {
+                message:
+                  'Invited ' + address + ', but the email did not go out. They need to sign up ' +
+                  'with that address, then join with the code: ' + roomId,
+                duration: 12000,
+              }
+            : {
+                message:
+                  'Invited ' + address + '. They have no account yet, so we asked them to sign ' +
+                  'up with that address — the room is waiting for them.',
+                duration: 10000,
+              }
+        }
+
         if (invited?.notified) {
           return { message: 'Invited ' + who + ' — the room code is on its way to ' + invited.email }
         }
@@ -134,5 +153,16 @@ export function useRoomPeople(roomId, { enabled = true } = {}) {
     [act, roomId]
   )
 
-  return { state, people, error, pending, reload: load, invite, remove, allow }
+  /** Withdraws an invitation to somebody who never signed up. */
+  const cancelInvite = useCallback(
+    (email) =>
+      act(
+        'invite:' + email,
+        () => api.cancelInvite(roomId, email),
+        'The invitation to ' + email + ' was withdrawn'
+      ),
+    [act, roomId]
+  )
+
+  return { state, people, error, pending, reload: load, invite, remove, allow, cancelInvite }
 }

@@ -25,6 +25,7 @@ const documentedPaths = [
   '/api/v1/rooms/{roomId}',
   '/api/v1/rooms/{roomId}/blocked/{userId}',
   '/api/v1/rooms/{roomId}/invite',
+  '/api/v1/rooms/{roomId}/invites/{email}',
   '/api/v1/rooms/{roomId}/members/{userId}',
   '/api/v1/rooms/{roomId}/people',
   '/api/v1/rooms/{roomId}/replay',
