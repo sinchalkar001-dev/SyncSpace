@@ -8,8 +8,20 @@
  * see *why* nothing arrived. This is that place: it reuses the app's own relay
  * settings, then reports the provider's actual answer instead of hiding it.
  */
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { env } from '../src/config/env.js'
 import { maskEmail, relayOptions } from '../src/services/email.service.js'
+
+/**
+ * dotenv reads `.env` from the working directory rather than from beside the
+ * file that imports it, so running this from the repo root quietly consults a
+ * different — usually absent — file than the server does. Both paths are known
+ * here so the message can say which one was actually read.
+ */
+const CONSULTED = path.resolve(process.cwd(), '.env')
+const SERVER_ENV = path.resolve(fileURLToPath(new URL('../.env', import.meta.url)))
 
 const to = process.argv[2]
 
@@ -25,12 +37,49 @@ if (!to || !to.includes('@')) {
 const relay = relayOptions()
 
 if (!relay) {
+  const lines = ['No mail relay is configured, so SyncSpace logs messages instead of sending them.', '']
+
+  if (existsSync(CONSULTED)) {
+    lines.push(
+      'Read ' + CONSULTED + ', but it sets no SMTP_HOST (or SMTP_URL).',
+      'See server/.env.example for a Gmail-ready block.'
+    )
+  } else if (existsSync(SERVER_ENV)) {
+    lines.push(
+      'Looked for ' + CONSULTED + ', which does not exist.',
+      'Your settings are in ' + SERVER_ENV + ', so run this from there:',
+      '',
+      '  cd server && npm run mail:check -- you@example.com'
+    )
+  } else {
+    lines.push(
+      'There is no ' + CONSULTED + ' yet. Copy the template:',
+      '',
+      '  cp server/.env.example server/.env',
+      '',
+      'then fill in SMTP_USER and SMTP_PASS there and run this again.',
+      '',
+      'Put the password in .env and nowhere else — .env.example is committed.'
+    )
+  }
+
+  die(lines.join('\n'))
+}
+
+/**
+ * What the template ships with. Catching these costs one round trip and saves
+ * reading a 535 as a wrong app password when the password was never pasted in.
+ */
+const PLACEHOLDERS = new Set(['PASTE_YOUR_APP_PASSWORD_HERE', 'abcdefghijklmnop'])
+
+if (typeof relay !== 'string' && PLACEHOLDERS.has(relay.auth?.pass)) {
   die(
     [
-      'No mail relay is configured, so SyncSpace logs messages instead of sending them.',
+      'SMTP_PASS is still the placeholder from the template.',
       '',
-      'Set SMTP_HOST / SMTP_USER / SMTP_PASS in server/.env — see server/.env.example',
-      'for a Gmail-ready block — then run this again.',
+      'Generate a Gmail app password at https://myaccount.google.com/apppasswords',
+      '(2-Step Verification has to be on before that page offers you one), then put',
+      'it in ' + CONSULTED + '. Gmail refuses everything else with a 535.',
     ].join('\n')
   )
 }
@@ -55,7 +104,13 @@ function describe() {
 
 const { where, how, as } = describe()
 process.stdout.write(
-  ['relay:  ' + where + ' (' + how + ')', 'as:     ' + as, 'from:   ' + env.MAIL_FROM, ''].join('\n') + '\n'
+  [
+    'config: ' + CONSULTED,
+    'relay:  ' + where + ' (' + how + ')',
+    'as:     ' + as,
+    'from:   ' + env.MAIL_FROM,
+    '',
+  ].join('\n') + '\n'
 )
 
 /**

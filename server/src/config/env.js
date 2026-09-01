@@ -1,5 +1,24 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import { z } from 'zod'
+
+/**
+ * Tests get the environment the suite declares, never the developer's own.
+ *
+ * A configured relay would otherwise make `npm test` send real email through a
+ * personal account — the suite registers dozens of them — and the verification
+ * tests read their token out of the logged message, which only happens while
+ * nothing is configured. Pinning values one at a time in vitest.config.js only
+ * ever covers the ones somebody already got caught by.
+ */
+if (process.env.NODE_ENV !== 'test') dotenv.config()
+
+/**
+ * An emptied setting means "not configured", not "configured with nothing".
+ * Clearing a value is the obvious way to turn one off, and it should not fail
+ * at boot with a complaint about length.
+ */
+const blankIsUnset = (schema) =>
+  z.preprocess((value) => (typeof value === 'string' && value.trim() === '' ? undefined : value), schema)
 
 const booleanish = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
 
@@ -91,21 +110,23 @@ const schema = z
     // Outbound email, given either way round: one relay URL, or the four
     // parts a provider actually hands you. Neither set means messages are
     // logged instead of sent — enough for development; production sets a relay.
-    SMTP_URL: z.string().optional(),
+    SMTP_URL: blankIsUnset(z.string().optional()),
 
-    SMTP_HOST: z.string().trim().min(1).optional(),
+    SMTP_HOST: blankIsUnset(z.string().trim().min(1).optional()),
     SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
-    SMTP_USER: z.string().trim().min(1).optional(),
+    SMTP_USER: blankIsUnset(z.string().trim().min(1).optional()),
     /**
      * Gmail prints an app password in four groups of four. The spaces are
      * presentation — the relay refuses them — and everybody pastes what they
      * were shown, so they come off here rather than in a support thread.
      */
-    SMTP_PASS: z
-      .string()
-      .transform((value) => value.replace(/\s+/g, ''))
-      .pipe(z.string().min(1))
-      .optional(),
+    SMTP_PASS: blankIsUnset(
+      z
+        .string()
+        .transform((value) => value.replace(/\s+/g, ''))
+        .pipe(z.string().min(1))
+        .optional()
+    ),
     // TLS from the first byte (port 465). Left unset it follows the port,
     // which is what every provider's instructions assume.
     SMTP_SECURE: booleanish.optional(),
