@@ -19,6 +19,7 @@ const ROSTER = {
     { id: 'u3', name: 'Reviewer', email: 'reviewer@syncspace.test', role: 'editor' },
   ],
   blocked: [],
+  pending: [],
   participants: [],
 }
 
@@ -172,6 +173,52 @@ describe('PresenceMenu', () => {
    * finishes. That is not a failure, and must not read as one: the code stays
    * out of the toast, because nobody has to pass it on by hand yet.
    */
+  /**
+   * The case the whole held-invite mechanism exists for. Saying "invited" and
+   * nothing else would leave the owner watching a roster that never changes,
+   * with no idea the person has to sign up first.
+   */
+  it('explains that a newcomer has to sign up before the room means anything', async () => {
+    mockApi({
+      invited: { id: null, name: null, email: 'stranger@syncspace.test', pending: true, notified: true },
+    })
+    renderMenu()
+    const panel = await openPanel()
+
+    const field = await within(panel).findByLabelText('Email address to invite')
+    await userEvent.type(field, 'stranger@syncspace.test')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Invite' }))
+
+    const said = await screen.findByText(/no account yet/)
+    expect(said).toHaveTextContent('sign up with that address')
+  })
+
+  it('lists an invitation nobody has taken up, and can withdraw it', async () => {
+    mockApi({
+      roster: {
+        ...ROSTER,
+        pending: [{ email: 'stranger@syncspace.test', role: 'editor', at: new Date().toISOString() }],
+      },
+    })
+    renderMenu()
+    const panel = await openPanel()
+
+    const row = (await within(panel).findByText('stranger@syncspace.test')).closest('li')
+    expect(row).toHaveTextContent(/sign up/i)
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Withdraw' }))
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.method === 'DELETE' &&
+            call.path.endsWith('/rooms/MSTTPQuJ/invites/stranger%40syncspace.test')
+        )
+      ).toBe(true)
+    )
+  })
+
   it('says the email is still sending when the server does not know yet', async () => {
     mockApi({ invited: { ...INVITED, notified: null } })
     renderMenu()

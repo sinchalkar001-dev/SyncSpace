@@ -139,6 +139,12 @@ export const api = {
       method: 'DELETE',
     }),
 
+  /** Withdraws an invitation to an address that never signed up. */
+  cancelInvite: (roomId, email) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/invites/' + encodeURIComponent(email), {
+      method: 'DELETE',
+    }),
+
   /** Undoes a removal. */
   unblockMember: (roomId, userId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/blocked/' + encodeURIComponent(userId), {

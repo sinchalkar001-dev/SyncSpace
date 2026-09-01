@@ -102,7 +102,13 @@ alongside everyone who has actually opened the room — guests included, since t
 visit rather than by invitation. The owner can invite someone by email address there, or put them
 out again. An invite emails the person a link to the room and the room code on its own line, since a
 private room is otherwise invisible to them; inviting somebody already in the room sends it again,
-which is how an owner re-sends a code that never arrived. **Rename** names a room, or renames one created without a name. **Make public / Make private**
+which is how an owner re-sends a code that never arrived.
+
+An address nobody has signed up with is invited all the same. Membership is by account id and there
+is no account to point at yet, so the address is held on the room and the email leads with creating
+one; the moment somebody registers with it, every invitation waiting on that address becomes a real
+membership. Until then the roster lists it under **Invited, no account yet**, where the owner can
+withdraw it — which is not the same as removing a member, since there is nobody to keep out. **Rename** names a room, or renames one created without a name. **Make public / Make private**
 flips visibility in place — going private also closes every live connection, so anyone who just lost
 access has to re-authenticate. **Delete room** is owner-only and asks first; it removes the
 whiteboard, the code, the snapshot and the whole update log, and hangs up anyone still connected.
@@ -254,7 +260,8 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
 | `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
-| `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId`. Emails the invitee the room code; answers `{ room, invited }` where `invited.notified` says whether the relay took it |
+| `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId`. Emails the invitee the room code; answers `{ room, invited }`, where `invited.notified` says whether the relay took it and `invited.pending` says the address has no account yet |
+| `DELETE` | `/api/rooms/:roomId/invites/:email` | Owner only; withdraws an invitation to an address that never signed up |
 | `DELETE` | `/api/rooms/:roomId/members/:userId` | Owner only; removes someone and keeps them out |
 | `DELETE` | `/api/rooms/:roomId/blocked/:userId` | Owner only; undoes a removal |
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |

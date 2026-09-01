@@ -75,13 +75,23 @@ describe('inviting by email', () => {
     expect(res.body.room.memberCount).toBe(2)
   })
 
-  it('says so when nobody is signed up with that address', async () => {
+  /**
+   * This used to be a 404. It is the ordinary case — most people an owner
+   * wants have not signed up yet — so the address is held on the room instead
+   * and becomes a membership when an account appears under it. Covered in full
+   * by room-invite-pending.test.js; kept here so the two halves of "invite by
+   * email" are visible side by side.
+   */
+  it('holds an invitation for an address nobody has signed up with', async () => {
     const owner = (await register(OWNER)).body
     const room = await makeRoom(owner.token)
 
     const res = await invite(owner.token, room.roomId, { email: 'nobody@members.test' })
-    expect(res.status).toBe(404)
-    expect(res.body.error.code).toBe('user_not_found')
+
+    expect(res.status).toBe(200)
+    expect(res.body.invited).toMatchObject({ email: 'nobody@members.test', pending: true })
+    // Held, not granted: nobody is in the room until they exist.
+    expect(res.body.room.memberCount).toBe(1)
   })
 
   it('refuses a body that names the invitee twice', async () => {

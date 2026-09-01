@@ -33,7 +33,7 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
   useDismissable(open, close, { containerRef, triggerRef, captureEscape: true })
 
   const isOwner = Boolean(room?.owner && user?.id && room.owner === user.id)
-  const { state, people, error, pending, invite, remove, allow } = useRoomPeople(roomId, {
+  const { state, people, error, pending, invite, remove, allow, cancelInvite } = useRoomPeople(roomId, {
     enabled: open && Boolean(user?.id),
   })
 
@@ -168,6 +168,30 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
             </section>
           )}
 
+          {state === 'ready' && isOwner && people.pending?.length > 0 && (
+            <section aria-label="Invited but not signed up">
+              <h3 className="people__heading">Invited, no account yet</h3>
+              <ul className="people__list">
+                {people.pending.map((person) => (
+                  <PersonRow
+                    key={person.email}
+                    name={person.email}
+                    detail="Waiting for them to sign up with this address"
+                    tag={person.role}
+                    muted
+                    action={{
+                      label: 'Withdraw',
+                      icon: 'close',
+                      title: 'Stop expecting this address',
+                      loading: pending === 'invite:' + person.email,
+                      onClick: () => cancelInvite(person.email),
+                    }}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
           {state === 'ready' && isOwner && people.blocked?.length > 0 && (
             <section aria-label="Removed from this room">
               <h3 className="people__heading">Removed</h3>
@@ -195,7 +219,7 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
             <InviteForm
               onInvite={invite}
               pending={pending === 'invite'}
-              hint="They need a SyncSpace account under that address. We email them the room code."
+              hint="We email them the room code. No account yet? They will be asked to sign up with that address, and the room is waiting when they do."
             />
           )}
 

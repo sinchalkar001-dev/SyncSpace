@@ -346,7 +346,7 @@ export const openapiDocument = {
         tags: ['Invitations'],
         summary: 'Invite a user to a room',
         description:
-          'Owner only. Identify the invitee by userId or by email — exactly one of the two. Inviting someone already in the room succeeds without changing their role, and inviting someone who was removed lifts that removal. Every successful invite emails the invitee the room code and a link to the room, so repeating one is also how an owner re-sends it.',
+          'Owner only. Identify the invitee by userId or by email — exactly one of the two. Inviting someone already in the room succeeds without changing their role, and inviting someone who was removed lifts that removal. Every successful invite emails the invitee the room code and a link to the room, so repeating one is also how an owner re-sends it. An address nobody has signed up with is held on the room and emailed an invitation to create an account; it becomes a real membership the moment one exists, and until then it is reported as pending and listed by the roster. A userId that matches nobody is still a 404, since an id can only ever mean an existing account.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/InviteInput' } } },
@@ -371,6 +371,47 @@ export const openapiDocument = {
           ...error(403, 'Only the owner can invite people', 'not_owner', 'Only the room owner can invite people'),
           ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
           ...rateLimited('Too many invites sent, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/invites/{email}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        {
+          name: 'email',
+          in: 'path',
+          required: true,
+          schema: { type: 'string', format: 'email' },
+          description: 'The invited address, URL-encoded.',
+        },
+      ],
+      delete: {
+        tags: ['Invitations'],
+        summary: 'Withdraw an invitation that was never taken up',
+        description:
+          'Owner only. Stops an address with no account being expected. Not the same as removing a member: there is no account to put out and nobody to keep away, so nothing is recorded against them and a later invite is an ordinary invite.',
+        responses: {
+          200: {
+            description: 'The invitation is withdrawn',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    cancelled: {
+                      type: 'object',
+                      properties: { email: { type: 'string', format: 'email' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+          ...error(403, 'Only the owner can withdraw an invitation', 'not_owner', 'Only the room owner can remove people'),
+          ...error(404, 'No invitation is waiting for that address', 'invite_not_found', 'No invitation is waiting for that address'),
         },
       },
     },
@@ -793,9 +834,14 @@ export const openapiDocument = {
         type: 'object',
         description: 'Who was let into the room, and whether they were told.',
         properties: {
-          id: { type: 'string' },
-          name: { type: 'string' },
+          id: { type: 'string', nullable: true, description: 'Null while the invitation is pending.' },
+          name: { type: 'string', nullable: true, description: 'Null while the invitation is pending.' },
           email: { type: 'string', format: 'email' },
+          pending: {
+            type: 'boolean',
+            description:
+              'Nobody has signed up under this address yet, so the invitation is held on the room rather than granting membership now. It is claimed when an account is created with the address.',
+          },
           notified: {
             type: 'boolean',
             nullable: true,
@@ -829,7 +875,23 @@ export const openapiDocument = {
           },
           members: { type: 'array', items: { $ref: '#/components/schemas/Member' } },
           blocked: { type: 'array', items: { $ref: '#/components/schemas/BlockedPerson' } },
+          pending: {
+            type: 'array',
+            description:
+              'Addresses invited that nobody has signed up with yet. Each becomes a member when an account is created with it.',
+            items: { $ref: '#/components/schemas/PendingInvite' },
+          },
           participants: { type: 'array', items: { $ref: '#/components/schemas/Participant' } },
+        },
+      },
+
+      PendingInvite: {
+        type: 'object',
+        description: 'An invitation waiting on an account that does not exist yet.',
+        properties: {
+          email: { type: 'string', format: 'email' },
+          role: { type: 'string', enum: ['editor', 'viewer'] },
+          at: { type: 'string', format: 'date-time' },
         },
       },
 
