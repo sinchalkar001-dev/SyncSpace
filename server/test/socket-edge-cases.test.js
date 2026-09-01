@@ -1,4 +1,3 @@
-import request from 'supertest'
 import { io as ioClient } from 'socket.io-client'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMemoryMongo, stopMemoryMongo, waitFor } from './helpers/db.js'

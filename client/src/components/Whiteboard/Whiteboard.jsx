@@ -141,9 +141,10 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         height: Math.abs(b.y - a.y),
       }
 
-      setSelectedIds(shapesInRect(shapes.toArray().map((shape) => shape.toJSON()), rect))
+      // Use the already-serialized list from useShapes instead of re-serializing
+      setSelectedIds(shapesInRect(list, rect))
     },
-    [shapes]
+    [shapes, list]
   )
 
   const commitDraft = useCallback(() => {
@@ -224,18 +225,14 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       const scale = stage.scaleX() || 1
       const radius = ERASER_RADIUS / scale
 
-      const hits = shapesHitBy(
-        shapes.toArray().map((shape) => shape.toJSON()),
-        point.x,
-        point.y,
-        radius
-      )
+      // Use the already-serialized list from useShapes instead of re-serializing
+      const hits = shapesHitBy(list, point.x, point.y, radius)
       if (hits.length === 0) return
 
       hits.forEach((id) => removeShape(shapes, id))
       setSelectedIds((current) => current.filter((id) => !hits.includes(id)))
     },
-    [shapes]
+    [shapes, list]
   )
 
   const handlePointerDown = useCallback(
@@ -427,8 +424,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
   const handleShapeDragEnd = useCallback(
     (id, patch) => {
-      const all = shapes.toArray().map((shape) => shape.toJSON())
-      const moved = all.find((shape) => shape.id === id)
+      const moved = list.find((shape) => shape.id === id)
       const dx = patch.x - (moved?.x || 0)
       const dy = patch.y - (moved?.y || 0)
 
@@ -439,7 +435,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
         selectedIds
           .filter((other) => other !== id)
           .forEach((other) => {
-            const shape = all.find((candidate) => candidate.id === other)
+            const shape = list.find((candidate) => candidate.id === other)
             if (!shape || shape.locked) return
             updateShape(shapes, other, { x: (shape.x || 0) + dx, y: (shape.y || 0) + dy })
           })
@@ -447,7 +443,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
       shapes.doc ? shapes.doc.transact(apply) : apply()
     },
-    [shapes, selectedIds]
+    [shapes, selectedIds, list]
   )
 
   const selection = useMemo(
@@ -502,29 +498,30 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       const pointer = stage.getPointerPosition()
       if (!pointer) return
 
-      const oldScale = viewport.scale
-      const anchor = {
-        x: (pointer.x - viewport.x) / oldScale,
-        y: (pointer.y - viewport.y) / oldScale,
-      }
-      const factor = event.evt.deltaY > 0 ? 1 / 1.08 : 1.08
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, oldScale * factor))
-
-      setViewport({
-        scale,
-        x: pointer.x - anchor.x * scale,
-        y: pointer.y - anchor.y * scale,
+      setViewport((current) => {
+        const oldScale = current.scale
+        const anchor = {
+          x: (pointer.x - current.x) / oldScale,
+          y: (pointer.y - current.y) / oldScale,
+        }
+        const factor = event.evt.deltaY > 0 ? 1 / 1.08 : 1.08
+        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, oldScale * factor))
+        return {
+          scale,
+          x: pointer.x - anchor.x * scale,
+          y: pointer.y - anchor.y * scale,
+        }
       })
     },
-    [viewport, setViewport]
+    [setViewport]
   )
 
   const handleStageDragEnd = useCallback(
     (event) => {
       if (event.target !== event.target.getStage()) return
-      setViewport({ ...viewport, x: event.target.x(), y: event.target.y() })
+      setViewport((current) => ({ ...current, x: event.target.x(), y: event.target.y() }))
     },
-    [viewport, setViewport]
+    [setViewport]
   )
 
   const handleKeyDown = useCallback(
@@ -548,10 +545,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
         if (key === 'c' && selectedIds.length) {
           event.preventDefault()
-          clipboardRef.current = shapes
-            .toArray()
-            .map((shape) => shape.toJSON())
-            .filter((shape) => selectedIds.includes(shape.id))
+          clipboardRef.current = list.filter((shape) => selectedIds.includes(shape.id))
           return
         }
 
@@ -579,7 +573,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
         if (key === 'a') {
           event.preventDefault()
-          setSelectedIds(shapes.toArray().map((shape) => shape.get('id')).filter(Boolean))
+          setSelectedIds(list.map((shape) => shape.id).filter(Boolean))
           return
         }
 
@@ -600,7 +594,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
       const next = SHORTCUTS[event.key.toLowerCase()]
       if (next) setTool(next)
     },
-    [selectedIds, shapes, setTool, undo, redo, readOnly]
+    [selectedIds, list, shapes, setTool, undo, redo, readOnly]
   )
 
   // A pointer released outside the canvas must still close the stroke.
@@ -681,6 +675,8 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
                   onHoverEnd={handleHoverEnd}
                 />
               ))}
+            </Layer>
+            <Layer listening={false}>
               {draft && (
                 <ShapeNode
                   shape={{ ...draft, id: '__draft__' }}
