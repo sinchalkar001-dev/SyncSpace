@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { User } from '../models/User.js'
 import { badRequest, conflict, notFound } from '../errors.js'
 import { env } from '../config/env.js'
+import { logger } from '../config/logger.js'
 import { sendVerificationEmail as sendMessage } from './email.service.js'
 
 // Verification links should be used promptly; 24h is the usual balance.
@@ -37,9 +38,17 @@ function confirmLink(raw) {
  * a relay outage is answered by the user pressing "resend", not by failing
  * registration — and with no SMTP configured it logs the message, which
  * keeps development and tests working without credentials.
+ *
+ * The catch is for the day that stops being true. Nothing awaits this call:
+ * registration has already answered by the time it settles, so a rejection
+ * here would have nobody to catch it, and an unhandled rejection ends the
+ * process — losing every open room to a mail problem. Only the error class is
+ * logged, since relay failures can echo credentials.
  */
-async function deliverVerificationLink(email, raw) {
-  await sendMessage(email, { url: confirmLink(raw) })
+function deliverVerificationLink(email, raw) {
+  return sendMessage(email, { url: confirmLink(raw) }).catch((error) => {
+    logger.warn({ code: error?.code ?? error?.name }, 'could not send the verification email')
+  })
 }
 
 /** Issues a fresh token for `user` and hands the confirm link to the mailer. */

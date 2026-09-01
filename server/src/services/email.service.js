@@ -96,3 +96,52 @@ export function sendVerificationEmail(to, { url }) {
 
   return mailer.send({ to, subject, text, html })
 }
+
+/**
+ * Anything a person typed is escaped before it reaches the HTML part. Room
+ * names and display names are free text, and an email client is one more
+ * place that will happily render a stray tag.
+ */
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * The room invitation.
+ *
+ * A private room is invisible to everyone outside it, so this message is the
+ * only thing that tells the invitee it exists. It carries both ways in: the
+ * link for one click, and the code underneath it, because a code can be typed
+ * into the dashboard by someone who would rather not follow a link in an
+ * email — and because it is what gets read out loud over a call.
+ */
+export function sendRoomInviteEmail(to, { inviter, room, code, url }) {
+  const who = inviter || 'Someone'
+  const what = room || code
+
+  const subject = who + ' invited you to ' + what + ' on SyncSpace'
+  const text = [
+    who + ' invited you to collaborate on "' + what + '" in SyncSpace.',
+    '',
+    'Open the room:',
+    url,
+    '',
+    'Or go to your dashboard and join with this room code: ' + code,
+    '',
+    'The room is private, so sign in with this address to get in.',
+  ].join('\n')
+
+  const html =
+    '<p><strong>' + escapeHtml(who) + '</strong> invited you to collaborate on ' +
+    '<strong>' + escapeHtml(what) + '</strong> in SyncSpace.</p>' +
+    '<p><a href="' + escapeHtml(url) + '">Open the room</a></p>' +
+    '<p>Or join from your dashboard with the room code ' +
+    '<strong>' + escapeHtml(code) + '</strong>.</p>' +
+    '<p>The room is private, so sign in with this address to get in.</p>'
+
+  return mailer.send({ to, subject, text, html })
+}

@@ -195,7 +195,7 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
             <InviteForm
               onInvite={invite}
               pending={pending === 'invite'}
-              hint="They need a SyncSpace account under that address."
+              hint="They need a SyncSpace account under that address. We email them the room code."
             />
           )}
 
