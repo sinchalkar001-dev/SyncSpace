@@ -125,11 +125,13 @@ async function findAccount({ userId, email }) {
  * How long an invite waits on the mail relay before answering anyway.
  *
  * The membership is saved before this starts, so a slow relay must never hold
- * up the reply. The owner is still told whether the code went out, because if
- * it did not, passing it on is now their job — and a "sent" they cannot trust
- * would be worse than an honest "we could not".
+ * up the reply. Gmail takes the better part of four seconds for a single
+ * message — TCP, STARTTLS, AUTH and the message itself, on a fresh connection
+ * every time — so anything tighter turns the usual case into a coin flip.
+ * This is sized to clear that comfortably; it only bites when a relay is
+ * genuinely wedged.
  */
-const NOTIFY_TIMEOUT_MS = 4000
+const NOTIFY_TIMEOUT_MS = 10000
 
 /**
  * Tells the invitee they are in, and hands them the way to get there.
@@ -138,8 +140,15 @@ const NOTIFY_TIMEOUT_MS = 4000
  * is silent: the room turns up on their dashboard and they have no reason to
  * look. Failure is reported, never thrown — the membership is already written,
  * and refusing an invite that worked would be the worse answer.
+ *
+ * Answers true when the relay took the message, false when it refused, and
+ * null when the deadline came first and the send is still going. That third
+ * answer matters: reporting a slow send as a failure sends the owner chasing
+ * their guest with a code that is already in their inbox.
  */
 async function notifyInvitee({ room, invitee, inviter }) {
+  const PENDING = Symbol('still sending')
+
   const sent = sendRoomInviteEmail(invitee.email, {
     inviter: inviter?.name,
     room: room.name,
@@ -152,11 +161,11 @@ async function notifyInvitee({ room, invitee, inviter }) {
 
   const deadline = new Promise((resolve) => {
     // Unreferenced: an invite still in the relay must not hold the process open.
-    setTimeout(resolve, NOTIFY_TIMEOUT_MS, { delivered: false }).unref?.()
+    setTimeout(resolve, NOTIFY_TIMEOUT_MS, PENDING).unref?.()
   })
 
-  const { delivered } = await Promise.race([sent, deadline])
-  return delivered
+  const result = await Promise.race([sent, deadline])
+  return result === PENDING ? null : result.delivered
 }
 
 /**

@@ -81,9 +81,12 @@ export function useRoomPeople(roomId, { enabled = true } = {}) {
 
   /**
    * The invitation itself is an email, so what there is to say afterwards
-   * depends on whether it left. When it did not, the room code goes into the
-   * toast: passing it on has just become the owner's job, and going to look
-   * for it is a step they should not have to take.
+   * depends on what became of it. Three answers, not two: sent, refused, and
+   * still going when the server stopped waiting.
+   *
+   * Only a refusal makes passing the code on the owner's job, so only a
+   * refusal puts the code in the toast. Treating a slow send as a failure
+   * would send them chasing their guest over a message already in the inbox.
    */
   const invite = useCallback(
     (email) => {
@@ -95,6 +98,10 @@ export function useRoomPeople(roomId, { enabled = true } = {}) {
 
         if (invited?.notified) {
           return { message: 'Invited ' + who + ' — the room code is on its way to ' + invited.email }
+        }
+
+        if (invited?.notified === null) {
+          return { message: 'Invited ' + who + '. The email to ' + invited.email + ' is still sending.' }
         }
 
         return {
