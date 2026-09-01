@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { loadEnv } from '../src/config/env.js'
 
@@ -100,6 +105,50 @@ describe('environment validation', () => {
     expect(() => loadEnv({ SMTP_URL: 'smtps://user:pass@mail.test:465' })).toThrow(
       /MAIL_FROM is required/
     )
+  })
+
+  /**
+   * The suite must never inherit a developer's own .env.
+   *
+   * With a relay configured there, `npm test` would send real email through a
+   * personal account — it registers dozens of them — and the verification
+   * tests read their token out of the logged message, which only happens while
+   * nothing is configured. Loading .env is a module-level side effect, so this
+   * is checked the only way it can be: from outside, in a directory that has one.
+   */
+  describe('a developer .env', () => {
+    const MODULE = pathToFileURL(path.resolve('src/config/env.js')).href
+    const READ_IT = 'const m = await import(' + JSON.stringify(MODULE) + ');' +
+      'process.stdout.write(String(m.env.SMTP_HOST))'
+
+    function smtpHostSeenBy(nodeEnv) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'syncspace-env-'))
+      writeFileSync(
+        path.join(dir, '.env'),
+        'SMTP_HOST=relay.from-dotenv.test\nMAIL_FROM=dev@from-dotenv.test\n'
+      )
+
+      const inherited = { ...process.env, NODE_ENV: nodeEnv }
+      delete inherited.SMTP_HOST
+
+      try {
+        return execFileSync(process.execPath, ['--input-type=module', '-e', READ_IT], {
+          cwd: dir,
+          env: inherited,
+          encoding: 'utf8',
+        })
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('is read when the server runs normally', () => {
+      expect(smtpHostSeenBy('development')).toBe('relay.from-dotenv.test')
+    })
+
+    it('is ignored under test, so the suite cannot send real mail', () => {
+      expect(smtpHostSeenBy('test')).toBe('undefined')
+    })
   })
 
   /**
