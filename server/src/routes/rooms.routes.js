@@ -11,6 +11,8 @@ import {
   inviteMember,
   listPeople,
   listRoomsForUser,
+  removeMember,
+  unblockMember,
   updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
@@ -51,10 +53,31 @@ const runSchema = z.object({
   as: z.string().trim().max(32).optional(),
 })
 
-const inviteSchema = z.object({
-  userId: z.string().regex(/^[a-f\d]{24}$/i, 'must be a user id'),
-  role: z.enum(['editor', 'viewer']).optional(),
-})
+const USER_ID = /^[a-f\d]{24}$/i
+
+/**
+ * Who to invite. An id is what another API client has to hand; an email is
+ * what the person running the room actually knows about their guest, so both
+ * are accepted — but only one at a time, since two answers to "who" would
+ * have to be reconciled.
+ */
+const inviteSchema = z
+  .object({
+    userId: z.string().regex(USER_ID, 'must be a user id').optional(),
+    email: z.string().trim().max(254).email('must be an email address').optional(),
+    role: z.enum(['editor', 'viewer']).optional(),
+  })
+  .refine((value) => Boolean(value.userId) !== Boolean(value.email), {
+    message: 'provide either a userId or an email',
+  })
+
+/** Path params carry no body to validate, so the id is checked in place. */
+function userIdParam(req) {
+  if (!USER_ID.test(req.params.userId)) {
+    throw badRequest('userId: must be a user id', 'validation_failed')
+  }
+  return req.params.userId
+}
 
 /** Shared guard: the room must exist and be readable by the caller. */
 async function loadAccessibleRoom(req) {
@@ -153,6 +176,7 @@ export function createRoomsRouter() {
           roomId: req.params.roomId,
           actorId: req.user.id,
           userId: req.body.userId,
+          email: req.body.email,
           role: req.body.role,
         })
         res.json({ room: room.toPublic() })
@@ -161,6 +185,38 @@ export function createRoomsRouter() {
       }
     }
   )
+
+  /**
+   * Removes someone and keeps them out, which is why it is not simply the
+   * inverse of an invite: a public room would otherwise let them straight
+   * back in through the link.
+   */
+  roomsRouter.delete('/:roomId/members/:userId', requireAuth, async (req, res, next) => {
+    try {
+      const { room, removed } = await removeMember({
+        roomId: req.params.roomId,
+        actorId: req.user.id,
+        userId: userIdParam(req),
+      })
+      res.json({ room: room.toPublic(), removed })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /** Undoes a removal. The person still needs an invite to a private room. */
+  roomsRouter.delete('/:roomId/blocked/:userId', requireAuth, async (req, res, next) => {
+    try {
+      const room = await unblockMember({
+        roomId: req.params.roomId,
+        actorId: req.user.id,
+        userId: userIdParam(req),
+      })
+      res.json({ room: room.toPublic() })
+    } catch (err) {
+      next(err)
+    }
+  })
 
   roomsRouter.get('/:roomId/replay', optionalAuth, async (req, res, next) => {
     try {

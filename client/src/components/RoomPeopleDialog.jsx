@@ -1,20 +1,11 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client.js'
+import { useAuth } from '../auth/useAuth.js'
+import { useRoomPeople } from '../hooks/useRoomPeople.js'
 import { formatWhen, roomLabel } from '../lib/rooms.js'
+import { InviteForm, PersonRow } from './PeopleList.jsx'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 import { Icon } from './ui/Icon.jsx'
 import { Skeleton } from './ui/Skeleton.jsx'
-
-function Avatar({ name, muted }) {
-  return (
-    <span className={muted ? 'people__avatar people__avatar--muted' : 'people__avatar'}>
-      {String(name || '?')
-        .slice(0, 1)
-        .toUpperCase()}
-    </span>
-  )
-}
 
 function PeopleSkeleton() {
   return (
@@ -35,34 +26,16 @@ function PeopleSkeleton() {
  * Who can reach a room, and who actually has.
  *
  * "Members" are the owner plus anyone invited; "Opened this room" is drawn
- * from real visits, so it includes guests who never had an account.
+ * from real visits, so it includes guests who never had an account. The owner
+ * also gets the controls: invite by email, put somebody out, let them back.
  */
 export function RoomPeopleDialog({ room, open, onClose }) {
-  const [state, setState] = useState('loading')
-  const [people, setPeople] = useState(null)
-  const [error, setError] = useState(null)
+  const { user } = useAuth()
+  const { state, people, error, pending, invite, remove, allow } = useRoomPeople(room?.roomId, {
+    enabled: open && Boolean(room),
+  })
 
-  useEffect(() => {
-    if (!open || !room) return undefined
-
-    const controller = new AbortController()
-    setState('loading')
-    setError(null)
-
-    api
-      .roomPeople(room.roomId, controller.signal)
-      .then((payload) => {
-        setPeople(payload)
-        setState('ready')
-      })
-      .catch((cause) => {
-        if (cause?.name === 'AbortError') return
-        setError(cause.message)
-        setState('error')
-      })
-
-    return () => controller.abort()
-  }, [open, room])
+  const isOwner = Boolean(room?.owner && user?.id && room.owner === user.id)
 
   return (
     <Modal
@@ -87,14 +60,23 @@ export function RoomPeopleDialog({ room, open, onClose }) {
             <h3 className="people__heading">Members</h3>
             <ul className="people__list">
               {people.members.map((member) => (
-                <li key={member.id}>
-                  <Avatar name={member.name} />
-                  <span className="people__who">
-                    <strong>{member.name}</strong>
-                    <span className="muted">{member.email}</span>
-                  </span>
-                  <span className="people__tag">{member.role}</span>
-                </li>
+                <PersonRow
+                  key={member.id}
+                  name={member.name}
+                  detail={member.email}
+                  tag={member.role}
+                  action={
+                    isOwner && member.id !== room.owner
+                      ? {
+                          label: 'Remove',
+                          icon: 'close',
+                          title: 'Withdraw their access to this room',
+                          loading: pending === member.id,
+                          onClick: () => remove(member),
+                        }
+                      : null
+                  }
+                />
               ))}
               {people.members.length === 0 && (
                 <li className="muted people__empty">Nobody has been invited yet.</li>
@@ -102,21 +84,68 @@ export function RoomPeopleDialog({ room, open, onClose }) {
             </ul>
           </section>
 
+          {isOwner && (
+            <section>
+              <h3 className="people__heading">Invite someone</h3>
+              <InviteForm
+                onInvite={invite}
+                pending={pending === 'invite'}
+                hint="They need a SyncSpace account under that address. A private room stays shut to everyone else."
+              />
+            </section>
+          )}
+
+          {isOwner && people.blocked?.length > 0 && (
+            <section>
+              <h3 className="people__heading">Removed</h3>
+              <ul className="people__list">
+                {people.blocked.map((person) => (
+                  <PersonRow
+                    key={person.id}
+                    name={person.name}
+                    detail={person.email + ' · removed ' + formatWhen(person.at)}
+                    muted
+                    action={{
+                      label: 'Allow back',
+                      icon: 'check',
+                      title: 'Let them open this room again',
+                      loading: pending === person.id,
+                      onClick: () => allow(person),
+                    }}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section>
             <h3 className="people__heading">Opened this room</h3>
             <ul className="people__list">
               {people.participants.map((person) => (
-                <li key={person.id}>
-                  <Avatar name={person.name} muted={person.guest} />
-                  <span className="people__who">
-                    <strong>{person.name}</strong>
-                    <span className="muted">
-                      {person.visits} visit{person.visits === 1 ? '' : 's'} · last{' '}
-                      {formatWhen(person.lastSeenAt)}
-                    </span>
-                  </span>
-                  {person.guest && <span className="people__tag">guest</span>}
-                </li>
+                <PersonRow
+                  key={person.id}
+                  name={person.name}
+                  muted={person.guest}
+                  tag={person.guest ? 'guest' : null}
+                  detail={
+                    person.visits +
+                    ' visit' +
+                    (person.visits === 1 ? '' : 's') +
+                    ' · last ' +
+                    formatWhen(person.lastSeenAt)
+                  }
+                  action={
+                    isOwner && person.userId && person.userId !== room.owner
+                      ? {
+                          label: 'Remove',
+                          icon: 'close',
+                          title: 'Withdraw their access to this room',
+                          loading: pending === person.userId,
+                          onClick: () => remove({ id: person.userId, name: person.name }),
+                        }
+                      : null
+                  }
+                />
               ))}
               {people.participants.length === 0 && (
                 <li className="muted people__empty">Nobody has opened this room yet.</li>

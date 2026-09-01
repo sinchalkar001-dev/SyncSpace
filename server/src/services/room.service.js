@@ -1,12 +1,25 @@
 import { nanoid } from '../utils/id.js'
 import { Room } from '../models/Room.js'
+import { User } from '../models/User.js'
 import { Snapshot } from '../models/Snapshot.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
 import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
 import { logger } from '../config/logger.js'
-import { forbidden, notFound } from '../errors.js'
+import { badRequest, forbidden, notFound } from '../errors.js'
+
+/**
+ * Close frame for a collab connection the server no longer wants.
+ *
+ * 4205 is Hocuspocus's "Reset Connection": the provider hangs up and comes
+ * straight back, and that reconnect is what re-runs onAuthenticate — so the
+ * person who just lost access gets a real authentication failure, and the room
+ * gate can say why. Closing with 4403 would look more apt and behave worse:
+ * the provider treats it as final, never retries, and leaves them staring at a
+ * stale document that has quietly stopped syncing.
+ */
+const RECONNECT_FRAME = { code: 4205, reason: 'Reset Connection' }
 
 /**
  * Rooms opened by URL are created on demand and are public, which keeps
@@ -37,21 +50,152 @@ export async function getRoom(roomId) {
   return room
 }
 
-export async function inviteMember({ roomId, actorId, userId, role = 'editor' }) {
+/** Loads a room for an operation only its owner may perform. */
+async function ownedRoom(roomId, actorId, message) {
   const room = await getRoom(roomId)
   if (!room.owner || String(room.owner) !== String(actorId)) {
-    throw forbidden('Only the room owner can invite people', 'not_owner')
+    throw forbidden(message, 'not_owner')
   }
-  if (room.hasMember(userId)) return room
-
-  room.members.push({ user: userId, role })
-  await room.save()
   return room
 }
 
-/** Public rooms are open to anyone; private rooms require membership. */
+/**
+ * Hangs up everyone in a room whose identity `matches`.
+ *
+ * Both transports have to be told. The Socket.io channel carries presence and
+ * is where a client learns it was removed; Hocuspocus carries the document
+ * itself, and leaving that one open would let someone who just lost access
+ * carry on typing on the whiteboard.
+ *
+ * Failures are logged, never thrown: the membership change is already written,
+ * and any connection that survives is refused at its next authentication.
+ */
+async function hangUp({ roomId, reason, matches }) {
+  try {
+    const document = getHocuspocus()?.documents?.get(roomId)
+    for (const { connection } of document?.connections?.values() ?? []) {
+      if (matches(connection.context?.user)) connection.close(RECONNECT_FRAME)
+    }
+  } catch (error) {
+    logger.warn({ err: error, room: roomId }, 'could not close collab connections')
+  }
+
+  try {
+    const io = getIo()
+    if (!io) return
+
+    const sockets = await io.in(roomId).fetchSockets()
+    const removed = sockets.filter((socket) => matches(socket.data.user))
+
+    for (const socket of removed) {
+      socket.emit('room:kicked', { roomId, reason })
+      socket.leave(roomId)
+      socket.data.roomId = null
+    }
+
+    if (removed.length > 0) {
+      const members = sockets
+        .filter((socket) => !removed.includes(socket))
+        .map((socket) => ({ socketId: socket.id, user: socket.data.user }))
+      io.to(roomId).emit('room:presence', { roomId, members })
+    }
+  } catch (error) {
+    logger.warn({ err: error, room: roomId }, 'could not close socket connections')
+  }
+}
+
+/** The account being invited or removed, by id or by the email people know. */
+async function findAccount({ userId, email }) {
+  const user = email
+    ? await User.findOne({ email: String(email).trim().toLowerCase() })
+    : await User.findById(userId)
+
+  if (!user) {
+    throw notFound(
+      email ? 'Nobody is signed up with that email address' : 'No such user',
+      'user_not_found'
+    )
+  }
+  return user
+}
+
+/**
+ * Adds someone to a room. Owner only.
+ *
+ * An invite is also the way back in for someone who was removed, so it clears
+ * any block — otherwise inviting a person you had kicked would look like it
+ * worked and then refuse them at the door.
+ */
+export async function inviteMember({ roomId, actorId, userId, email, role = 'editor' }) {
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can invite people')
+  const invitee = await findAccount({ userId, email })
+  const inviteeId = invitee._id.toString()
+
+  const blocked = room.isBlocked(inviteeId)
+  const member = room.hasMember(inviteeId)
+  if (!blocked && member) return room
+
+  if (blocked) room.blocked = room.blocked.filter((entry) => String(entry.user) !== inviteeId)
+  if (!member) room.members.push({ user: inviteeId, role })
+  await room.save()
+
+  logger.info({ room: roomId, user: inviteeId }, 'member invited')
+  return room
+}
+
+/**
+ * Removes someone from a room and keeps them out. Owner only.
+ *
+ * Dropping the membership is enough for a private room, but a public one is
+ * open to anyone holding the link, so the person is recorded as blocked as
+ * well and refused by canAccess whichever way the room is set. Their live
+ * connections close immediately rather than at their next reload, and their
+ * visit history goes too — a roster that lists someone as both removed and
+ * present reads like two different people.
+ */
+export async function removeMember({ roomId, actorId, userId }) {
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const target = await findAccount({ userId })
+  const targetId = target._id.toString()
+
+  if (String(room.owner) === targetId) {
+    throw badRequest('The room owner cannot be removed', 'cannot_remove_owner')
+  }
+
+  room.members = room.members.filter((member) => String(member.user) !== targetId)
+  if (!room.isBlocked(targetId)) room.blocked.push({ user: targetId, at: new Date() })
+  await room.save()
+
+  await Participant.deleteMany({ roomId, user: targetId })
+  await hangUp({
+    roomId,
+    reason: 'removed_by_owner',
+    matches: (user) => Boolean(user?.id) && String(user.id) === targetId,
+  })
+
+  logger.info({ room: roomId, user: targetId }, 'member removed')
+  return { room, removed: { id: targetId, name: target.name, email: target.email } }
+}
+
+/** Lets a removed person back in, as far as the room's own rules allow. */
+export async function unblockMember({ roomId, actorId, userId }) {
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const id = String(userId)
+
+  room.blocked = room.blocked.filter((entry) => String(entry.user) !== id)
+  await room.save()
+
+  logger.info({ room: roomId, user: id }, 'member unblocked')
+  return room
+}
+
+/**
+ * Public rooms are open to anyone; private rooms require membership. Someone
+ * the owner has removed is refused either way.
+ */
 export function canAccess(room, userId) {
   if (!room) return false
+  if (room.isBlocked(userId)) return false
   if (room.isPublic) return true
   return room.hasMember(userId)
 }
@@ -89,12 +233,13 @@ export async function recordParticipant({ roomId, user }) {
   )
 }
 
-/** Owner, invited members, and everyone who has actually opened the room. */
+/** Owner, invited members, anyone removed, and everyone who has opened the room. */
 export async function listPeople(roomId) {
   const room = await getRoom(roomId)
   await room.populate([
     { path: 'owner', select: 'name email' },
     { path: 'members.user', select: 'name email' },
+    { path: 'blocked.user', select: 'name email' },
   ])
 
   const participants = await Participant.find({ roomId }).sort({ lastSeenAt: -1 }).limit(100)
@@ -111,6 +256,14 @@ export async function listPeople(roomId) {
         email: member.user.email,
         role: member.role,
       })),
+    blocked: room.blocked
+      .filter((entry) => entry.user)
+      .map((entry) => ({
+        id: entry.user._id.toString(),
+        name: entry.user.name,
+        email: entry.user.email,
+        at: entry.at,
+      })),
     participants: participants.map((participant) => participant.toPublic()),
   }
 }
@@ -118,15 +271,13 @@ export async function listPeople(roomId) {
 /**
  * Renames a room or flips its visibility. Owner only.
  *
- * Going private closes every live connection so anyone who just lost access
- * is forced to re-authenticate; members reconnect on their own.
+ * Going private closes every connection that no longer belongs, so anyone who
+ * just lost access is forced to re-authenticate; members stay where they are.
+ * It is also the only way to clear guests out of a room, since an anonymous
+ * visitor has no account to remove.
  */
 export async function updateRoom({ roomId, actorId, patch }) {
-  const room = await getRoom(roomId)
-
-  if (!room.owner || String(room.owner) !== String(actorId)) {
-    throw forbidden('Only the room owner can change this room', 'not_owner')
-  }
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can change this room')
 
   const closing = patch.isPublic === false && room.isPublic === true
 
@@ -135,50 +286,11 @@ export async function updateRoom({ roomId, actorId, patch }) {
   await room.save()
 
   if (closing) {
-    try {
-      getHocuspocus()?.closeConnections(roomId)
-    } catch (error) {
-      logger.warn({ err: error, room: roomId }, 'could not close connections after going private')
-    }
-
-    // Kick non-member users from Socket.io so they lose real-time access
-    // immediately, matching the documented intent: "Going private closes every
-    // live connection so anyone who just lost access is forced to
-    // re-authenticate; members reconnect on their own."
-    try {
-      const io = getIo()
-      if (io) {
-        const sockets = await io.in(roomId).fetchSockets()
-        const toKick = []
-        const remaining = []
-
-        for (const socket of sockets) {
-          if (!room.hasMember(socket.data.user?.id)) {
-            toKick.push(socket)
-          } else {
-            remaining.push(socket)
-          }
-        }
-
-        for (const socket of toKick) {
-          socket.emit('room:kicked', { roomId, reason: 'room_became_private' })
-          socket.leave(roomId)
-        }
-
-        if (toKick.length > 0) {
-          const members = remaining.map((s) => ({
-            socketId: s.id,
-            user: s.data.user,
-          }))
-          io.to(roomId).emit('room:presence', { roomId, members })
-        }
-      }
-    } catch (error) {
-      logger.warn(
-        { err: error, room: roomId },
-        'could not close socket connections after going private'
-      )
-    }
+    await hangUp({
+      roomId,
+      reason: 'room_became_private',
+      matches: (user) => !room.hasMember(user?.id),
+    })
   }
 
   logger.info({ room: roomId, patch }, 'room updated')
@@ -194,33 +306,10 @@ export async function updateRoom({ roomId, actorId, patch }) {
  * deliberately, bypassing that guard.
  */
 export async function deleteRoom({ roomId, actorId }) {
-  const room = await getRoom(roomId)
+  const room = await ownedRoom(roomId, actorId, 'Only the room owner can delete this room')
 
-  if (!room.owner || String(room.owner) !== String(actorId)) {
-    throw forbidden('Only the room owner can delete this room', 'not_owner')
-  }
-
-  // Hang up anyone still in the room so they stop writing to it.
-  try {
-    getHocuspocus()?.closeConnections(roomId)
-  } catch (error) {
-    logger.warn({ err: error, room: roomId }, 'could not close collab connections on delete')
-  }
-
-  // Also disconnect Socket.io users from the deleted room
-  try {
-    const io = getIo()
-    if (io) {
-      const sockets = await io.in(roomId).fetchSockets()
-      for (const socket of sockets) {
-        socket.emit('room:kicked', { roomId, reason: 'room_deleted' })
-        socket.leave(roomId)
-        socket.data.roomId = null
-      }
-    }
-  } catch (error) {
-    logger.warn({ err: error, room: roomId }, 'could not close socket connections on delete')
-  }
+  // Hang up everyone still in the room so they stop writing to it.
+  await hangUp({ roomId, reason: 'room_deleted', matches: () => true })
 
   const [updates] = await Promise.all([
     DocUpdate.collection.deleteMany({ roomId }),
@@ -229,6 +318,6 @@ export async function deleteRoom({ roomId, actorId }) {
   ])
   await Room.deleteOne({ roomId })
 
-  logger.info({ room: roomId, updates: updates.deletedCount }, 'room deleted')
+  logger.info({ room: room.roomId, updates: updates.deletedCount }, 'room deleted')
   return { roomId, deletedUpdates: updates.deletedCount }
 }
