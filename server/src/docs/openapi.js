@@ -56,7 +56,7 @@ export const openapiDocument = {
     { name: 'Auth', description: 'Registration, login, password change, email verification' },
     { name: 'Users', description: 'Reading account data — your own profile and room rosters' },
     { name: 'Rooms', description: 'Creating, finding, renaming, publishing and deleting rooms' },
-    { name: 'Invitations', description: 'Granting users access to a room' },
+    { name: 'Invitations', description: 'Granting and withdrawing access to a room' },
     { name: 'Replay', description: 'Timeline metadata and historical document state' },
     { name: 'Code execution', description: 'Running a room buffer and discovering runnable toolchains' },
   ],
@@ -325,7 +325,7 @@ export const openapiDocument = {
         tags: ['Users', 'Rooms'],
         summary: 'Roster of a room',
         description:
-          'Owner, invited members, and everyone who actually opened the room. Owned rooms show this only to owner and members. Participants are ordered by most recent visit and capped at the latest 100.',
+          'Owner, invited members, anyone the owner removed, and everyone who actually opened the room. Owned rooms show this only to owner and members. Participants are ordered by most recent visit and capped at the latest 100.',
         responses: {
           200: {
             description: 'Roster',
@@ -345,7 +345,8 @@ export const openapiDocument = {
       post: {
         tags: ['Invitations'],
         summary: 'Invite a user to a room',
-        description: 'Owner only. Inviting someone already in the room succeeds without changing their role.',
+        description:
+          'Owner only. Identify the invitee by userId or by email — exactly one of the two. Inviting someone already in the room succeeds without changing their role, and inviting someone who was removed lifts that removal.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/InviteInput' } } },
@@ -360,6 +361,61 @@ export const openapiDocument = {
           ...error(403, 'Only the owner can invite people', 'not_owner', 'Only the room owner can invite people'),
           ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
           ...rateLimited('Too many invites sent, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/members/{userId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { $ref: '#/components/parameters/userId' },
+      ],
+      delete: {
+        tags: ['Invitations'],
+        summary: 'Remove someone from a room',
+        description:
+          'Owner only. Drops the membership and records the person as removed, so a public room cannot let them straight back in through its link; a later invite lifts it. Their live document and presence connections close immediately, and their visit history is cleared.',
+        responses: {
+          200: {
+            description: 'Membership withdrawn',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    removed: { $ref: '#/components/schemas/Member' },
+                  },
+                },
+              },
+            },
+          },
+          ...error(400, 'The owner cannot be removed from their own room', 'cannot_remove_owner', 'The room owner cannot be removed'),
+          ...authRequired(),
+          ...error(403, 'Only the owner can remove people', 'not_owner', 'Only the room owner can remove people'),
+          ...error(404, 'No room under that id, or no such user', 'room_not_found', 'Room not found'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/blocked/{userId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { $ref: '#/components/parameters/userId' },
+      ],
+      delete: {
+        tags: ['Invitations'],
+        summary: 'Undo a removal',
+        description:
+          'Owner only, and idempotent. Lets a removed person open the room again on its normal terms — a private room still needs an invite.',
+        responses: {
+          200: {
+            description: 'Removal lifted',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/RoomEnvelope' } } },
+          },
+          ...authRequired(),
+          ...error(403, 'Only the owner can remove people', 'not_owner', 'Only the room owner can remove people'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
         },
       },
     },
@@ -570,6 +626,13 @@ export const openapiDocument = {
         description: 'Short id from the URL or the create call (8 characters).',
         schema: { type: 'string', minLength: 1, maxLength: 64 },
       },
+      userId: {
+        name: 'userId',
+        in: 'path',
+        required: true,
+        description: 'Id of the account being acted on.',
+        schema: { type: 'string', pattern: '^[a-f0-9]{24}$' },
+      },
     },
 
     schemas: {
@@ -682,10 +745,27 @@ export const openapiDocument = {
 
       InviteInput: {
         type: 'object',
-        required: ['userId'],
+        description: 'Exactly one of userId or email.',
         properties: {
           userId: { type: 'string', pattern: '^[a-f\\d]{24}$', description: 'Id of an existing user.' },
+          email: {
+            type: 'string',
+            format: 'email',
+            maxLength: 254,
+            description: 'Email address of an existing account.',
+          },
           role: { type: 'string', enum: ['editor', 'viewer'], default: 'editor' },
+        },
+      },
+
+      BlockedPerson: {
+        type: 'object',
+        description: 'Someone the owner removed. Refused whether the room is public or private.',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          at: { type: 'string', format: 'date-time' },
         },
       },
 
@@ -722,6 +802,7 @@ export const openapiDocument = {
             description: 'Null for ad-hoc rooms nobody claimed.',
           },
           members: { type: 'array', items: { $ref: '#/components/schemas/Member' } },
+          blocked: { type: 'array', items: { $ref: '#/components/schemas/BlockedPerson' } },
           participants: { type: 'array', items: { $ref: '#/components/schemas/Participant' } },
         },
       },

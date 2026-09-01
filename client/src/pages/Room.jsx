@@ -11,7 +11,7 @@ import { useRoomSocket } from '../hooks/useRoomSocket.js'
 import { useToast } from '../components/ui/useToast.js'
 import { TopBar, Brand } from '../components/TopBar.jsx'
 import { SplitPane } from '../components/SplitPane.jsx'
-import { PresenceBar } from '../components/PresenceBar.jsx'
+import { PresenceMenu } from '../components/PresenceMenu.jsx'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { Segmented } from '../components/ui/Segmented.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
@@ -58,7 +58,7 @@ function isTyping(target) {
 
 export default function Room() {
   const { roomId } = useParams()
-  const { identity, token, isAuthenticated, isLoading } = useAuth()
+  const { user, identity, token, isAuthenticated, isLoading } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
 
@@ -81,9 +81,32 @@ export default function Room() {
   const { peers, self } = useAwareness(session?.provider)
   const runner = useCodeRunner(roomId, identity?.name)
 
+  /**
+   * Losing access while sitting in the room. The collab connection reports it
+   * too — it reconnects, fails authentication, and the gate below takes over —
+   * but that says nothing about why, and a whiteboard that quietly stops
+   * syncing is the worst way to find out you were removed.
+   */
+  const onKicked = useCallback(
+    (payload) => {
+      toast.error(
+        payload?.reason === 'room_deleted'
+          ? 'This room was deleted by its owner'
+          : payload?.reason === 'removed_by_owner'
+            ? 'You were removed from this room by its owner'
+            : 'This room is private now, and you are not on its guest list'
+      )
+      navigate(isAuthenticated ? '/dashboard' : '/')
+    },
+    [toast, navigate, isAuthenticated]
+  )
+
   // Runs are announced to the whole room, so the console shows everyone's.
-  const socketHandlers = useMemo(() => ({ 'code:run': runner.receive }), [runner.receive])
-  useRoomSocket(roomId, identity, socketHandlers)
+  const socketHandlers = useMemo(
+    () => ({ 'code:run': runner.receive, 'room:kicked': onKicked }),
+    [runner.receive, onKicked]
+  )
+  useRoomSocket(roomId, identity, token, socketHandlers)
 
   // A dropped connection is worth telling the user about; a restored one too.
   const previousStatus = useRef(status)
@@ -289,7 +312,17 @@ export default function Room() {
           </p>
 
           <div className="gate__actions">
-            {!isAuthenticated && (
+            {isAuthenticated ? (
+              /* A refused provider will not try again on its own, and the usual
+                 reason to be standing here is an invite that has just arrived. */
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => window.location.reload()}
+              >
+                Try again
+              </button>
+            ) : (
               <Link className="btn btn--primary" to="/login" state={{ from: '/room/' + roomId }}>
                 Sign in
               </Link>
@@ -332,7 +365,14 @@ export default function Room() {
         </div>
 
         <div className="topbar__right">
-          <PresenceBar self={self} peers={peers} />
+          <PresenceMenu
+            room={room}
+            roomId={roomId}
+            self={self}
+            peers={peers}
+            user={user}
+            onRoomChange={setRoom}
+          />
           <div className="room__views">
             <Segmented
               options={VIEWS}

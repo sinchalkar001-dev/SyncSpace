@@ -43,6 +43,13 @@ Two ways in, both first-class:
   create are private and invite-only.
 - **Guest** — open a room link and pick a display name. Guests reach public rooms only.
 
+Inside a room, the avatar stack in the header opens the same roster: who is connected right now,
+who is invited but away, and — for the owner — an invite field and a **Remove** button beside each
+name. Removing someone withdraws their membership *and* keeps them out of a public room, which a
+plain membership change cannot do while the link still works; it closes their live document and
+presence connections on the spot, and an invite lets them back. Guests have no account to withdraw,
+so the way to clear them out is **Make private**, offered in the same panel.
+
 Guest access is deliberate: the interview scenario in the brief needs a candidate to join from a
 link without signing up. The server enforces the same rule the UI shows, and refuses to boot in
 production with `ALLOW_ANONYMOUS=true`.
@@ -71,7 +78,8 @@ stable identity stripe derived from its code.
 
 Each room on the dashboard has its own menu. **People** shows the owner and invited members
 alongside everyone who has actually opened the room — guests included, since they are recorded by
-visit rather than by invitation. **Rename** names a room, or renames one created without a name. **Make public / Make private**
+visit rather than by invitation. The owner can invite someone by email address there, or put them
+out again. **Rename** names a room, or renames one created without a name. **Make public / Make private**
 flips visibility in place — going private also closes every live connection, so anyone who just lost
 access has to re-authenticate. **Delete room** is owner-only and asks first; it removes the
 whiteboard, the code, the snapshot and the whole update log, and hangs up anyone still connected.
@@ -223,7 +231,9 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
 | `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
-| `POST` | `/api/rooms/:roomId/invite` | Owner only |
+| `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId` |
+| `DELETE` | `/api/rooms/:roomId/members/:userId` | Owner only; removes someone and keeps them out |
+| `DELETE` | `/api/rooms/:roomId/blocked/:userId` | Owner only; undoes a removal |
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
 | `GET` | `/api/rooms/:roomId/replay` | Timeline metadata |
