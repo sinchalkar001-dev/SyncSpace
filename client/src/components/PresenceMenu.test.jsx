@@ -168,6 +168,24 @@ describe('PresenceMenu', () => {
   })
 
   /**
+   * A real relay takes seconds, so the server sometimes answers before the send
+   * finishes. That is not a failure, and must not read as one: the code stays
+   * out of the toast, because nobody has to pass it on by hand yet.
+   */
+  it('says the email is still sending when the server does not know yet', async () => {
+    mockApi({ invited: { ...INVITED, notified: null } })
+    renderMenu()
+    const panel = await openPanel()
+
+    const field = await within(panel).findByLabelText('Email address to invite')
+    await userEvent.type(field, 'new@syncspace.test')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Invite' }))
+
+    const said = await screen.findByText(/still sending/)
+    expect(said).not.toHaveTextContent('MSTTPQuJ')
+  })
+
+  /**
    * With no relay configured the invite still works, but telling the guest has
    * just become the owner's job — so the code goes in the toast rather than
    * sending them off to find it.

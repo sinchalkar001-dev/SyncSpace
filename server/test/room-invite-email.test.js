@@ -182,6 +182,41 @@ describe('when the invitation cannot be sent', () => {
     expect(opened.status).toBe(200)
   })
 
+  /**
+   * Gmail takes the better part of four seconds to accept one message, so the
+   * deadline is generous — but a relay that never answers still has to not
+   * hold the invite. What matters is that this is reported as "unfinished"
+   * rather than "failed": a slow send is not a lost one, and telling the owner
+   * to chase their guest over a message already on its way is the worse error.
+   */
+  it('says it does not yet know when the relay outlasts the deadline', { timeout: 30000 }, async () => {
+    // Never settles, which is what a wedged relay looks like from here. The
+    // clock is real: faking it would stop the request itself, since the HTTP
+    // layer and the driver underneath are waiting on timers of their own.
+    mailer.send.mockImplementation(() => new Promise(() => {}))
+
+    const owner = (await register(OWNER)).body
+    const guest = (await register(GUEST)).body
+    const room = await makeRoom(owner.token)
+
+    const started = Date.now()
+    const res = await invite(owner.token, room.roomId, { email: GUEST.email })
+    const waited = Date.now() - started
+
+    expect(res.status).toBe(200)
+    expect(res.body.invited.notified).toBeNull()
+
+    // Bounded, and not by accident: an invite must answer even if the relay
+    // never does.
+    expect(waited).toBeLessThan(20000)
+
+    // Unfinished, not undone: the access is real either way.
+    const opened = await request(app)
+      .get('/api/v1/rooms/' + room.roomId)
+      .set(auth(guest.token))
+    expect(opened.status).toBe(200)
+  })
+
   it('survives a mailer that throws outright', async () => {
     mailer.send.mockRejectedValue(new Error('relay exploded'))
 

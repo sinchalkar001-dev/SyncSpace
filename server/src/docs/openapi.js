@@ -798,8 +798,9 @@ export const openapiDocument = {
           email: { type: 'string', format: 'email' },
           notified: {
             type: 'boolean',
+            nullable: true,
             description:
-              'The mail relay accepted the invitation. False when no relay is configured, when it refused, or when it took longer than the invite was willing to wait — in each case the owner has to pass the room code on themselves.',
+              'True when the mail relay accepted the invitation, false when no relay is configured or it refused, and null when the send outlasted the invite deadline and is still running. Only false makes passing the room code on the owner’s job.',
           },
         },
       },
