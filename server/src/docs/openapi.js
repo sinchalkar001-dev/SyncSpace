@@ -346,15 +346,25 @@ export const openapiDocument = {
         tags: ['Invitations'],
         summary: 'Invite a user to a room',
         description:
-          'Owner only. Identify the invitee by userId or by email — exactly one of the two. Inviting someone already in the room succeeds without changing their role, and inviting someone who was removed lifts that removal.',
+          'Owner only. Identify the invitee by userId or by email — exactly one of the two. Inviting someone already in the room succeeds without changing their role, and inviting someone who was removed lifts that removal. Every successful invite emails the invitee the room code and a link to the room, so repeating one is also how an owner re-sends it.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/InviteInput' } } },
         },
         responses: {
           200: {
-            description: 'Membership recorded (idempotent)',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/RoomEnvelope' } } },
+            description: 'Membership recorded (idempotent) and the invitation sent',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    invited: { $ref: '#/components/schemas/Invited' },
+                  },
+                },
+              },
+            },
           },
           ...validationError(),
           ...authRequired(),
@@ -776,6 +786,21 @@ export const openapiDocument = {
           name: { type: 'string' },
           email: { type: 'string', format: 'email' },
           role: { type: 'string', enum: ['owner', 'editor', 'viewer'] },
+        },
+      },
+
+      Invited: {
+        type: 'object',
+        description: 'Who was let into the room, and whether they were told.',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          notified: {
+            type: 'boolean',
+            description:
+              'The mail relay accepted the invitation. False when no relay is configured, when it refused, or when it took longer than the invite was willing to wait — in each case the owner has to pass the room code on themselves.',
+          },
         },
       },
 

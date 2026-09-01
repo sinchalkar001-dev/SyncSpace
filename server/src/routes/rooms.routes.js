@@ -165,6 +165,14 @@ export function createRoomsRouter() {
     }
   })
 
+  /**
+   * Lets somebody in, and tells them so.
+   *
+   * A private room is invisible from outside, so the invitation email is the
+   * whole notification: it carries the room code and a link straight to it.
+   * `invited.notified` says whether the relay took the message, because when
+   * it did not, passing the code on falls to the owner.
+   */
   roomsRouter.post(
     '/:roomId/invite',
     requireAuth,
@@ -172,14 +180,14 @@ export function createRoomsRouter() {
     validate(inviteSchema),
     async (req, res, next) => {
       try {
-        const room = await inviteMember({
+        const { room, invited } = await inviteMember({
           roomId: req.params.roomId,
           actorId: req.user.id,
           userId: req.body.userId,
           email: req.body.email,
           role: req.body.role,
         })
-        res.json({ room: room.toPublic() })
+        res.json({ room: room.toPublic(), invited })
       } catch (err) {
         next(err)
       }

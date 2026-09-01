@@ -90,7 +90,7 @@ export function RoomPeopleDialog({ room, open, onClose }) {
               <InviteForm
                 onInvite={invite}
                 pending={pending === 'invite'}
-                hint="They need a SyncSpace account under that address. A private room stays shut to everyone else."
+                hint="They need a SyncSpace account under that address. We email them the room code and a link straight to this room."
               />
             </section>
           )}

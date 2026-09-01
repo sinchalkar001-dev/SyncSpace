@@ -1,6 +1,6 @@
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
+import { clearDatabase, startMemoryMongo, stopMemoryMongo, waitFor } from './helpers/db.js'
 import { createApp } from '../src/app.js'
 import { createMailer, maskEmail, mailer } from '../src/services/email.service.js'
 import { logger } from '../src/config/logger.js'
@@ -101,5 +101,42 @@ describe('email failure isolation', () => {
     expect(resent.body).toEqual({ sent: true })
 
     failing.mockRestore()
+  })
+
+  /**
+   * The verification send is deliberately not awaited — registration has
+   * already answered by the time it settles — so a rejection would have nobody
+   * left to catch it, and an unhandled rejection ends the process, taking every
+   * open room down with it. Reporting failure is not enough: it has to survive
+   * a mailer that throws.
+   */
+  it('a mailer that throws never escapes as an unhandled rejection', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const escaped = vi.fn()
+    process.on('unhandledRejection', escaped)
+
+    const throwing = vi
+      .spyOn(mailer, 'send')
+      .mockRejectedValue(Object.assign(new Error('535 auth failed'), { code: 'EAUTH' }))
+
+    const registered = await request(app).post('/api/v1/auth/register').send(ALICE)
+    expect(registered.status).toBe(201)
+
+    await waitFor(
+      () => warnSpy.mock.calls.some(([, message]) => message === 'could not send the verification email'),
+      { label: 'the failed verification email to be logged' }
+    )
+    expect(escaped).not.toHaveBeenCalled()
+
+    // Same discipline as every other mail failure: the error class, nothing else.
+    const [context] = warnSpy.mock.calls.find(
+      ([, message]) => message === 'could not send the verification email'
+    )
+    expect(context).toEqual({ code: 'EAUTH' })
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('535')
+
+    process.off('unhandledRejection', escaped)
+    throwing.mockRestore()
+    warnSpy.mockRestore()
   })
 })

@@ -22,11 +22,14 @@ const ROSTER = {
   participants: [],
 }
 
+/** What the invite endpoint answers with: who was let in, and whether they were told. */
+const INVITED = { id: 'u9', name: 'Newcomer', email: 'new@syncspace.test', notified: true }
+
 const ok = (body) => ({ ok: true, status: 200, json: () => Promise.resolve(body) })
 
 let calls
 
-function mockApi({ roster = ROSTER, fails } = {}) {
+function mockApi({ roster = ROSTER, fails, invited = INVITED } = {}) {
   calls = []
   vi.spyOn(globalThis, 'fetch').mockImplementation((url, init = {}) => {
     const method = init.method || 'GET'
@@ -45,6 +48,7 @@ function mockApi({ roster = ROSTER, fails } = {}) {
     }
 
     if (path.endsWith('/people')) return Promise.resolve(ok(roster))
+    if (path.endsWith('/invite')) return Promise.resolve(ok({ room: ROOM, invited }))
     return Promise.resolve(ok({ room: ROOM }))
   })
 }
@@ -148,6 +152,37 @@ describe('PresenceMenu', () => {
       })
     )
     await waitFor(() => expect(field).toHaveValue(''))
+  })
+
+  it('says the invitation is on its way, and to which address', async () => {
+    renderMenu()
+    const panel = await openPanel()
+
+    const field = await within(panel).findByLabelText('Email address to invite')
+    await userEvent.type(field, 'new@syncspace.test')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Invite' }))
+
+    expect(
+      await screen.findByText('Invited Newcomer — the room code is on its way to new@syncspace.test')
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * With no relay configured the invite still works, but telling the guest has
+   * just become the owner's job — so the code goes in the toast rather than
+   * sending them off to find it.
+   */
+  it('hands the owner the room code when the email did not go out', async () => {
+    mockApi({ invited: { ...INVITED, notified: false } })
+    renderMenu()
+    const panel = await openPanel()
+
+    const field = await within(panel).findByLabelText('Email address to invite')
+    await userEvent.type(field, 'new@syncspace.test')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Invite' }))
+
+    const said = await screen.findByText(/the email did not go out/)
+    expect(said).toHaveTextContent('MSTTPQuJ')
   })
 
   it('keeps a refused address in the field to be corrected', async () => {

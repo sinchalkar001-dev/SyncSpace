@@ -6,6 +6,8 @@ import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
 import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
+import { sendRoomInviteEmail } from './email.service.js'
+import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
 
@@ -120,11 +122,53 @@ async function findAccount({ userId, email }) {
 }
 
 /**
+ * How long an invite waits on the mail relay before answering anyway.
+ *
+ * The membership is saved before this starts, so a slow relay must never hold
+ * up the reply. The owner is still told whether the code went out, because if
+ * it did not, passing it on is now their job — and a "sent" they cannot trust
+ * would be worse than an honest "we could not".
+ */
+const NOTIFY_TIMEOUT_MS = 4000
+
+/**
+ * Tells the invitee they are in, and hands them the way to get there.
+ *
+ * A private room shows nothing to anyone outside it, so without this an invite
+ * is silent: the room turns up on their dashboard and they have no reason to
+ * look. Failure is reported, never thrown — the membership is already written,
+ * and refusing an invite that worked would be the worse answer.
+ */
+async function notifyInvitee({ room, invitee, inviter }) {
+  const sent = sendRoomInviteEmail(invitee.email, {
+    inviter: inviter?.name,
+    room: room.name,
+    code: room.roomId,
+    url: env.CLIENT_URL + '/room/' + encodeURIComponent(room.roomId),
+  }).catch((error) => {
+    logger.warn({ err: error, room: room.roomId }, 'could not send the invite email')
+    return { delivered: false }
+  })
+
+  const deadline = new Promise((resolve) => {
+    // Unreferenced: an invite still in the relay must not hold the process open.
+    setTimeout(resolve, NOTIFY_TIMEOUT_MS, { delivered: false }).unref?.()
+  })
+
+  const { delivered } = await Promise.race([sent, deadline])
+  return delivered
+}
+
+/**
  * Adds someone to a room. Owner only.
  *
  * An invite is also the way back in for someone who was removed, so it clears
  * any block — otherwise inviting a person you had kicked would look like it
  * worked and then refuse them at the door.
+ *
+ * Answers with the room and who was let in, including whether the invitation
+ * email reached the relay: a private room that nobody was told about is the
+ * same as no invite at all.
  */
 export async function inviteMember({ roomId, actorId, userId, email, role = 'editor' }) {
   const room = await ownedRoom(roomId, actorId, 'Only the room owner can invite people')
@@ -133,14 +177,23 @@ export async function inviteMember({ roomId, actorId, userId, email, role = 'edi
 
   const blocked = room.isBlocked(inviteeId)
   const member = room.hasMember(inviteeId)
-  if (!blocked && member) return room
 
-  if (blocked) room.blocked = room.blocked.filter((entry) => String(entry.user) !== inviteeId)
-  if (!member) room.members.push({ user: inviteeId, role })
-  await room.save()
+  if (blocked || !member) {
+    if (blocked) room.blocked = room.blocked.filter((entry) => String(entry.user) !== inviteeId)
+    if (!member) room.members.push({ user: inviteeId, role })
+    await room.save()
+    logger.info({ room: roomId, user: inviteeId }, 'member invited')
+  }
 
-  logger.info({ room: roomId, user: inviteeId }, 'member invited')
-  return room
+  // Sent even when the membership was already there, so pressing Invite again
+  // is how an owner re-sends a code their guest never received. The invite
+  // limiter is what stops that becoming a way to mail somebody at will.
+  const notified = await notifyInvitee({ room, invitee, inviter: await User.findById(actorId) })
+
+  return {
+    room,
+    invited: { id: inviteeId, name: invitee.name, email: invitee.email, notified },
+  }
 }
 
 /**
