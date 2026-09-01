@@ -14,9 +14,4 @@ export const LANGUAGES = [
   'cpp',
   'go',
   'rust',
-  'sql',
-  'json',
-  'html',
-  'css',
-  'markdown',
 ]
