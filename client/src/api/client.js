@@ -123,6 +123,12 @@ export const api = {
   login: (body) => apiFetch('/auth/login', { method: 'POST', body, retry: 2 }),
   me: (signal) => apiFetch('/auth/me', { signal, retry: 2 }),
   changePassword: (body) => apiFetch('/auth/change-password', { method: 'POST', body }),
+
+  /** Spends the token from a confirmation email. Single-use, so never retried. */
+  verifyEmail: (token) => apiFetch('/auth/verify-email', { method: 'POST', body: { token } }),
+
+  /** Issues a fresh confirmation email for the signed-in account. */
+  resendVerification: () => apiFetch('/auth/resend-verification', { method: 'POST' }),
   listRooms: (signal) => apiFetch('/rooms', { signal }),
   createRoom: (body) => apiFetch('/rooms', { method: 'POST', body }),
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
