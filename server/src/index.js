@@ -15,6 +15,43 @@ import { initRateLimitStore } from './middleware/rateLimit.js'
 const COLLAB_PATH = '/collab'
 
 /**
+ * How long to keep trying the port before calling it taken.
+ *
+ * `node --watch` starts the replacement while the previous process is still
+ * letting go, so the first bind can land on a socket that is closing. That is
+ * a moment, not a conflict — and the old behaviour treated it as fatal, which
+ * under --watch means the server stays dead until somebody saves a file.
+ */
+const BIND_TIMEOUT_MS = 5000
+const BIND_RETRY_MS = 150
+
+/** Binds, waiting out a port that is still being released. */
+async function listen(httpServer, port, host) {
+  const deadline = Date.now() + BIND_TIMEOUT_MS
+  let waited = false
+
+  for (;;) {
+    try {
+      await new Promise((resolve, reject) => {
+        const failed = (error) => reject(error)
+        httpServer.once('error', failed)
+        httpServer.listen(port, host, () => {
+          httpServer.removeListener('error', failed)
+          resolve()
+        })
+      })
+
+      if (waited) logger.info({ port }, 'port was busy for a moment, now bound')
+      return
+    } catch (error) {
+      if (error?.code !== 'EADDRINUSE' || Date.now() >= deadline) throw error
+      waited = true
+      await new Promise((resolve) => setTimeout(resolve, BIND_RETRY_MS))
+    }
+  }
+}
+
+/**
  * One HTTP server carries all three surfaces:
  *   /api/v1     Express REST (versioned)
  *   /collab     Hocuspocus (Yjs sync + awareness)
@@ -63,10 +100,7 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
     })
   })
 
-  await new Promise((resolve, reject) => {
-    httpServer.once('error', reject)
-    httpServer.listen(port, host, resolve)
-  })
+  await listen(httpServer, port, host)
 
   const address = httpServer.address()
   logger.info(
@@ -84,6 +118,14 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
       await hocuspocus.destroy()
       setHocuspocus(null)
       wss.close()
+
+      /**
+       * close() only stops the server accepting; every socket already open
+       * keeps it alive, and a browser holds keep-alive connections open for
+       * seconds after the last request. Under --watch that is time the old
+       * process spends holding the port while its replacement tries to bind.
+       */
+      httpServer.closeAllConnections?.()
       await new Promise((resolve) => httpServer.close(resolve))
       if (connectDb) await disconnectDatabase()
     })()
@@ -98,12 +140,29 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   const server = await startServer().catch((error) => {
-    logger.fatal({ err: error }, 'failed to start')
+    // A port held by something else is a setup mistake, not a crash, and the
+    // stack trace says none of what you need to know to fix it.
+    if (error?.code === 'EADDRINUSE') {
+      logger.fatal(
+        'Port ' + env.PORT + ' is already in use — another server is listening there. ' +
+          'Stop it and try again, or start this one on a different port with PORT=4001.'
+      )
+    } else {
+      logger.fatal({ err: error }, 'failed to start')
+    }
     process.exit(1)
   })
 
+  /**
+   * Shutdown must not outlast its usefulness: whatever is still draining, the
+   * port has to be free for the process replacing this one.
+   */
+  const SHUTDOWN_TIMEOUT_MS = 3000
+
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
+      const giveUp = setTimeout(() => process.exit(0), SHUTDOWN_TIMEOUT_MS)
+      giveUp.unref()
       server.close().then(() => process.exit(0))
     })
   }
