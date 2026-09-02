@@ -1,3 +1,12 @@
+/**
+ * Configures Monaco before the editor component can mount.
+ *
+ * This used to be imported by main.jsx, which quietly undid the lazy room
+ * route: `import * as monaco from 'monaco-editor'` runs at entry, so every
+ * page — the landing page included — paid for the whole editor before it drew
+ * anything. Importing it here keeps it inside the chunk that actually uses it.
+ */
+import '../../lib/monacoSetup.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { MonacoBinding } from 'y-monaco'

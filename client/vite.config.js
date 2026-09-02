@@ -63,6 +63,17 @@ export default defineConfig({
   customLogger: quietProxyLogger(),
   server: {
     port: 5173,
+
+    /**
+     * Transformed while the server is starting rather than while somebody is
+     * waiting. The room is the expensive one — it pulls in the editor, the
+     * canvas and the CRDT layer — and paying for it during boot is free,
+     * because nobody is looking at a page yet.
+     */
+    warmup: {
+      clientFiles: ['./src/main.jsx', './src/pages/Room.jsx', './src/pages/Dashboard.jsx'],
+    },
+
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
       '/collab': { target: BACKEND, ws: true, changeOrigin: true },
