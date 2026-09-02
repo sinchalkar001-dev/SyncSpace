@@ -5,6 +5,7 @@ import { LoadingBlock } from './components/ui/Spinner.jsx'
 import Home from './pages/Home.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
+import VerifyEmail from './pages/VerifyEmail.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import NotFound from './pages/NotFound.jsx'
 
@@ -23,6 +24,10 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      {/* Where every confirmation email points. Open to signed-out visitors:
+          the link is as likely to be opened on a phone that has never signed
+          in as in the browser that registered. */}
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route
         path="/dashboard"
         element={

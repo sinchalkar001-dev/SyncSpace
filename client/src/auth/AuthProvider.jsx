@@ -79,6 +79,18 @@ export function AuthProvider({ children }) {
     [adopt]
   )
 
+  /**
+   * Re-reads the account. Confirming an email changes it server-side, and
+   * without this the session goes on claiming the address is unverified until
+   * the next reload.
+   */
+  const refresh = useCallback(async () => {
+    if (!readToken()) return null
+    const payload = await api.me().catch(() => null)
+    if (payload?.user) setUser(payload.user)
+    return payload?.user ?? null
+  }, [])
+
   const renameGuest = useCallback((name) => setGuest(renameIdentity(name)), [])
 
   const identity = useMemo(() => (user ? identityFromUser(user) : guest), [user, guest])
@@ -94,9 +106,10 @@ export function AuthProvider({ children }) {
       login,
       register,
       logout,
+      refresh,
       renameGuest,
     }),
-    [status, user, token, identity, login, register, logout, renameGuest]
+    [status, user, token, identity, login, register, logout, refresh, renameGuest]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

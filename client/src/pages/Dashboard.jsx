@@ -7,6 +7,7 @@ import { activityByDay, FILTERS, roomLabel, selectRooms, SORTS, summarise } from
 import { TopBar, Brand, TopNav } from '../components/TopBar.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
 import { RoomCard } from '../components/RoomCard.jsx'
+import { VerifyEmailNotice } from '../components/VerifyEmailNotice.jsx'
 import { RoomPeopleDialog } from '../components/RoomPeopleDialog.jsx'
 import { RenameRoomDialog } from '../components/RenameRoomDialog.jsx'
 import { ConfirmDialog } from '../components/ui/Modal.jsx'
@@ -159,6 +160,10 @@ export default function Dashboard() {
             <p className="dash__sub">Start a session, or pick up where you left off.</p>
           </div>
         </div>
+
+        {/* Shows only while the address is unverified, and carries the only
+            control that can ask for another link. */}
+        <VerifyEmailNotice />
 
         {/* Overview: figures on the left, a week of activity on the right. */}
         <section className="dash__overview" aria-label="Overview">
