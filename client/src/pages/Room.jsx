@@ -12,6 +12,8 @@ import { useToast } from '../components/ui/useToast.js'
 import { TopBar, Brand } from '../components/TopBar.jsx'
 import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceMenu } from '../components/PresenceMenu.jsx'
+import { ChatPanel } from '../components/ChatPanel.jsx'
+import { useRoomChat } from '../hooks/useRoomChat.js'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { Segmented } from '../components/ui/Segmented.jsx'
 import { UserMenu } from '../components/UserMenu.jsx'
@@ -101,12 +103,20 @@ export default function Room() {
     [toast, navigate, isAuthenticated]
   )
 
+  const [chatOpen, setChatOpen] = useState(false)
+  const socketRef = useRef(null)
+  const chat = useRoomChat({ roomId, socketRef, self: identity, open: chatOpen })
+
   // Runs are announced to the whole room, so the console shows everyone's.
   const socketHandlers = useMemo(
-    () => ({ 'code:run': runner.receive, 'room:kicked': onKicked }),
-    [runner.receive, onKicked]
+    () => ({ 'code:run': runner.receive, 'room:kicked': onKicked, 'room:chat': chat.receive }),
+    [runner.receive, onKicked, chat.receive]
   )
-  useRoomSocket(roomId, identity, token, socketHandlers)
+
+  // The same socket carries presence, runs and chat, so the panel sends on the
+  // connection the room already has rather than opening one of its own.
+  const liveSocket = useRoomSocket(roomId, identity, token, socketHandlers)
+  socketRef.current = liveSocket.current
 
   // A dropped connection is worth telling the user about; a restored one too.
   const previousStatus = useRef(status)
@@ -372,6 +382,13 @@ export default function Room() {
             peers={peers}
             user={user}
             onRoomChange={setRoom}
+          />
+          <ChatPanel
+            messages={chat.messages}
+            unread={chat.unread}
+            onSend={chat.send}
+            open={chatOpen}
+            onOpenChange={setChatOpen}
           />
           <div className="room__views">
             <Segmented

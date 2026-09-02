@@ -2057,3 +2057,85 @@
 .runpanel__body:has(.runstale) .runpanel__out {
   opacity: 0.55;
 }
+
+/* ---------- room chat ---------- */
+
+/*
+ * The panel reuses the roster popover, so only the parts that differ are here:
+ * a transcript that scrolls on its own, and a composer pinned under it.
+ */
+.chat {
+  gap: var(--space-3);
+}
+
+.chat__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.presence-menu__trigger {
+  position: relative;
+}
+
+.chat__log {
+  max-height: 18rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat__line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.chat__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+/* Wraps anywhere: a pasted stack trace must not widen the popover. */
+.chat__text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat__line.is-mine .chat__text {
+  color: var(--text-dim);
+}
+
+.chat__compose {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chat__compose .input {
+  flex: 1;
+  min-width: 0;
+}
