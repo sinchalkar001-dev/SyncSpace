@@ -18,9 +18,13 @@ JWT + bcryptjs · zod · pino · nodemailer · helmet / cors / rate-limit
 
 ```bash
 npm install
-npm run dev:server    # http://localhost:4000
-npm run dev:client    # http://localhost:5173
+npm run dev           # server on :4000, client on :5173
 ```
+
+Both halves have to be running: the client proxies `/api`, `/collab` and `/socket.io` to the server,
+so with only the client up every room sits at "Connecting" and the terminal fills with proxy errors.
+`npm run dev` starts the pair and stops them together. To run one alone — two terminals, or one under
+a debugger — `npm run dev:server` and `npm run dev:client` still do exactly that.
 
 **MongoDB.** The server expects `mongodb://127.0.0.1:27017/syncspace`. Three ways to get one:
 
@@ -28,9 +32,9 @@ npm run dev:client    # http://localhost:5173
 | --- | --- |
 | MongoDB installed locally | nothing — it is the default |
 | Docker available | `docker compose up -d` |
-| Neither | `npm run dev:memory --workspace server` |
+| Neither | `npm run dev:memory` |
 
-`dev:memory` boots the server against a throwaway in-memory MongoDB. Everything written is lost on
+`dev:memory` boots the same pair against a throwaway in-memory MongoDB. Everything written is lost on
 exit — it is for trying things out, not for keeping work.
 
 Other scripts: `npm test`, `npm run lint`, `npm run build`, `npm run test:e2e`.
