@@ -2139,3 +2139,49 @@
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- room files ---------- */
+
+/*
+ * Shares the roster popover's frame; only the row layout differs, because a
+ * file row carries a name that can be long, two figures, and up to two actions.
+ */
+.files {
+  gap: var(--space-3);
+}
+
+.files__list {
+  max-height: 18rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.files__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+/*
+ * A long filename truncates rather than pushing the actions off the panel.
+ * The full name is on the element's title, so it is still reachable.
+ */
+.files__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files__add {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}

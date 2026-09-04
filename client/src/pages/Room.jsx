@@ -13,6 +13,7 @@ import { TopBar, Brand } from '../components/TopBar.jsx'
 import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceMenu } from '../components/PresenceMenu.jsx'
 import { ChatPanel } from '../components/ChatPanel.jsx'
+import { FilesPanel } from '../components/FilesPanel.jsx'
 import { useRoomChat } from '../hooks/useRoomChat.js'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { Segmented } from '../components/ui/Segmented.jsx'
@@ -390,6 +391,9 @@ export default function Room() {
             open={chatOpen}
             onOpenChange={setChatOpen}
           />
+          {/* Every file route is behind requireAuth, so a guest is told why
+              rather than shown a panel that can only fail. */}
+          <FilesPanel roomId={roomId} user={user} canUse={isAuthenticated} />
           <div className="room__views">
             <Segmented
               options={VIEWS}
