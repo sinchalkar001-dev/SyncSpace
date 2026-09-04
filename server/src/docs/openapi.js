@@ -532,14 +532,20 @@ export const openapiDocument = {
         tags: ['Replay'],
         summary: 'Binary document state at a point in time',
         description:
-          'A Yjs update stream ready for `Y.applyUpdate`. The `X-Updates-Applied` header counts the folded entries. Public rooms are readable anonymously, like room metadata.',
+          'A Yjs update stream ready for `Y.applyUpdate`. Reads start from the newest stored checkpoint at or before `seq` rather than folding the log from the beginning, so `X-Updates-Applied` counts only the entries folded on top of it and `X-Checkpoint-Seq` says which one that was (0 = the whole log). Public rooms are readable anonymously, like room metadata.',
         security: [{ bearerAuth: [] }],
         responses: {
           200: {
             description: 'Raw Yjs state',
             headers: {
               'X-Updates-Applied': {
-                description: 'Number of log entries folded into the response',
+                description:
+                  'Log entries folded on top of the checkpoint to produce this state — the work this request actually did, not the number of entries the state represents',
+                schema: { type: 'integer' },
+              },
+              'X-Checkpoint-Seq': {
+                description:
+                  'Sequence number of the checkpoint the fold started from, or 0 if the whole log was folded',
                 schema: { type: 'integer' },
               },
             },

@@ -4,7 +4,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { createApp } from '../src/app.js'
 import { DocUpdate } from '../src/models/DocUpdate.js'
-import { listTimeline, snapshotJsonAt, stateAt } from '../src/services/replay.service.js'
+import {
+  backfillCheckpoints,
+  CHECKPOINT_EVERY,
+  listTimeline,
+  snapshotJsonAt,
+  stateAt,
+} from '../src/services/replay.service.js'
 import { env } from '../src/config/env.js'
 
 const ROOM = 'replay-room'
@@ -300,6 +306,50 @@ describe('replay HTTP edge cases', () => {
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('bad_seq')
+    })
+
+    /**
+     * The saving has to be visible over HTTP, not just inside the service, or
+     * nobody can tell whether a slow replay is folding the whole log again.
+     */
+    it('answers from a checkpoint and says which one', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+
+      const doc = new Y.Doc()
+      const updates = []
+      doc.on('update', (update) => updates.push(Buffer.from(update)))
+      for (let i = 0; i < CHECKPOINT_EVERY; i += 1) doc.getText('code').insert(i, 'x')
+      doc.destroy()
+
+      await seedLog(updates, room.roomId)
+      await backfillCheckpoints(room.roomId)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/${CHECKPOINT_EVERY}`)
+        .set(auth(body.token))
+
+      expect(res.status).toBe(200)
+      const startedFrom = Number(res.headers['x-checkpoint-seq'])
+      const folded = Number(res.headers['x-updates-applied'])
+
+      expect(startedFrom).toBeGreaterThan(0)
+      expect(folded).toBeLessThan(CHECKPOINT_EVERY)
+      // Between them they account for the whole log up to that point.
+      expect(startedFrom + folded).toBe(CHECKPOINT_EVERY)
+    })
+
+    it('says so plainly when it folded the whole log', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+      await seedLog(recordEdits([(doc) => doc.getText('code').insert(0, 'short')]), room.roomId)
+
+      const res = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay/1`)
+        .set(auth(body.token))
+
+      expect(res.headers['x-checkpoint-seq']).toBe('0')
+      expect(res.headers['x-updates-applied']).toBe('1')
     })
 
     it('returns an empty state for seq 0 on a room with no updates', async () => {

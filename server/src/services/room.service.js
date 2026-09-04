@@ -2,6 +2,7 @@ import { nanoid } from '../utils/id.js'
 import { Room } from '../models/Room.js'
 import { User } from '../models/User.js'
 import { Snapshot } from '../models/Snapshot.js'
+import { Checkpoint } from '../models/Checkpoint.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
 import { getHocuspocus } from '../collab/registry.js'
@@ -468,6 +469,9 @@ export async function deleteRoom({ roomId, actorId }) {
   const [updates] = await Promise.all([
     DocUpdate.collection.deleteMany({ roomId }),
     Snapshot.deleteOne({ roomId }),
+    // The replay checkpoints go with the log they summarise; leaving them
+    // would let a later room reusing this id read somebody else's history.
+    Checkpoint.deleteMany({ roomId }),
     Participant.deleteMany({ roomId }),
   ])
   await Room.deleteOne({ roomId })

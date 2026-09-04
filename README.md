@@ -126,6 +126,24 @@ One response carries at most 500 entries, which a room passes within a few minut
 safe here in a way it rarely is: the log is append-only, so a page already read cannot change
 underneath the reader.
 
+The fold itself is where the cost was. Asking for the state at a sequence number meant replaying
+every entry from the first one, so a frame got more expensive the longer the room had been alive —
+160ms each on a 3,000 entry log, against a scrubber that steps every 420ms. **Checkpoints** are the
+answer: every 250 entries the room records its whole state, and a read starts from the newest one
+at or before the position it wants. The same benchmark then costs 15.7ms a frame, and stops growing
+with the room's age (`node scripts/replay-bench.js` prints both sides).
+
+Two things keep that honest. A checkpoint is built by folding the log, never by copying a live
+in-memory document — a document only equals the log when nothing has gone wrong, and a checkpoint
+that disagrees with the log is a replay that quietly shows the wrong thing. And each one stores how
+many entries it folded, so if an entry numbered below it ever lands afterwards, the count no longer
+matches and readers refuse it and fold from the beginning instead. Refusing is merely slow; using it
+would drop somebody's edit without saying so.
+
+Rooms whose history predates all this get their checkpoints from
+`node scripts/backfill-checkpoints.js`, which is safe to run repeatedly and against a live database:
+it only ever adds or repairs a derived cache, and never touches the log.
+
 A room created without a name leads with its code and an `Unnamed` chip rather than a shared
 "Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
 stable identity stripe derived from its code.
@@ -300,7 +318,7 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
 | `GET` | `/api/rooms/:roomId/replay` | Timeline metadata; `limit` (≤ 500) and `from` (exclusive seq bound) page through the log |
-| `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
+| `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point; `X-Updates-Applied` counts the entries folded and `X-Checkpoint-Seq` says which checkpoint the fold started from (0 = the whole log) |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
 
@@ -377,6 +395,11 @@ The app is solid for a demo or an internal tool. Before putting it in front of u
 - **Update-log growth.** One insert per Yjs update, so a fast typist writes a lot of rows. Batching,
   compaction, or a TTL is needed before this runs long-term; `PERSIST_UPDATE_LOG=false` disables it
   (and replay with it).
+- **Checkpoint growth.** Each checkpoint is a full copy of the document and the document grows with
+  the log, so at a fixed interval their total size goes as O(n² / interval) while the log goes as
+  O(n). At 250 they came to 79 KB against a 60 KB log in the benchmark, which is fine; over a much
+  longer life they would not be. Thinning the old ones — keeping a bounded number by widening the
+  spacing as the room ages — is what makes a smaller interval affordable, and is not done here.
 - **Single node.** See the sequence-counter note above.
 - **Replay reach.** The viewer pages the log but stops at 5,000 entries and says so — past that,
   a scrubber has finer pixels than steps and each one is a round trip. Coarser positions (one per
