@@ -269,10 +269,13 @@ export function createRoomsRouter() {
       if (!env.PERSIST_UPDATE_LOG) {
         throw badRequest('Replay is disabled (PERSIST_UPDATE_LOG=false)', 'replay_disabled')
       }
-      const { state, applied } = await stateAt(req.params.roomId, req.params.seq)
+      const { state, applied, from } = await stateAt(req.params.roomId, req.params.seq)
 
       res.setHeader('Content-Type', 'application/octet-stream')
       res.setHeader('X-Updates-Applied', String(applied))
+      // Which checkpoint the fold started from, so the saving is observable
+      // rather than merely claimed. 0 means the whole log was folded.
+      res.setHeader('X-Checkpoint-Seq', String(from))
       res.send(state)
     } catch (err) {
       next(err)

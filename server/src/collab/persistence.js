@@ -3,6 +3,7 @@ import { Snapshot } from '../models/Snapshot.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Room } from '../models/Room.js'
 import { ensureRoom } from '../services/room.service.js'
+import { checkpointTarget, ensureCheckpoint } from '../services/replay.service.js'
 import { toUint8 } from '../utils/binary.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
@@ -92,8 +93,9 @@ export class MongoPersistence {
   async onChange(payload) {
     if (!env.PERSIST_UPDATE_LOG) return
 
+    let entry
     try {
-      await this.appendUpdate(payload)
+      entry = await this.appendUpdate(payload)
     } catch (error) {
       // Hocuspocus rethrows whatever this hook rejects with, which Node turns
       // into an unhandled rejection and a dead process — one failed insert
@@ -101,6 +103,26 @@ export class MongoPersistence {
       // (the snapshot still carries the document), so this is logged and the
       // session carries on.
       logger.error({ err: error, room: payload.documentName }, 'update log append failed')
+      return
+    }
+
+    // Every hundredth entry, record where the room stood a little way back, so
+    // a replay read starts from there instead of folding the whole log. The
+    // fold this costs covers one interval and happens once per interval, which
+    // is a fraction of a millisecond amortised across the edits themselves.
+    const target = checkpointTarget(entry?.seq)
+    if (!target) return
+
+    try {
+      await ensureCheckpoint(payload.documentName, target)
+    } catch (error) {
+      // Its own catch, deliberately: a checkpoint is an optimisation, and
+      // failing to write one must neither take the session down nor be
+      // mistaken in the log for failing to record somebody's edit.
+      logger.error(
+        { err: error, room: payload.documentName, seq: target },
+        'replay checkpoint failed'
+      )
     }
   }
 
