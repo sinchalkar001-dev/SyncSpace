@@ -97,6 +97,20 @@ a masked recipient and an error code only, and the resend endpoint reports "sent
 provider state. A relay outage never fails sign-up or an invite: the account and the membership
 exist either way.
 
+The room header carries three panels beside the presence stack. **People** is the roster and the
+invite controls. **Chat** is live text for the room, kept in memory only — nothing is stored on
+either side, so anyone joining later starts from an empty transcript and the panel says so.
+**Files** is everything shared in the room: images, PDFs and text files up to 10 MB, listed newest
+first with their size and age.
+
+A file is refused before it leaves the browser if the server would refuse it anyway, so ten
+megabytes are not pushed up the wire to be told no — the message names the file and its actual
+size. Saving one goes through an authenticated request rather than a plain link, because the
+download route needs a bearer token and an `<a href>` cannot carry one; the bytes are handed to the
+browser from memory. **Remove** appears only on your own files, matching the server rule that only
+the uploader or the room owner may delete. Every file route needs an account, so a guest in a
+public room is told that rather than shown a panel that could only fail.
+
 A room created without a name leads with its code and an `Unnamed` chip rather than a shared
 "Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
 stable identity stripe derived from its code.

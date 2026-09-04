@@ -114,6 +114,65 @@ export async function apiFetch(path, { method = 'GET', body, signal, retry = 0 }
 }
 
 /**
+ * Turns a failed response into an ApiError, for the two paths below that
+ * cannot go through apiFetch. Same translation, same expiry handling.
+ */
+async function refusal(response) {
+  const payload = await response.json().catch(() => null)
+  if (response.status === 401 && authToken) expiredHandler?.()
+  const { code, message } = describeFailure(response.status, payload)
+  return new ApiError(response.status, code, message)
+}
+
+/**
+ * Sends a multipart body.
+ *
+ * Deliberately not apiFetch: that stamps Content-Type: application/json on
+ * anything with a body and JSON.stringifies it, which would turn a FormData
+ * into the string "[object FormData]". Multipart also needs a boundary in the
+ * header, and only the browser can generate one to match the body it encodes —
+ * so Content-Type is left unset here on purpose.
+ */
+export async function apiUpload(path, formData, { signal } = {}) {
+  const headers = { Accept: 'application/json' }
+  if (authToken) headers.Authorization = 'Bearer ' + authToken
+
+  let response
+  try {
+    response = await fetch(API_URL + path, { method: 'POST', headers, signal, body: formData })
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cause
+    throw new ApiError(0, 'network_error', UNREACHABLE)
+  }
+
+  if (!response.ok) throw await refusal(response)
+  return response.json()
+}
+
+/**
+ * Fetches a file's bytes as a Blob.
+ *
+ * The download route is behind requireAuth, so a plain <a href> would arrive
+ * without a bearer token and be refused. The bytes have to be fetched with the
+ * header attached and handed to the browser from memory instead.
+ */
+export async function apiDownload(path, { signal } = {}) {
+  const headers = {}
+  if (authToken) headers.Authorization = 'Bearer ' + authToken
+
+  let response
+  try {
+    response = await fetch(API_URL + path, { headers, signal })
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cause
+    throw new ApiError(0, 'network_error', UNREACHABLE)
+  }
+
+  if (!response.ok) throw await refusal(response)
+  return response.blob()
+}
+
+/**
  * `retry` is set only where repeating the call cannot do anything twice.
  * Signing in and reading your own account are safe; creating a room or running
  * a program are not, and are left to fail loudly.
@@ -167,4 +226,32 @@ export const api = {
   /** Runs a program and resolves with its output; a crash is a result, not a throw. */
   run: (roomId, body, signal) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/run', { method: 'POST', body, signal }),
+
+  /** Everything shared in a room, newest first. Answers { files, total, limit, offset }. */
+  listFiles: (roomId, { limit = 50, offset = 0 } = {}, signal) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/files?limit=' + limit + '&offset=' + offset,
+      { signal }
+    ),
+
+  /** Shares one file with the room. The field name the server reads is "file". */
+  uploadFile: (roomId, file, signal) => {
+    const body = new FormData()
+    body.append('file', file)
+    return apiUpload('/rooms/' + encodeURIComponent(roomId) + '/files', body, { signal })
+  },
+
+  /** The file's bytes, as a Blob. */
+  downloadFile: (roomId, fileId, signal) =>
+    apiDownload(
+      '/rooms/' + encodeURIComponent(roomId) + '/files/' + encodeURIComponent(fileId) + '/download',
+      { signal }
+    ),
+
+  /** Removes a file. The uploader or the room owner, nobody else. */
+  deleteFile: (roomId, fileId) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/files/' + encodeURIComponent(fileId),
+      { method: 'DELETE' }
+    ),
 }
