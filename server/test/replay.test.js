@@ -179,6 +179,30 @@ describe('replay HTTP edge cases', () => {
       expect(res.status).toBe(404)
     })
 
+    /** The scrubber pages with these two, so the route has to honour both. */
+    it('pages with limit and from', async () => {
+      const { body } = await register(ALICE)
+      const room = await makeRoom(body.token)
+      await seedLog(
+        recordEdits([
+          (doc) => doc.getText('code').insert(0, 'a'),
+          (doc) => doc.getText('code').insert(1, 'b'),
+          (doc) => doc.getText('code').insert(2, 'c'),
+        ]),
+        room.roomId
+      )
+
+      const first = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay?limit=2`)
+        .set(auth(body.token))
+      expect(first.body.timeline.map((entry) => entry.seq)).toEqual([1, 2])
+
+      const next = await request(app)
+        .get(`/api/v1/rooms/${room.roomId}/replay?limit=2&from=2`)
+        .set(auth(body.token))
+      expect(next.body.timeline.map((entry) => entry.seq)).toEqual([3])
+    })
+
     it('denies access to a private room for non-members', async () => {
       const alice = await register(ALICE)
       const bob = await register(BOB)

@@ -5,11 +5,24 @@ import { badRequest } from '../errors.js'
 
 const MAX_TIMELINE = 500
 
-/** Metadata for the replay scrubber — never the payloads themselves. */
-export async function listTimeline(roomId, { limit = MAX_TIMELINE } = {}) {
+/**
+ * Metadata for the replay scrubber — never the payloads themselves.
+ *
+ * `from` is an exclusive lower bound on `seq`, so a caller can page through a
+ * log longer than one response may carry. A room passes 500 updates within a
+ * few minutes of typing, and a scrubber that could only ever see the first
+ * page would end somewhere in the room's distant past while claiming to be
+ * its history. Paging is safe here in a way it rarely is: the log is
+ * append-only, so a page already read can never change underneath the reader.
+ */
+export async function listTimeline(roomId, { limit = MAX_TIMELINE, from = 0 } = {}) {
   const capped = Math.min(Math.max(Number(limit) || MAX_TIMELINE, 1), MAX_TIMELINE)
 
-  const entries = await DocUpdate.find({ roomId })
+  const after = Number(from)
+  const query = { roomId }
+  if (Number.isFinite(after) && after > 0) query.seq = { $gt: after }
+
+  const entries = await DocUpdate.find(query)
     .select({ seq: 1, actor: 1, size: 1, createdAt: 1 })
     .sort({ seq: 1 })
     .limit(capped)

@@ -862,6 +862,26 @@
   max-width: 560px;
 }
 
+/*
+ * The replay viewer wants the screen, not a card in the middle of it: two
+ * panes and a scrubber are unreadable at 560px. The body is the part that
+ * stretches, so the title stays put and the panes take whatever is left.
+ */
+.modal--full {
+  display: flex;
+  flex-direction: column;
+  max-width: min(1240px, 100vw - var(--space-6));
+  height: min(880px, 100vh - var(--space-6));
+  max-height: none;
+  overflow: hidden;
+}
+
+.modal--full .modal__body {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--space-4);
+}
+
 .modal__title {
   font-size: var(--text-lg);
   font-weight: 600;
@@ -2184,4 +2204,169 @@
   gap: var(--space-2);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border);
+}
+
+/* ---------- replay ---------- */
+
+/*
+ * A room's history. Two panes over a transport bar: the board painted by the
+ * same ShapeNode the live canvas uses, and the buffer as plain text.
+ *
+ * The whole thing is a fixed-height flex column inside .modal--full, so the
+ * panes absorb the space and the controls stay where the hand expects them
+ * rather than moving as the code grows.
+ */
+.replay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+}
+
+.replay__panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.replay__board,
+.replay__code {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.replay__code {
+  display: flex;
+  flex-direction: column;
+}
+
+.replay__code-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+}
+
+.replay__code-head .nums {
+  margin-left: auto;
+}
+
+.replay__code-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  tab-size: 2;
+  white-space: pre;
+}
+
+/* Centred in whichever pane is empty, and never in the way of the canvas. */
+.replay__blank {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  text-align: center;
+  pointer-events: none;
+}
+
+.replay__code .replay__blank {
+  top: 2.4rem;
+}
+
+.replay__transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * The scrubber is the widest thing in the row on purpose: it is what the hand
+ * reaches for, and a short one makes a long history unpickable.
+ */
+.replay__scrub {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.replay__count {
+  flex: none;
+  min-width: 5.5rem;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+}
+
+.replay__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 30px;
+}
+
+.replay__actor {
+  font-weight: 600;
+}
+
+.replay__who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.replay__meta .segmented {
+  flex: none;
+  margin-left: auto;
+}
+
+.replay__note {
+  font-size: var(--text-sm);
+}
+
+.replay__notice {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.replay__notice .empty__icon {
+  margin-bottom: var(--space-2);
+}
+
+/*
+ * Side by side needs width. Below this the panes stack, the board keeps a
+ * fixed share so it does not collapse to nothing, and the code scrolls.
+ */
+@media (max-width: 860px) {
+  .replay__panes {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+  }
 }

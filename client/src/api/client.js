@@ -125,6 +125,30 @@ async function refusal(response) {
 }
 
 /**
+ * One request with the bearer token attached and a failure translated exactly
+ * as apiFetch translates one, answering the raw Response.
+ *
+ * The three callers below all need the same auth and the same error handling
+ * but read the body in three different shapes — JSON, a Blob, raw bytes — and
+ * none of them can go through apiFetch, which assumes JSON in both directions.
+ */
+async function authedFetch(path, { method = 'GET', headers = {}, body, signal } = {}) {
+  const sent = { ...headers }
+  if (authToken) sent.Authorization = 'Bearer ' + authToken
+
+  let response
+  try {
+    response = await fetch(API_URL + path, { method, headers: sent, signal, body })
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cause
+    throw new ApiError(0, 'network_error', UNREACHABLE)
+  }
+
+  if (!response.ok) throw await refusal(response)
+  return response
+}
+
+/**
  * Sends a multipart body.
  *
  * Deliberately not apiFetch: that stamps Content-Type: application/json on
@@ -134,18 +158,12 @@ async function refusal(response) {
  * so Content-Type is left unset here on purpose.
  */
 export async function apiUpload(path, formData, { signal } = {}) {
-  const headers = { Accept: 'application/json' }
-  if (authToken) headers.Authorization = 'Bearer ' + authToken
-
-  let response
-  try {
-    response = await fetch(API_URL + path, { method: 'POST', headers, signal, body: formData })
-  } catch (cause) {
-    if (cause?.name === 'AbortError') throw cause
-    throw new ApiError(0, 'network_error', UNREACHABLE)
-  }
-
-  if (!response.ok) throw await refusal(response)
+  const response = await authedFetch(path, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body: formData,
+    signal,
+  })
   return response.json()
 }
 
@@ -157,19 +175,19 @@ export async function apiUpload(path, formData, { signal } = {}) {
  * header attached and handed to the browser from memory instead.
  */
 export async function apiDownload(path, { signal } = {}) {
-  const headers = {}
-  if (authToken) headers.Authorization = 'Bearer ' + authToken
-
-  let response
-  try {
-    response = await fetch(API_URL + path, { headers, signal })
-  } catch (cause) {
-    if (cause?.name === 'AbortError') throw cause
-    throw new ApiError(0, 'network_error', UNREACHABLE)
-  }
-
-  if (!response.ok) throw await refusal(response)
+  const response = await authedFetch(path, { signal })
   return response.blob()
+}
+
+/**
+ * Fetches raw bytes, for a body that is neither JSON nor a file to save.
+ *
+ * Replay answers a Yjs update stream, which goes straight into Y.applyUpdate
+ * as a Uint8Array — routing it through a Blob first would only add a copy.
+ */
+export async function apiBytes(path, { signal } = {}) {
+  const response = await authedFetch(path, { signal })
+  return new Uint8Array(await response.arrayBuffer())
 }
 
 /**
@@ -254,4 +272,20 @@ export const api = {
       '/rooms/' + encodeURIComponent(roomId) + '/files/' + encodeURIComponent(fileId),
       { method: 'DELETE' }
     ),
+
+  /**
+   * One page of the room's update log: metadata only, oldest first. `from` is
+   * an exclusive lower bound on seq, so paging is last-seq-of-the-last-page.
+   */
+  replayTimeline: (roomId, { limit = 500, from = 0 } = {}, signal) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/replay?limit=' + limit + '&from=' + from,
+      { signal }
+    ),
+
+  /** The document exactly as it stood at `seq`, as a Yjs update stream. */
+  replayStateAt: (roomId, seq, signal) =>
+    apiBytes('/rooms/' + encodeURIComponent(roomId) + '/replay/' + encodeURIComponent(seq), {
+      signal,
+    }),
 }
