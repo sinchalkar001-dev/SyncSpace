@@ -79,6 +79,56 @@ describe('listTimeline edge cases', () => {
   })
 })
 
+/**
+ * A scrubber has to be able to reach the present. One response is capped at
+ * 500 entries, which a room passes within minutes of typing, so the client
+ * pages with the last seq it saw.
+ */
+describe('listTimeline paging', () => {
+  const four = () =>
+    recordEdits([
+      (doc) => doc.getText('code').insert(0, 'a'),
+      (doc) => doc.getText('code').insert(1, 'b'),
+      (doc) => doc.getText('code').insert(2, 'c'),
+      (doc) => doc.getText('code').insert(3, 'd'),
+    ])
+
+  it('reads the next page from the last seq of the previous one', async () => {
+    await seedLog(four())
+
+    const first = await listTimeline(ROOM, { limit: 2 })
+    expect(first.map((entry) => entry.seq)).toEqual([1, 2])
+
+    const second = await listTimeline(ROOM, { limit: 2, from: first[first.length - 1].seq })
+    expect(second.map((entry) => entry.seq)).toEqual([3, 4])
+
+    // And the end of the log is an empty page, not a repeat of the last one.
+    const third = await listTimeline(ROOM, { limit: 2, from: 4 })
+    expect(third).toEqual([])
+  })
+
+  it('is exclusive, so no entry is read twice', async () => {
+    await seedLog(four())
+    const page = await listTimeline(ROOM, { from: 2 })
+    expect(page.map((entry) => entry.seq)).toEqual([3, 4])
+  })
+
+  it('ignores from when it is absent, zero or nonsense', async () => {
+    await seedLog(four())
+    for (const from of [undefined, 0, -3, 'abc', null]) {
+      const page = await listTimeline(ROOM, { from })
+      expect(page.map((entry) => entry.seq), 'from=' + String(from)).toEqual([1, 2, 3, 4])
+    }
+  })
+
+  it('keeps paging scoped to one room', async () => {
+    await seedLog(four())
+    await seedLog(four(), 'other-room')
+    expect(await listTimeline('other-room', { from: 2 })).toHaveLength(2)
+    expect(await listTimeline(ROOM, { from: 2 })).toHaveLength(2)
+  })
+})
+
 describe('stateAt edge cases', () => {
   it('applies all available updates when seq exceeds the log length', async () => {
     await seedLog(

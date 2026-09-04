@@ -481,6 +481,14 @@ export const openapiDocument = {
           description: 'Maximum timeline entries returned, clamped to 500.',
           schema: { type: 'integer', minimum: 1, maximum: 500, default: 500 },
         },
+        {
+          name: 'from',
+          in: 'query',
+          required: false,
+          description:
+            'Exclusive lower bound on `seq`. Pass the last seq of the previous page to read the next one; the log is append-only, so pages never shift.',
+          schema: { type: 'integer', minimum: 0, default: 0 },
+        },
       ],
       get: {
         tags: ['Replay'],

@@ -23,6 +23,7 @@ import { LoadingBlock } from '../components/ui/Spinner.jsx'
 import { Whiteboard } from '../components/Whiteboard/Whiteboard.jsx'
 import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
 import { CommandPalette } from '../components/CommandPalette.jsx'
+import { ReplayViewer } from '../components/Replay/ReplayViewer.jsx'
 import { ShortcutsPanel } from '../components/ShortcutsPanel.jsx'
 import { LANGUAGES } from '../lib/languages.js'
 import { TOOLS } from '../store/uiStore.js'
@@ -78,6 +79,7 @@ export default function Room() {
 
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [replayOpen, setReplayOpen] = useState(false)
   const copyTimer = useRef(null)
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
@@ -273,6 +275,14 @@ export default function Room() {
         run: onCopy,
       },
       {
+        id: 'room:replay',
+        group: 'Room',
+        icon: 'clock',
+        title: 'Replay this room’s history',
+        keywords: 'history timeline scrub playback past',
+        run: () => setReplayOpen(true),
+      },
+      {
         id: 'room:shortcuts',
         group: 'Room',
         icon: 'key',
@@ -394,6 +404,17 @@ export default function Room() {
           {/* Every file route is behind requireAuth, so a guest is told why
               rather than shown a panel that can only fail. */}
           <FilesPanel roomId={roomId} user={user} canUse={isAuthenticated} />
+          {/* Replay reads the update log, which is optionalAuth like the room
+              itself — whoever can open the room can watch how it was built. */}
+          <button
+            type="button"
+            className="presence-menu__trigger"
+            aria-label="Room history"
+            title="Replay this room’s history"
+            onClick={() => setReplayOpen(true)}
+          >
+            <Icon name="clock" size={16} />
+          </button>
           <div className="room__views">
             <Segmented
               options={VIEWS}
@@ -440,6 +461,11 @@ export default function Room() {
         commands={commands}
       />
       <ShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      {/* Mounted only while open: closing should forget the position, the
+          cached frames and the playback state, and unmounting says so more
+          plainly than resetting six pieces of state would. */}
+      {replayOpen && <ReplayViewer roomId={roomId} onClose={() => setReplayOpen(false)} />}
     </div>
   )
 }

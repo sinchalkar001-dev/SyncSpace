@@ -252,7 +252,11 @@ export function createRoomsRouter() {
       if (!env.PERSIST_UPDATE_LOG) {
         throw badRequest('Replay is disabled (PERSIST_UPDATE_LOG=false)', 'replay_disabled')
       }
-      res.json({ timeline: await listTimeline(req.params.roomId, { limit: req.query.limit }) })
+      const timeline = await listTimeline(req.params.roomId, {
+        limit: req.query.limit,
+        from: req.query.from,
+      })
+      res.json({ timeline })
     } catch (err) {
       next(err)
     }

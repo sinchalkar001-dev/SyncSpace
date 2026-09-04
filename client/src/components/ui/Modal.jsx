@@ -21,6 +21,7 @@ export function Modal({
   onClose,
   initialFocusRef,
   wide = false,
+  full = false,
 }) {
   const surfaceRef = useRef(null)
   const titleId = useId()
@@ -79,7 +80,7 @@ export function Modal({
       }}
     >
       <div
-        className={'modal' + (wide ? ' modal--wide' : '')}
+        className={'modal' + (wide ? ' modal--wide' : '') + (full ? ' modal--full' : '')}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

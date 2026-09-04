@@ -97,7 +97,7 @@ a masked recipient and an error code only, and the resend endpoint reports "sent
 provider state. A relay outage never fails sign-up or an invite: the account and the membership
 exist either way.
 
-The room header carries three panels beside the presence stack. **People** is the roster and the
+The room header carries four panels beside the presence stack. **People** is the roster and the
 invite controls. **Chat** is live text for the room, kept in memory only — nothing is stored on
 either side, so anyone joining later starts from an empty transcript and the panel says so.
 **Files** is everything shared in the room: images, PDFs and text files up to 10 MB, listed newest
@@ -110,6 +110,21 @@ download route needs a bearer token and an `<a href>` cannot carry one; the byte
 browser from memory. **Remove** appears only on your own files, matching the server rule that only
 the uploader or the room owner may delete. Every file route needs an account, so a guest in a
 public room is told that rather than shown a panel that could only fail.
+
+**History** replays how the room was built. The scrubber runs over the update log, and dragging it
+shows the board and the buffer exactly as they stood at that point; play walks forward from there
+at a chosen speed. Two properties of Yjs decide the whole design: updates only ever add, so a frame
+cannot be produced by rewinding the one before it, and they commute, so the state at a point is the
+fold of everything up to it. That fold is `/replay/:seq`'s job, and every position gets a fresh
+document built from the answer. Frames are cached by sequence number and the next one is fetched
+during the current one's dwell time, so playback steps on a cache hit rather than a round trip; a
+slow connection plays slowly rather than queueing steps it cannot keep up with. Nothing in the
+viewer writes, and it is not connected to the live document — the room carries on behind it.
+
+One response carries at most 500 entries, which a room passes within a few minutes of typing, so
+`/replay` takes a `from` bound and the viewer pages with the last sequence number it saw. Paging is
+safe here in a way it rarely is: the log is append-only, so a page already read cannot change
+underneath the reader.
 
 A room created without a name leads with its code and an `Unnamed` chip rather than a shared
 "Untitled room" label, so two unnamed rooms are never indistinguishable, and each card carries a
@@ -284,7 +299,7 @@ tests flake. Both rules are commented where they apply, in
 | `DELETE` | `/api/rooms/:roomId/blocked/:userId` | Owner only; undoes a removal |
 | `GET` | `/api/rooms/:roomId/people` | Owner and members: roster plus everyone who opened it |
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
-| `GET` | `/api/rooms/:roomId/replay` | Timeline metadata |
+| `GET` | `/api/rooms/:roomId/replay` | Timeline metadata; `limit` (≤ 500) and `from` (exclusive seq bound) page through the log |
 | `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
@@ -363,6 +378,8 @@ The app is solid for a demo or an internal tool. Before putting it in front of u
   compaction, or a TTL is needed before this runs long-term; `PERSIST_UPDATE_LOG=false` disables it
   (and replay with it).
 - **Single node.** See the sequence-counter note above.
-- **Replay UI.** The endpoints exist; the scrubber does not.
+- **Replay reach.** The viewer pages the log but stops at 5,000 entries and says so — past that,
+  a scrubber has finer pixels than steps and each one is a round trip. Coarser positions (one per
+  second of wall-clock, say) would be needed to replay a long-lived room end to end.
 - **Monaco bundle** is 3.3 MB (857 kB gzipped) because every language ships. Trim the language set
   when size matters.
