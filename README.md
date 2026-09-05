@@ -1,5 +1,7 @@
 # SyncSpace
 
+[![CI](https://github.com/sinchalkar001-dev/SyncSpace/actions/workflows/ci.yml/badge.svg)](https://github.com/sinchalkar001-dev/SyncSpace/actions/workflows/ci.yml)
+
 Real-time collaborative whiteboard and code editor. Two people open the same room and draw on a
 shared canvas while editing a shared code buffer — concurrent edits merge through CRDTs rather than
 last-write-wins.
@@ -378,6 +380,21 @@ the running stack: both must see each other in presence, code typed in one must 
 and back again, a rectangle drawn in one must change the other's canvas pixels, and the tool rail
 must not overflow at 1440, 1100, or 900px wide. It needs a MongoDB; start one of the three ways
 above first.
+
+## Continuous integration
+
+Every push to `main` or `feature/frontend`, and every pull request, runs
+`.github/workflows/ci.yml`: lint, unit tests and the production build for the
+client, and lint plus the full unit suite for the server. The two run as
+separate jobs, so a failure names the side it came from.
+
+Node 20 rather than the newest release — `package.json` asks for `>=20`, and the
+floor is the version worth proving the code still runs on. The server job caches
+`~/.cache/mongodb-binaries`, because most of that suite starts an in-process
+MongoDB and `mongodb-memory-server` otherwise downloads a ~100 MB `mongod` on
+every run.
+
+The Playwright suite is not in CI yet. See the note at the top of the workflow.
 
 ## What "production ready" would still take
 
