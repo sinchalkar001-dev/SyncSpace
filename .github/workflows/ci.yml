@@ -1,0 +1,85 @@
+name: CI
+
+# The repository carries several hundred tests and lint across two workspaces.
+# Until this file existed none of it ran on a push, so a green history said
+# nothing about whether the code worked.
+#
+# The Playwright suite (npm run test:e2e) is deliberately not here yet. It takes
+# 7 minutes and currently fails 4 of 31 locally — three of those fail on
+# 66f92ec too, so they predate the replay work, and the fourth passes when run
+# on its own, which makes it order-dependent rather than broken. A workflow that
+# is red on arrival teaches people to ignore the red. Fix those four, then add a
+# third job here.
+
+on:
+  push:
+    branches: [main, feature/frontend]
+  pull_request:
+
+# A second push to the same branch makes the first run pointless; stop it
+# rather than queue behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client — lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 20 rather than the newest release: package.json asks for >=20, and
+      # the floor is the version worth proving the code still runs on.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint --workspace client
+
+      - name: Test
+        run: npm run test --workspace client
+
+      # Catches what tests cannot: a bad import path, or a chunk that only
+      # fails to resolve once Rollup tries to bundle it.
+      - name: Build
+        run: npm run build
+
+  server:
+    name: Server — lint, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # Most of the server suite starts an in-process MongoDB, and
+      # mongodb-memory-server downloads a ~100MB mongod the first time. Without
+      # this cache every run pays for that download again. The key carries the
+      # version pinned in test/helpers/db.js, so bumping it fetches a new one.
+      - name: Cache the MongoDB binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-7.0.14
+
+      - name: Lint
+        run: npm run lint --workspace server
+
+      # Slowest step in the workflow by a wide margin, and deliberately last:
+      # a lint error should not cost four minutes to find out about.
+      - name: Test
+        run: npm run test --workspace server
