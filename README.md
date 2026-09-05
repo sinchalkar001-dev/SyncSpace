@@ -394,7 +394,16 @@ floor is the version worth proving the code still runs on. The server job caches
 MongoDB and `mongodb-memory-server` otherwise downloads a ~100 MB `mongod` on
 every run.
 
-The Playwright suite is not in CI yet. See the note at the top of the workflow.
+A third job drives the Playwright suite: it starts both servers itself and
+takes a real browser through the app — two tabs syncing a room, drawing,
+erasing, running code, the dashboard. It caches the browser as well as the
+MongoDB binary, and keeps the trace as an artifact when it fails, because a
+browser failure is close to unreadable without one.
+
+Those run with one retry on CI and none locally. They drive two real browsers
+against two real servers, so a timing loss is not the same event as a broken
+feature — but a test that needs the retry every time is one to fix, and the run
+summary names the ones that used it.
 
 ## What "production ready" would still take
 

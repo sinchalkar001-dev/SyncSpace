@@ -127,14 +127,33 @@ test('the console is shared: the room sees a run it did not start', async ({ bro
   }
 })
 
+/**
+ * The picker used to offer languages the server could never execute, and this
+ * test reached for `markdown` to prove the button explained itself rather than
+ * failing on the press. 15f63e3 removed those from the picker, so every name it
+ * offers is one the server has a recipe for — and the only way left to meet a
+ * disabled Run button is a toolchain this particular machine has not installed.
+ *
+ * That is the same promise, met by whatever is missing here rather than by a
+ * language that no longer exists.
+ */
 test('says why a language cannot be run instead of failing on the press', async ({ page }) => {
   await openRoom(page)
 
-  await chooseLanguage(page, 'markdown')
+  const support = await page.request.get('/api/v1/runners').then((r) => r.json())
+  const missing = support.languages.find((entry) => !entry.available)
+  test.skip(!missing, 'every language this build offers is installed on this machine')
+
+  await chooseLanguage(page, missing.language)
 
   const button = runButton(page)
   await expect(button).toBeDisabled()
-  await expect(button).toHaveAttribute('title', /not run/)
+
+  // Compared as text rather than as a pattern: toolchain names are not regex
+  // safe — `new RegExp('g++')` throws "Nothing to repeat".
+  const why = await button.getAttribute('title')
+  expect(why).toContain(missing.toolchain) // so the reader knows what to install
+  expect(why).toContain('not installed')
 })
 
 /**

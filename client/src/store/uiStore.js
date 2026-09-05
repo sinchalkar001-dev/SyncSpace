@@ -122,7 +122,18 @@ export const useUIStore = create((set) => ({
       return { editor }
     }),
 
-  setViewport: (viewport) => set({ viewport }),
+  /**
+   * Accepts a value or an updater, the way React's setState does.
+   *
+   * Both call sites on the board pass an updater, because a pan and a zoom are
+   * both defined relative to where the view already is. Taking only a value
+   * meant `set({ viewport: <the function> })`: the viewport became the updater
+   * itself, so `viewport.scale` and `viewport.x` were undefined from the first
+   * wheel or drag onwards, and the board snapped back to the origin and stayed
+   * there.
+   */
+  setViewport: (next) =>
+    set((state) => ({ viewport: typeof next === 'function' ? next(state.viewport) : next })),
   zoomBy: (factor) =>
     set((state) => ({
       viewport: {
