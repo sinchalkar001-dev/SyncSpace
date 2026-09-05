@@ -20,6 +20,13 @@ export default defineConfig({
   expect: { timeout: 15000 },
   fullyParallel: false,
   workers: 1,
+  /**
+   * One retry on CI, none locally. These drive two real browsers against two
+   * real servers, so a timing loss is not the same event as a broken feature —
+   * but a test that needs the retry every time is one to fix, and the run
+   * summary says which ones used it.
+   */
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   use: {
     baseURL: CLIENT,

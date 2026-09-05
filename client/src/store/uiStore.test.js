@@ -29,6 +29,29 @@ describe('ui store', () => {
     expect(useUIStore.getState().viewport).toEqual({ scale: 1, x: 0, y: 0 })
   })
 
+  /**
+   * Panning and zooming are both defined relative to where the view already
+   * is, so both call sites on the board pass an updater rather than a value.
+   * Storing the updater itself left the board with an undefined scale and
+   * origin from the first wheel or drag onwards.
+   */
+  it('takes an updater as well as a value', () => {
+    useUIStore.getState().setViewport({ scale: 2, x: 10, y: 20 })
+    useUIStore.getState().setViewport((current) => ({ ...current, x: 300, y: 400 }))
+
+    expect(useUIStore.getState().viewport).toEqual({ scale: 2, x: 300, y: 400 })
+  })
+
+  it('never stores a function where the viewport should be', () => {
+    useUIStore.getState().setViewport((current) => ({ ...current, x: 55 }))
+    const { viewport } = useUIStore.getState()
+
+    expect(typeof viewport).toBe('object')
+    expect(Number.isFinite(viewport.scale)).toBe(true)
+    expect(Number.isFinite(viewport.x)).toBe(true)
+    expect(Number.isFinite(viewport.y)).toBe(true)
+  })
+
   it('switches the active tool', () => {
     useUIStore.getState().setTool('eraser')
     expect(useUIStore.getState().tool).toBe('eraser')
