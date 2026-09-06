@@ -1974,6 +1974,62 @@
   color: var(--danger);
 }
 
+/*
+  Stopping a program. Sits beside the spinner rather than in the button row on
+  the right, because it belongs to the run it is interrupting and not to the
+  panel — and because "Cancel" next to "Clear output" would be one destructive
+  verb too many in a row.
+*/
+.runpanel__cancel {
+  height: 22px;
+  padding: 0 var(--space-2);
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--fast), border-color var(--fast);
+}
+
+.runpanel__cancel:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.runpanel__cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/*
+  What this server will not stop a program from doing. Deliberately quiet —
+  it is a standing property of the deployment, not an error, and something
+  that shouts on every run stops being read by the second one.
+*/
+.runpanel__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  /* The same amber as .runhint above, which is the established way this
+     interface says "worth knowing" without saying "something broke". */
+  border: 1px solid rgba(233, 194, 92, 0.3);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.runpanel__warning svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
 /* ---------- input button and run hints ---------- */
 
 .inputbtn {

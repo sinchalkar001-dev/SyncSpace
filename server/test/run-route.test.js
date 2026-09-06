@@ -116,11 +116,42 @@ describe('POST /rooms/:roomId/run', () => {
 
     await run(roomId, { language: 'javascript', code: 'console.log("shared")' }, owner.token)
 
-    expect(sent).toHaveLength(1)
-    expect(sent[0].room).toBe(roomId)
-    expect(sent[0].event).toBe('code:run')
-    expect(sent[0].payload.by.name).toBe('Owner')
-    expect(sent[0].payload.run.stdout).toBe('shared\n')
+    // The finished result, in the shape the console has always rendered.
+    const finished = sent.filter((message) => message.event === 'code:run')
+    expect(finished).toHaveLength(1)
+    expect(finished[0].room).toBe(roomId)
+    expect(finished[0].payload.by.name).toBe('Owner')
+    expect(finished[0].payload.run.stdout).toBe('shared\n')
+  })
+
+  /**
+   * The room hears about a run before it has finished.
+   *
+   * This is what a Cancel button is built on: until the room is told the id of
+   * something still running, there is nothing for anyone to cancel. It is also
+   * what makes a slow compile look like progress rather than a hang.
+   */
+  it('announces a run as it moves, not only when it is over', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+
+    const sent = []
+    setIo({ to: (room) => ({ emit: (event, payload) => sent.push({ room, event, payload }) }) })
+
+    await run(roomId, { language: 'javascript', code: 'console.log("shared")' }, owner.token)
+
+    const states = sent.filter((message) => message.event === 'execution:state')
+    expect(states.map((message) => message.payload.state)).toEqual(['queued', 'running', 'completed'])
+
+    // One run, one id, and the same id on the finished broadcast — otherwise a
+    // client could not match them up.
+    const ids = new Set(states.map((message) => message.payload.executionId))
+    expect(ids.size).toBe(1)
+    expect(sent.find((m) => m.event === 'code:run').payload.executionId).toBe([...ids][0])
+
+    // Everything about the run reaches the room, not just the person who
+    // pressed the button.
+    expect(states.every((message) => message.room === roomId)).toBe(true)
   })
 
   it('runs in a room that only exists because someone opened the URL', async () => {

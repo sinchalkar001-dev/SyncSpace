@@ -184,13 +184,24 @@ export default function Room() {
   const socketHandlers = useMemo(
     () => ({
       'code:run': runner.receive,
+      // Queued, running, and how it ended. This is what a Cancel button needs
+      // — a run has no id anyone can act on until the room is told.
+      'execution:state': runner.receiveState,
       'room:kicked': onKicked,
       'room:chat': chat.receive,
       'session:ended': onSessionEnded,
       'ai:generation': onRemoteGeneration,
       'ai:applied': onRemoteApplied,
     }),
-    [runner.receive, onKicked, chat.receive, onSessionEnded, onRemoteGeneration, onRemoteApplied]
+    [
+      runner.receive,
+      runner.receiveState,
+      onKicked,
+      chat.receive,
+      onSessionEnded,
+      onRemoteGeneration,
+      onRemoteApplied,
+    ]
   )
 
   // The same socket carries presence, runs and chat, so the panel sends on the

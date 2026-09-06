@@ -69,6 +69,20 @@ export function createRateLimiters() {
     }),
 
     /**
+     * Stopping a program, budgeted separately and generously.
+     *
+     * Sharing the run budget would mean that the moment somebody exhausts it,
+     * they can no longer cancel the programs they already started — the exact
+     * situation where cancelling matters most. Ending a run also costs less
+     * than starting one.
+     */
+    cancelLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.SANDBOX_CANCEL_RATE_LIMIT_MAX,
+      message: 'Too many cancellations from this address, try again later',
+    }),
+
+    /**
      * Each generation is a paid call to a model and the slowest request this
      * server serves. Capped well below everything else, because the cost of
      * abuse here is a bill rather than load.

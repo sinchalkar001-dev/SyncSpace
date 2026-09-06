@@ -27,10 +27,15 @@ import {
 } from '../services/generation.service.js'
 import { TARGET_KEYS } from '../services/ai.service.js'
 import { runCode } from '../services/runner.service.js'
+import {
+  cancelExecution,
+  getExecution,
+  listExecutions,
+} from '../services/execution.service.js'
 import { getIo } from '../realtime/registry.js'
 import { env } from '../config/env.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
-import { badRequest, forbidden } from '../errors.js'
+import { badRequest, forbidden, notFound } from '../errors.js'
 
 const createSchema = z.object({
   name: z.string().trim().max(80).optional(),
@@ -127,7 +132,7 @@ async function loadRosterRoom(req) {
 
 export function createRoomsRouter() {
   const roomsRouter = Router()
-  const { inviteLimiter, runLimiter, generateLimiter } = createRateLimiters()
+  const { inviteLimiter, runLimiter, cancelLimiter, generateLimiter } = createRateLimiters()
 
   roomsRouter.post('/', requireAuth, validate(createSchema), async (req, res, next) => {
     try {
@@ -331,31 +336,127 @@ export function createRoomsRouter() {
           throw forbidden('You do not have access to this room', 'room_forbidden')
         }
 
-        const run = await runCode({
-          language: req.body.language,
-          code: req.body.code,
-          stdin: req.body.stdin,
-        })
-
+        // Worked out before the run rather than after it, because the queue
+        // needs to know whose it is: per-user admission is what stops one
+        // person holding every slot.
         const by = req.user
           ? { id: req.user.id, name: req.user.name }
           : req.body.as
             ? { id: null, name: req.body.as }
             : null
 
+        const run = await runCode({
+          language: req.body.language,
+          code: req.body.code,
+          stdin: req.body.stdin,
+          room: req.params.roomId,
+          user: by,
+          runId: req.body.runId ?? null,
+        })
+
         // Everyone in the room sees the result, not only whoever pressed Run:
         // a shared buffer with a private console would leave people guessing
         // why the code they are looking at just changed.
+        //
+        // This is the finished result. `execution:state` has already told the
+        // room the same run was queued and then running, which is what a
+        // Cancel button needs and what makes a slow compile visible rather
+        // than looking like nothing happened.
         getIo()
           ?.to(req.params.roomId)
           .emit('code:run', {
             roomId: req.params.roomId,
             runId: req.body.runId ?? null,
+            executionId: run.executionId,
             by,
             run,
           })
 
         res.json({ run })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /**
+   * A room's recent runs.
+   *
+   * The console is emptied by a page reload, which is a poor property for the
+   * one part of the room that is not a Yjs document and cannot rebuild itself
+   * from the server's copy. This is where it reloads from.
+   */
+  roomsRouter.get('/:roomId/executions', optionalAuth, runLimiter, async (req, res, next) => {
+    try {
+      const room = await ensureRoom(req.params.roomId)
+      if (!canAccess(room, req.user?.id)) {
+        throw forbidden('You do not have access to this room', 'room_forbidden')
+      }
+
+      res.json({ executions: await listExecutions(req.params.roomId, { limit: req.query.limit }) })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /** One run, by the id every broadcast about it carried. */
+  roomsRouter.get('/:roomId/executions/:executionId', optionalAuth, async (req, res, next) => {
+    try {
+      const room = await ensureRoom(req.params.roomId)
+      if (!canAccess(room, req.user?.id)) {
+        throw forbidden('You do not have access to this room', 'room_forbidden')
+      }
+
+      const execution = await getExecution(req.params.executionId)
+      // An id from another room is not this room's to read, and saying "not
+      // found" rather than "forbidden" avoids confirming it exists at all.
+      if (execution.roomId !== req.params.roomId) {
+        throw notFound('No such execution', 'execution_not_found')
+      }
+
+      res.json({ execution })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /**
+   * Stops a program.
+   *
+   * Whoever started it can stop it, and so can the room's owner — somebody has
+   * to be able to end a run in their own room without waiting out the timeout.
+   * Everyone else is refused, because a shared console would otherwise let any
+   * member cancel anyone's work.
+   */
+  roomsRouter.delete(
+    '/:roomId/executions/:executionId',
+    optionalAuth,
+    cancelLimiter,
+    async (req, res, next) => {
+      try {
+        const room = await ensureRoom(req.params.roomId)
+        if (!canAccess(room, req.user?.id)) {
+          throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        const execution = await getExecution(req.params.executionId).catch(() => null)
+        if (!execution || execution.roomId !== req.params.roomId) {
+          throw notFound('No such execution', 'execution_not_found')
+        }
+
+        const owns = Boolean(req.user?.id) && room.owner?.toString() === req.user.id
+
+        const outcome = await cancelExecution({
+          executionId: req.params.executionId,
+          user: req.user
+            ? { id: req.user.id, name: req.user.name }
+            : req.body?.as
+              ? { id: null, name: req.body.as }
+              : null,
+          canCancelAnything: owns,
+        })
+
+        res.json(outcome)
       } catch (err) {
         next(err)
       }

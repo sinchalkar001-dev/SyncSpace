@@ -27,6 +27,33 @@ const csv = z
   .transform((value) => value.split(',').map((part) => part.trim()).filter(Boolean))
 
 /**
+ * A small `{"key": "value"}` map in one variable.
+ *
+ * Used for per-language container image overrides, where the alternative is
+ * seven variables that all have to be spelled correctly. Bad JSON is a
+ * configuration mistake worth failing at boot for, rather than one that
+ * surfaces as a mysteriously missing language later.
+ */
+const jsonRecord = blankIsUnset(
+  z
+    .string()
+    .transform((value, ctx) => {
+      try {
+        const parsed = JSON.parse(value)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('not an object')
+        }
+        return parsed
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'must be a JSON object of strings' })
+        return z.NEVER
+      }
+    })
+    .pipe(z.record(z.string()))
+    .optional()
+)
+
+/**
  * Where the browsable API documentation lives. One plain path, so it can be
  * renamed or firewalled as a unit; trailing slashes are trimmed away because
  * the mount must not depend on how the operator spelled the variable.
@@ -155,14 +182,81 @@ const schema = z
     PERSIST_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(2000),
     PERSIST_MAX_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(10000),
 
-    // Running a room's buffer executes a real program on this machine. There
-    // is no sandbox around it, so it is worth switching off anywhere the
-    // people in a room are not people you trust.
+    // Running a room's buffer executes a program somebody else wrote. How
+    // much that is worth worrying about depends entirely on SANDBOX_BACKEND
+    // below; this switch turns the whole feature off.
     ALLOW_CODE_EXECUTION: booleanish.default('true'),
     RUN_TIMEOUT_MS: z.coerce.number().int().positive().max(60000).default(5000),
     RUN_OUTPUT_LIMIT: z.coerce.number().int().positive().default(65536),
     RUN_MAX_CONCURRENT: z.coerce.number().int().positive().default(4),
     RUN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+
+    /**
+     * How a program is isolated from the machine it runs on.
+     *
+     *   docker   a container per run, and if there is no container runtime
+     *            then nothing runs at all
+     *   process  a child process on this machine, which is not a sandbox
+     *   auto     containers when available, a child process otherwise
+     *
+     * `auto` is the default so the feature works on a laptop with nothing
+     * installed. Production wants `docker`, and the difference is not
+     * cosmetic: `auto` on a host where the daemon is down silently becomes
+     * `process`, which runs untrusted code with the server's own filesystem
+     * and network access. `docker` refuses instead.
+     */
+    SANDBOX_BACKEND: z.enum(['auto', 'docker', 'process']).default('auto'),
+    SANDBOX_DOCKER_BIN: z.string().trim().min(1).default('docker'),
+
+    // Per run. A memory limit and a process limit are what turn "allocate
+    // until the machine swaps" and a fork bomb into an ordinary failed run.
+    SANDBOX_MEMORY_MB: z.coerce.number().int().positive().max(16384).default(256),
+    SANDBOX_CPUS: z.coerce.number().positive().max(64).default(1),
+    SANDBOX_PIDS: z.coerce.number().int().positive().max(4096).default(64),
+    SANDBOX_FILE_SIZE_MB: z.coerce.number().int().positive().max(4096).default(32),
+
+    /**
+     * Off, and it takes a deliberate act to change that.
+     *
+     * A program with a network is a program that can reach the cloud metadata
+     * endpoint that hands out credentials, scan the private network the server
+     * sits in, and post whatever it finds somewhere else. None of that is
+     * exotic; it is the first thing anyone tries.
+     */
+    SANDBOX_NETWORK: booleanish.default('false'),
+    SANDBOX_NETWORK_NAME: z.string().trim().min(1).default('bridge'),
+
+    // Never root. Left unset it follows the server's own uid, which is what
+    // makes the bind-mounted working directory writable.
+    SANDBOX_USER: blankIsUnset(z.string().trim().optional()),
+    // For gVisor or Kata, where a deployment wants a second boundary under
+    // the first.
+    SANDBOX_RUNTIME: blankIsUnset(z.string().trim().optional()),
+    // Whether a language counts as available before its image is local.
+    SANDBOX_PULL: booleanish.default('false'),
+    SANDBOX_IMAGES: jsonRecord,
+
+    /**
+     * Admission, not just capacity.
+     *
+     * RUN_MAX_CONCURRENT alone is first-come-first-served, so one person with
+     * a script can hold every slot indefinitely and everybody else is refused.
+     * These two make that a slower turn for the person doing it rather than an
+     * outage for everyone else.
+     */
+    SANDBOX_MAX_PER_USER: z.coerce.number().int().positive().default(2),
+    SANDBOX_MAX_PER_ROOM: z.coerce.number().int().positive().default(4),
+    SANDBOX_QUEUE_DEPTH: z.coerce.number().int().positive().default(32),
+
+    // Program output is whatever someone typed into a shared editor. Keeping
+    // it forever is a liability; keeping it briefly is what lets the console
+    // survive a reload.
+    SANDBOX_RETENTION_HOURS: z.coerce.number().int().positive().max(8760).default(24),
+
+    // Cancelling has its own budget: sharing the run budget would mean that
+    // exhausting it leaves you unable to stop the programs you already
+    // started, which is when stopping them matters most.
+    SANDBOX_CANCEL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
 
     /**
      * Turning a whiteboard into code calls a model, which costs money per

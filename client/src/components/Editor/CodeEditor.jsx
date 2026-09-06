@@ -356,6 +356,10 @@ export function CodeEditor({
           error={runner.error}
           hint={hint}
           stale={stale}
+          live={runner.live}
+          cancelling={runner.cancelling}
+          isolation={runner.isolation}
+          onCancel={runner.cancel}
           onHintAction={openStdin}
           onRun={run}
           onClear={runner.clear}

@@ -961,10 +961,118 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/executions': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['Code execution'],
+        summary: "A room's recent runs",
+        description: [
+          'The console is emptied by a page reload, and unlike the rest of the room it is not a Yjs document that can rebuild itself. This is where it reloads from.',
+          '',
+          'Rows expire on their own after SANDBOX_RETENTION_HOURS: program output is whatever somebody typed into a shared editor, and keeping it indefinitely is a liability rather than a feature.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'How many to return, newest first (1-100).',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Newest first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    executions: { type: 'array', items: { $ref: '#/components/schemas/Execution' } },
+                  },
+                },
+              },
+            },
+          },
+          ...error(403, 'No access to the room', 'room_forbidden', 'You do not have access to this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/executions/{executionId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { $ref: '#/components/parameters/executionId' },
+      ],
+      get: {
+        tags: ['Code execution'],
+        summary: 'One run',
+        description:
+          'The id is the one carried by every `execution:state` broadcast about the run, and by the finished `code:run`.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The run',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { execution: { $ref: '#/components/schemas/Execution' } },
+                },
+              },
+            },
+          },
+          ...error(403, 'No access to the room', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No such run, or it belongs to another room', 'execution_not_found', 'No such execution'),
+        },
+      },
+      delete: {
+        tags: ['Code execution'],
+        summary: 'Stop a running program',
+        description: [
+          'Whoever started a run can stop it, and so can the room owner — somebody has to be able to end a program in their own room without waiting out the timeout.',
+          '',
+          'A run that has already finished answers `{ cancelled: false }` with its final state rather than an error: pressing Cancel as a program exits is a race, not a mistake.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Whether anything was actually stopped',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    cancelled: { type: 'boolean' },
+                    state: { $ref: '#/components/schemas/ExecutionState' },
+                  },
+                },
+                examples: {
+                  stopped: { summary: 'It was running', value: { cancelled: true, state: 'cancelled' } },
+                  too_late: {
+                    summary: 'It had already finished',
+                    value: { cancelled: false, state: 'completed' },
+                  },
+                },
+              },
+            },
+          },
+          ...error(
+            403,
+            'Not yours to stop, or no access to the room',
+            'execution_forbidden',
+            'You can only stop a program you started'
+          ),
+          ...error(404, 'No such run, or it belongs to another room', 'execution_not_found', 'No such execution'),
+        },
+      },
+    },
+
     '/api/v1/runners': {
       get: {
         tags: ['Code execution'],
-        summary: 'Which languages this machine can run',
+        summary: 'Which languages this machine can run, and how it contains them',
         description: 'A property of the machine, deliberately not per-room: clients consult it before offering the Run button.',
         security: [],
         responses: {
@@ -981,6 +1089,11 @@ export const openapiDocument = {
                       type: 'array',
                       items: { $ref: '#/components/schemas/RunnerLanguage' },
                     },
+                    isolation: {
+                      allOf: [{ $ref: '#/components/schemas/Isolation' }],
+                      nullable: true,
+                      description: 'Null when execution is switched off entirely.',
+                    },
                   },
                   example: {
                     enabled: true,
@@ -989,6 +1102,13 @@ export const openapiDocument = {
                       { language: 'javascript', available: true, toolchain: 'Node.js', version: 'v22.9.0' },
                       { language: 'rust', available: false, toolchain: 'Rust', version: '' },
                     ],
+                    isolation: {
+                      backend: 'docker',
+                      available: true,
+                      weak: false,
+                      unenforced: [],
+                      limits: { timeoutMs: 5000, memoryMb: 256, cpus: 1, processes: 64, network: false },
+                    },
                   },
                 },
               },
@@ -1016,6 +1136,13 @@ export const openapiDocument = {
         required: true,
         description: 'Id of a generation from the room history.',
         schema: { type: 'string', pattern: '^[0-9a-f]{24}$' },
+      },
+      executionId: {
+        name: 'executionId',
+        in: 'path',
+        required: true,
+        description: 'Id of a run, as carried by every broadcast about it.',
+        schema: { type: 'string', format: 'uuid' },
       },
       roomId: {
         name: 'roomId',
@@ -1517,13 +1644,105 @@ export const openapiDocument = {
           language: { type: 'string' },
           stage: { type: 'string', enum: ['compile', 'run'], description: '"compile" when compilation already failed' },
           ok: { type: 'boolean', description: 'Exit code zero within the time limit' },
-          stdout: { type: 'string' },
+          stdout: { type: 'string', description: 'Host paths are redacted out of both streams before anyone sees them' },
           stderr: { type: 'string' },
           truncated: { type: 'boolean' },
           timedOut: { type: 'boolean' },
           durationMs: { type: 'integer' },
           exitCode: { type: ['integer', 'null'] },
           signal: { type: ['string', 'null'] },
+          executionId: { type: 'string', format: 'uuid', description: 'Names this run for cancellation and history' },
+          state: { $ref: '#/components/schemas/ExecutionState' },
+          termination: { $ref: '#/components/schemas/Termination' },
+          backend: { type: ['string', 'null'], enum: ['docker', 'process', null], description: 'Which isolation actually ran it' },
+          sourceHash: { type: 'string', description: 'SHA-256 of the code that ran' },
+        },
+      },
+
+      ExecutionState: {
+        type: 'string',
+        enum: ['queued', 'running', 'completed', 'failed', 'timed_out', 'resource_limit', 'cancelled'],
+        description:
+          '`resource_limit` is a memory, output or process ceiling; `failed` is the program exiting non-zero.',
+      },
+
+      Termination: {
+        type: ['string', 'null'],
+        enum: [
+          'exited',
+          'timeout',
+          'memory_limit',
+          'output_limit',
+          'process_limit',
+          'cancelled',
+          'failed_to_start',
+          'internal_error',
+          null,
+        ],
+        description: 'Why it ended. Finer than the state: `resource_limit` covers three of these.',
+      },
+
+      Execution: {
+        type: 'object',
+        description: 'One run, as recorded. Output is stored already capped and already redacted.',
+        properties: {
+          executionId: { type: 'string', format: 'uuid' },
+          roomId: { type: 'string' },
+          by: {
+            type: ['object', 'null'],
+            properties: { id: { type: ['string', 'null'] }, name: { type: ['string', 'null'] } },
+            description: 'Null id for a guest, who has no account to point at',
+          },
+          language: { type: 'string' },
+          sourceHash: { type: 'string', description: 'Answers "was this the same code?" without storing it' },
+          state: { $ref: '#/components/schemas/ExecutionState' },
+          termination: { $ref: '#/components/schemas/Termination' },
+          stage: { type: ['string', 'null'], enum: ['compile', 'run', null] },
+          queuedAt: { type: 'string', format: 'date-time' },
+          startedAt: { type: ['string', 'null'], format: 'date-time' },
+          finishedAt: { type: ['string', 'null'], format: 'date-time' },
+          durationMs: { type: 'integer', description: 'Time inside the sandbox, not since the button was pressed' },
+          exitCode: { type: ['integer', 'null'] },
+          signal: { type: ['string', 'null'] },
+          stdout: { type: 'string' },
+          stderr: { type: 'string' },
+          truncated: { type: 'boolean' },
+        },
+      },
+
+      Isolation: {
+        type: 'object',
+        description: [
+          'What this deployment does and does not stop a program from doing.',
+          '',
+          'Reported rather than assumed, because it depends on how the server was deployed: with a container runtime a program cannot open a socket or read the filesystem, and without one it certainly can. A client should treat `weak: true` as a reason to warn.',
+        ].join('\n'),
+        properties: {
+          backend: { type: 'string', enum: ['docker', 'process'], description: 'What actually ran it' },
+          available: { type: 'boolean', description: 'False when SANDBOX_BACKEND=docker and no runtime answered' },
+          weak: { type: 'boolean', description: 'True when any control is unenforced' },
+          unenforced: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The controls this backend cannot impose. Empty under Docker.',
+          },
+          enforcement: {
+            type: 'object',
+            additionalProperties: { type: 'string', enum: ['enforced', 'none'] },
+            description: 'One answer per control: timeout, output, memory, cpu, processes, filesystem, network, environment, cleanup.',
+          },
+          limits: {
+            type: 'object',
+            properties: {
+              timeoutMs: { type: 'integer' },
+              outputBytes: { type: 'integer' },
+              memoryMb: { type: 'integer' },
+              cpus: { type: 'number' },
+              processes: { type: 'integer' },
+              fileSizeMb: { type: 'integer' },
+              network: { type: 'boolean' },
+            },
+          },
         },
       },
 

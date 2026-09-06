@@ -138,3 +138,107 @@ describe('useCodeRunner', () => {
     })
   })
 })
+
+/**
+ * A run has a name before it has a result.
+ *
+ * That is the whole reason `execution:state` exists: until the room is told
+ * the id of something still running, there is nothing a Cancel button can
+ * address, and the only way out of a slow program is the timeout.
+ */
+describe('a run still in flight', () => {
+  const running = (over = {}) => ({
+    executionId: 'exec-1',
+    runId: null,
+    state: 'running',
+    by: { id: null, name: 'Priya' },
+    ...over,
+  })
+
+  it('shows what the room is running, including somebody else’s', () => {
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+
+    act(() => hook.current.receiveState(running()))
+
+    expect(hook.current.live.executionId).toBe('exec-1')
+    expect(hook.current.live.state).toBe('running')
+    expect(hook.current.live.mine).toBe(false)
+  })
+
+  it('clears when the run reaches a state it cannot leave', () => {
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+
+    act(() => hook.current.receiveState(running()))
+    act(() => hook.current.receiveState(running({ state: 'completed' })))
+
+    expect(hook.current.live).toBeNull()
+  })
+
+  /** A late message about an old run must not blank the current one. */
+  it('ignores a finished message for a run that is not the live one', () => {
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+
+    act(() => hook.current.receiveState(running({ executionId: 'current' })))
+    act(() => hook.current.receiveState(running({ executionId: 'older', state: 'completed' })))
+
+    expect(hook.current.live?.executionId).toBe('current')
+  })
+
+  it('stops it by the id the room was given', async () => {
+    const cancel = vi.spyOn(api, 'cancelRun').mockResolvedValue({ cancelled: true, state: 'cancelled' })
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    act(() => hook.current.receiveState(running()))
+
+    await act(() => hook.current.cancel())
+
+    expect(cancel).toHaveBeenCalledWith('room-1', 'exec-1')
+  })
+
+  it('does nothing when there is nothing running', async () => {
+    const cancel = vi.spyOn(api, 'cancelRun').mockResolvedValue({})
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await act(() => hook.current.cancel())
+
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Losing the race with a program that was about to finish anyway is not
+   * worth an error toast.
+   */
+  it('stays quiet when the cancel arrives too late', async () => {
+    vi.spyOn(api, 'cancelRun').mockRejectedValue(new Error('No such execution'))
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    act(() => hook.current.receiveState(running()))
+
+    await act(() => hook.current.cancel())
+
+    expect(hook.current.error).toBeNull()
+    expect(hook.current.cancelling).toBe(false)
+  })
+})
+
+describe('what the server admits about isolation', () => {
+  it('passes the report through for the console to warn about', async () => {
+    vi.spyOn(api, 'runners').mockResolvedValue({
+      ...SUPPORT,
+      isolation: { backend: 'process', weak: true, unenforced: ['network', 'filesystem'] },
+    })
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+    expect(hook.current.isolation.weak).toBe(true)
+    expect(hook.current.isolation.unenforced).toContain('network')
+  })
+
+  it('is null rather than guessing when the server says nothing', async () => {
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+    expect(hook.current.isolation).toBeNull()
+  })
+})

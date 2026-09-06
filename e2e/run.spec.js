@@ -267,3 +267,57 @@ test('runs python when the server has it', async ({ page }) => {
   await expect(page.locator('.runpanel__out')).toHaveText('hello from python\n')
   await expect(page.locator('.statusbar')).toContainText('python')
 })
+
+/**
+ * Stopping a program from the browser.
+ *
+ * The whole cancellation path in one test, because every piece of it is
+ * invisible on its own: the server has to name the run and announce it over
+ * the socket before it finishes, the client has to hold onto that id, and the
+ * button has to reach the right endpoint. A unit test can prove each half
+ * while the two halves disagree about the shape of the message between them.
+ */
+test('stops a program that will not finish on its own', async ({ page }) => {
+  await openRoom(page)
+  await type(page, 'setTimeout(() => console.log("finished on its own"), 60000)')
+
+  await runButton(page).click()
+
+  // Offered only once the server has named the run — before that there is no
+  // id for the button to address.
+  const cancel = page.getByRole('button', { name: 'Cancel' })
+  await expect(cancel).toBeVisible()
+
+  await cancel.click()
+
+  // Exactly "Stopped", not "Stopped after 5.00 s". The timeout would kill this
+  // program too, a few seconds later, and produce a similar-looking panel —
+  // so a loose matcher here would pass whether or not Cancel did anything.
+  await expect(page.locator('.runpanel__state--warn')).toHaveText('Stopped')
+  await expect(page.locator('.runpanel')).not.toContainText('finished on its own')
+
+  // And the console is usable again rather than stuck on a run that is gone.
+  await expect(cancel).toHaveCount(0)
+  await expect(runButton(page)).toBeEnabled()
+})
+
+/**
+ * What the server will not stop a program from doing, said where somebody
+ * about to run a stranger's code will read it.
+ */
+test('says so when programs are not sandboxed', async ({ page }) => {
+  await openRoom(page)
+
+  const support = await page.request.get('/api/v1/runners').then((r) => r.json())
+  const warning = page.locator('.runpanel__warning')
+
+  await type(page, 'console.log("hello")')
+  await runButton(page).click()
+  await expect(page.locator('.runpanel__out')).toHaveText('hello\n')
+
+  if (support.isolation?.weak) {
+    await expect(warning).toContainText('unsandboxed')
+  } else {
+    await expect(warning).toHaveCount(0)
+  }
+})

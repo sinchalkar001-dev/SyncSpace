@@ -268,8 +268,30 @@ export const api = {
   deleteRoom: (roomId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' }),
 
-  /** What this server can run, and whether running is switched on at all. */
+  /**
+   * What this server can run, whether running is switched on at all, and what
+   * it will and will not stop a program from doing.
+   */
   runners: (signal) => apiFetch('/runners', { signal }),
+
+  /** A room's recent runs, newest first — what the console reloads into. */
+  executions: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/executions', { signal }),
+
+  /**
+   * Stops a running program.
+   *
+   * Answers `{ cancelled: false }` rather than failing when the program has
+   * already finished, so a Cancel pressed at the last moment is not an error.
+   */
+  cancelRun: (roomId, executionId) =>
+    apiFetch(
+      '/rooms/' +
+        encodeURIComponent(roomId) +
+        '/executions/' +
+        encodeURIComponent(executionId),
+      { method: 'DELETE' }
+    ),
 
   /** Whether this server can generate code, and what it can be asked for. */
   ai: (signal) => apiFetch('/ai', { signal, retry: 2 }),

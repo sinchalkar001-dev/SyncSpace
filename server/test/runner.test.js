@@ -7,6 +7,8 @@ const original = {
   limit: env.RUN_OUTPUT_LIMIT,
   enabled: env.ALLOW_CODE_EXECUTION,
   concurrent: env.RUN_MAX_CONCURRENT,
+  perUser: env.SANDBOX_MAX_PER_USER,
+  perRoom: env.SANDBOX_MAX_PER_ROOM,
 }
 
 afterEach(() => {
@@ -14,6 +16,8 @@ afterEach(() => {
   env.RUN_OUTPUT_LIMIT = original.limit
   env.ALLOW_CODE_EXECUTION = original.enabled
   env.RUN_MAX_CONCURRENT = original.concurrent
+  env.SANDBOX_MAX_PER_USER = original.perUser
+  env.SANDBOX_MAX_PER_ROOM = original.perRoom
 })
 
 const run = (code, extra = {}) => runCode({ language: 'javascript', code, ...extra })
@@ -89,12 +93,30 @@ describe('running code', () => {
     expect(seen.PATH || seen.Path).toBeTruthy()
   })
 
+  /**
+   * Proven by what one run can see of another, rather than by printing the
+   * directory and comparing.
+   *
+   * Printing it used to be the test, and it stopped working the moment the
+   * working directory started being redacted out of program output — both runs
+   * now truthfully report ".". Asking whether a file one run created is
+   * visible to the other tests the property itself instead of a proxy for it,
+   * and would have caught a shared directory that happened to be printed
+   * under two names.
+   */
   it('runs each program somewhere of its own', async () => {
-    const code = 'console.log(process.cwd())'
-    const [first, second] = await Promise.all([run(code), run(code)])
+    const marker = 'require("fs").writeFileSync("marker.txt", "x")'
+    const look = 'require("fs").existsSync("marker.txt")'
 
-    expect(first.stdout.trim()).not.toBe(second.stdout.trim())
-    expect(first.stdout).toContain('syncspace-run-')
+    const [first, second] = await Promise.all([
+      run(marker + '; setTimeout(() => console.log(' + look + ' ? "mine" : "lost"), 300)'),
+      run('setTimeout(() => console.log(' + look + ' ? "saw-the-neighbour" : "isolated"), 150)'),
+    ])
+
+    // The first still has its own file: this is not passing because nothing
+    // was written at all.
+    expect(first.stdout.trim()).toBe('mine')
+    expect(second.stdout.trim()).toBe('isolated')
   })
 
   it('refuses a language it has no runner for', async () => {
@@ -113,19 +135,73 @@ describe('running code', () => {
     })
   })
 
-  it('refuses to start more programs than it will run at once', async () => {
+  /**
+   * A full server now makes people wait rather than turning them away.
+   *
+   * This used to be a refusal: the fifth caller got a 429 and lost their run.
+   * Waiting is strictly better for the ordinary case it was written for — four
+   * people in a room all pressing Run — and the abuse case it was really
+   * guarding against is answered properly by the per-person limit below,
+   * which a global counter never could.
+   */
+  it('queues a program rather than refusing it when every slot is busy', async () => {
     env.RUN_MAX_CONCURRENT = 1
-    env.RUN_TIMEOUT_MS = 2000
+    env.RUN_TIMEOUT_MS = 4000
 
-    const slow = run('setTimeout(() => console.log("done"), 400)')
+    // Prints when it starts, then holds its slot for 300ms.
+    const program = 'console.log(Date.now()); const end = Date.now() + 300; while (Date.now() < end) {}'
+
+    const [first, second] = await Promise.all([run(program), run(program)])
+
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+
+    // One slot, so the later start cannot have overlapped the earlier run.
+    const starts = [Number(first.stdout.trim()), Number(second.stdout.trim())].sort((a, b) => a - b)
+    expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(250)
+  })
+
+  /**
+   * The limit that a global slot count could not express: one person cannot
+   * take every slot, however many there are.
+   */
+  it('refuses one person more than their share', async () => {
+    env.SANDBOX_MAX_PER_USER = 1
+    env.RUN_TIMEOUT_MS = 4000
+
+    const slow = run('const end = Date.now() + 400; while (Date.now() < end) {}')
+
     await expect(run('console.log(1)')).rejects.toMatchObject({
       status: 429,
-      code: 'runner_busy',
+      code: 'user_execution_limit',
     })
 
-    // The first one is unaffected, and the slot frees up after it.
-    expect((await slow).stdout).toBe('done\n')
+    // Theirs is unaffected, and they are welcome again once it is done.
+    expect((await slow).ok).toBe(true)
     expect((await run('console.log(1)')).ok).toBe(true)
+  })
+
+  it('refuses a room more than its share, whoever is asking', async () => {
+    env.SANDBOX_MAX_PER_ROOM = 1
+    env.RUN_TIMEOUT_MS = 4000
+
+    const busy = runCode({
+      language: 'javascript',
+      code: 'const end = Date.now() + 400; while (Date.now() < end) {}',
+      room: 'crowded',
+      user: { id: null, name: 'First' },
+    })
+
+    await expect(
+      runCode({
+        language: 'javascript',
+        code: 'console.log(1)',
+        room: 'crowded',
+        user: { id: null, name: 'Second' },
+      })
+    ).rejects.toMatchObject({ status: 429, code: 'room_execution_limit' })
+
+    expect((await busy).ok).toBe(true)
   })
 
   /**

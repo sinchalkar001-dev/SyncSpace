@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "dev:memory": "node scripts/dev-memory.js",
-    "mail:check": "node scripts/mail-check.js"
+    "mail:check": "node scripts/mail-check.js",
+    "sandbox:check": "node scripts/sandbox-check.js",
+    "sandbox:pull": "node scripts/sandbox-check.js --pull"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

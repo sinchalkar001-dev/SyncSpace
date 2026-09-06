@@ -311,6 +311,10 @@ printed something.
 An `Input` box beside the button is piped to the program's standard input, which is enough for the
 usual read-a-line exercises.
 
+A run that is queued or still going says so, and offers **Cancel** — to whoever started it, and to
+the room's owner, who otherwise has no way to end somebody else's program in their own room short
+of waiting out the timeout.
+
 | Language | Needs | How it runs |
 | --- | --- | --- |
 | JavaScript | Node.js | `node main.js` |
@@ -325,21 +329,104 @@ Whatever is not installed is reported as unavailable and its Run button says so 
 failing when pressed. Languages with nothing to execute — SQL, JSON, HTML, CSS, Markdown — can
 still be written and shared.
 
-**This runs real programs on the machine hosting the server.** There is no container and no
-syscall filter, so the protections are the ones a single process can enforce: a fresh working
-directory per run, an environment scrubbed down to a toolchain whitelist (a program cannot read
-`MONGODB_URI` or `JWT_SECRET`), a wall-clock timeout that kills the whole process tree, a cap on
-captured output, a ceiling on concurrent runs, and a rate limit. Access is the room's: only
-someone who can open a room can run its code. Anywhere the people in a room are not people you
-trust, set `ALLOW_CODE_EXECUTION=false`.
+### How a run happens
+
+```
+Client  →  POST /rooms/:id/run  →  execution job  →  queue  →  isolated runner
+                                                                     ↓
+Room broadcast  ←  execution record  ←  result  ←  sandbox (container per run)
+```
+
+The queue is the part that is not obvious. Admission is checked before anything becomes a
+process — per person, per room, and against the queue's own depth — so one person with a script
+gets a slower turn rather than every slot in the building. A run is given an id and announced to
+the room as `execution:state` the moment it is queued, which is what makes it cancellable: until
+the room knows the name of something still running, there is nothing anyone can press Cancel on.
+
+Each run is recorded with its id, room, who started it, the language, a SHA-256 of the source, the
+times, the exit code, the output and **why it ended**. States are `queued`, `running`, `completed`,
+`failed`, `timed_out`, `resource_limit` and `cancelled`; `termination` is finer, because
+`resource_limit` covers memory, output and process ceilings, which a person would fix three
+different ways. Records expire on their own — program output is whatever somebody typed into a
+shared editor.
+
+### The sandbox
+
+With a container runtime, each run gets its own container and nothing survives it:
+
+| Control | How |
+| --- | --- |
+| Network | `--network none`. Nothing, including the cloud metadata endpoint that hands out credentials |
+| Memory | `--memory` with `--memory-swap` equal, so swap is not the way around it |
+| CPU | `--cpus` |
+| Processes | `--pids-limit`, which is the whole answer to a fork bomb |
+| Filesystem | `--read-only` plus a size-capped `--tmpfs`; only the run's own directory is writable |
+| Privileges | `--cap-drop ALL`, `--security-opt no-new-privileges`, never root |
+| Disk | `--ulimit fsize`, so the bind mount cannot be filled |
+| Environment | Docker passes none of the server's; only `HOME` and toolchain caches are added back |
+| Cleanup | The container is removed on every path, and orphans are labelled so they can be reaped |
+
+Two more hold whatever the backend: output is **capped and the program killed**, rather than left
+to burn a core printing into the bin; and host paths are stripped from stdout and stderr before
+anyone sees them. That last one is not cosmetic — an uncaught error in Node names the file it was
+running by its real path, which spells out the OS, the account the server runs as, and where its
+temporary files live, to everyone in the room.
+
+### Deployment
+
+```sh
+cd server
+npm run sandbox:pull     # fetch the images; the first run of a language is otherwise a silent download
+npm run sandbox:check    # what this machine would really do with somebody else's program
+```
+
+Set **`SANDBOX_BACKEND=docker` in production.** The default is `auto`, which falls back to running
+programs as ordinary child processes when no container runtime answers — right for a laptop, wrong
+for a host anyone else can reach, and quiet about it either way. `docker` refuses to run code at
+all rather than run it unsandboxed. `npm run sandbox:check --strict` exits non-zero when anything
+is unenforced, which makes it a deploy gate.
+
+The server needs access to the Docker socket, and the working directory is bind-mounted into the
+container — so on Docker-in-Docker or a rootless daemon, check that `SANDBOX_USER` can write to it.
+
+### What it does not do
+
+The process backend **is not a sandbox** and nothing here pretends otherwise. It enforces a
+timeout, an output cap, a throwaway working directory and a scrubbed environment — the four things
+one Node process can impose on a child that is otherwise its peer. A program running under it can
+read any file the server account can read, open any socket, allocate until the machine swaps, and
+fork until the process table is full. The security tests assert exactly this, empirically, rather
+than asserting a protection that is not there.
+
+Which controls are real is reported by `GET /api/v1/runners` and shown next to the console, because
+"read the deployment's environment variables" is not an answer available to the person in the room
+about to run a stranger's code.
+
+Even with containers: this is isolation, not a proof. A container shares the host kernel, so a
+kernel exploit is a way out — `SANDBOX_RUNTIME=runsc` puts gVisor underneath if that matters. And
+`ALLOW_CODE_EXECUTION=false` is still the only setting that runs nothing at all.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ALLOW_CODE_EXECUTION` | `true` | Turns running off entirely |
+| `SANDBOX_BACKEND` | `auto` | `docker`, `process`, or `auto`. Production wants `docker` |
+| `SANDBOX_MEMORY_MB` | `256` | Memory ceiling per run |
+| `SANDBOX_CPUS` | `1` | CPU ceiling per run |
+| `SANDBOX_PIDS` | `64` | Process ceiling per run |
+| `SANDBOX_FILE_SIZE_MB` | `32` | Largest file a program may write, and the `/tmp` size |
+| `SANDBOX_NETWORK` | `false` | Whether the container gets a network at all |
+| `SANDBOX_USER` | server's uid | Who the program is inside the container; never root |
+| `SANDBOX_RUNTIME` | — | Passed to `--runtime`, for gVisor or Kata |
+| `SANDBOX_IMAGES` | — | Per-language image overrides, as one JSON object |
+| `SANDBOX_MAX_PER_USER` | `2` | Runs one person may have queued or running |
+| `SANDBOX_MAX_PER_ROOM` | `4` | Runs one room may have queued or running |
+| `SANDBOX_QUEUE_DEPTH` | `32` | How many may wait before the server says no |
+| `SANDBOX_RETENTION_HOURS` | `24` | How long a run's output is kept |
 | `RUN_TIMEOUT_MS` | `5000` | Wall clock per run; compiles get twice this |
-| `RUN_OUTPUT_LIMIT` | `65536` | Bytes of stdout and stderr kept |
+| `RUN_OUTPUT_LIMIT` | `65536` | Bytes of stdout and stderr kept before the program is killed |
 | `RUN_MAX_CONCURRENT` | `4` | Programs allowed to run at once |
 | `RUN_RATE_LIMIT_MAX` | `60` | Runs per IP per window |
+| `SANDBOX_CANCEL_RATE_LIMIT_MAX` | `120` | Cancellations per IP per window, budgeted separately |
 
 ## Interface
 

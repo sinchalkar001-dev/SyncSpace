@@ -9,12 +9,24 @@ import { api } from '../api/client.js'
  * broadcasts every result, so everyone watching the same buffer sees the same
  * console. Each request carries an id that comes back in the broadcast, which
  * is how a client recognises its own run and does not show it twice.
+ *
+ * A run is now also *named* by the server before it finishes, and announced to
+ * the room as it moves between states. That is what the Cancel button is built
+ * on — without an id for something still running there is nothing to cancel —
+ * and it is what makes a slow compile look like progress rather than a hang.
  */
+
+/** The states in which there is still something to stop. */
+const LIVE = new Set(['queued', 'running'])
+
 export function useCodeRunner(roomId, displayName) {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [support, setSupport] = useState(null)
+  /** The run currently in flight anywhere in the room, or null. */
+  const [live, setLive] = useState(null)
+  const [cancelling, setCancelling] = useState(false)
   // Bumped by anything that wants a run but does not hold the buffer — the
   // command palette, for one. The editor watches it and starts the run.
   const [requestId, setRequestId] = useState(0)
@@ -48,6 +60,11 @@ export function useCodeRunner(roomId, displayName) {
 
       setStatus('running')
       setError(null)
+      setCancelling(false)
+      // Queued until the server says otherwise. Without this the panel shows
+      // nothing at all for however long the queue is, which reads as a click
+      // that did not register.
+      setLive({ runId, executionId: null, state: 'queued', mine: true })
 
       try {
         const payload = await api.run(
@@ -67,6 +84,11 @@ export function useCodeRunner(roomId, displayName) {
         setError(cause?.message || 'Could not run this')
       } finally {
         setStatus('idle')
+        // Only ours. Somebody else's program may still be running in this
+        // room, and blanking their indicator would take the Cancel button
+        // away from the owner who might need it.
+        setLive((current) => (current && current.mine === false ? current : null))
+        setCancelling(false)
         inFlight.current = null
       }
     },
@@ -80,6 +102,54 @@ export function useCodeRunner(roomId, displayName) {
     setResult({ ...payload.run, by: payload.by || null, at: Date.now() })
     setError(null)
   }, [])
+
+  /**
+   * A run moving between states, anywhere in the room.
+   *
+   * Everyone's, not only your own: a program somebody else started is holding
+   * the room's slot, and the room owner can stop it. Showing only your own
+   * would leave the console blank while the room is plainly busy.
+   */
+  const receiveState = useCallback((payload) => {
+    if (!payload?.executionId) return
+
+    const isMine = Boolean(payload.runId && mine.current.has(payload.runId))
+
+    setLive((current) => {
+      if (!LIVE.has(payload.state)) {
+        // Only clear the run this message is about; a stale terminal message
+        // for an older run must not blank a newer one.
+        return current && current.executionId !== payload.executionId ? current : null
+      }
+
+      return {
+        runId: payload.runId ?? null,
+        executionId: payload.executionId,
+        state: payload.state,
+        by: payload.by ?? null,
+        mine: isMine,
+      }
+    })
+  }, [])
+
+  /**
+   * Stops whatever is running.
+   *
+   * Failure is deliberately quiet. The common reason is that the program
+   * finished half a second ago, and an error toast for losing that race would
+   * be noise about nothing.
+   */
+  const cancel = useCallback(async () => {
+    const target = live?.executionId
+    if (!roomId || !target || cancelling) return
+
+    setCancelling(true)
+    try {
+      await api.cancelRun(roomId, target)
+    } catch {
+      setCancelling(false)
+    }
+  }, [roomId, live, cancelling])
 
   const clear = useCallback(() => {
     setResult(null)
@@ -106,7 +176,38 @@ export function useCodeRunner(roomId, displayName) {
   // One object identity per actual change: the room passes this straight into
   // a memoised command list and down to the editor as a prop.
   return useMemo(
-    () => ({ status, result, error, support, start, receive, clear, blocker, request, requestId }),
-    [status, result, error, support, start, receive, clear, blocker, request, requestId]
+    () => ({
+      status,
+      result,
+      error,
+      support,
+      isolation: support?.isolation ?? null,
+      live,
+      cancelling,
+      start,
+      cancel,
+      receive,
+      receiveState,
+      clear,
+      blocker,
+      request,
+      requestId,
+    }),
+    [
+      status,
+      result,
+      error,
+      support,
+      live,
+      cancelling,
+      start,
+      cancel,
+      receive,
+      receiveState,
+      clear,
+      blocker,
+      request,
+      requestId,
+    ]
   )
 }
