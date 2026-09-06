@@ -1,6 +1,6 @@
 import { env } from '../../../config/env.js'
 import { logger } from '../../../config/logger.js'
-import { containerContext } from '../recipes.js'
+import { containerContext, RECIPES } from '../recipes.js'
 import { spawnCollect } from '../spawn.js'
 import { TERMINATION } from '../limits.js'
 
@@ -172,6 +172,52 @@ export async function available() {
 
 export function resetAvailabilityCache() {
   cachedAvailability = null
+  cachedReadiness = null
+}
+
+let cachedReadiness = null
+
+/**
+ * Whether this machine could actually run something in a container, as
+ * opposed to merely having a daemon.
+ *
+ * A daemon with no images is the case that matters, and it is not exotic: it
+ * is every CI runner and every laptop where Docker came with the operating
+ * system and has never been used. `docker run` on a missing image quietly
+ * turns into a download, which against a five-second execution budget is not
+ * a run at all — it is a timeout with a confusing name, on every language, and
+ * nothing in the message says the word "image".
+ *
+ * So the question is asked once, up front, in the two words that decide it.
+ */
+export async function readiness() {
+  if (cachedReadiness) return cachedReadiness
+
+  if (!(await available())) {
+    cachedReadiness = { ok: false, reason: 'no container runtime answered' }
+    return cachedReadiness
+  }
+
+  // Pulling is a deliberate setting; with it on, a missing image is a slow
+  // first run rather than a broken one.
+  if (env.SANDBOX_PULL) {
+    cachedReadiness = { ok: true, reason: null }
+    return cachedReadiness
+  }
+
+  const images = [...new Set(Object.keys(RECIPES).map((language) => imageFor(language, RECIPES[language])))]
+  const present = await Promise.all(images.map(hasImage))
+
+  cachedReadiness = present.some(Boolean)
+    ? { ok: true, reason: null }
+    : {
+        ok: false,
+        reason:
+          'a container runtime is present but none of its execution images are ' +
+          '(run `npm run sandbox:pull` in server/, or set SANDBOX_PULL=true)',
+      }
+
+  return cachedReadiness
 }
 
 const imageFor = (language, recipe) => env.SANDBOX_IMAGES?.[language] ?? recipe.image

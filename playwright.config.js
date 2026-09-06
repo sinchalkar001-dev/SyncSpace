@@ -79,6 +79,23 @@ export default defineConfig({
         // browser's Origin as it is, so the collab upgrade is refused without
         // this and every room test fails at "Connected".
         CORS_ORIGIN: CLIENT,
+
+        /**
+         * Which sandbox runs the programs, pinned rather than discovered.
+         *
+         * On `auto` this depends on whether the machine has a container
+         * runtime, and CI runners ship with one — so the suite ran against
+         * containers there and child processes here. Worse, the images had
+         * never been pulled, which turns each run into a silent download
+         * against a five-second budget and fails as a timeout with nothing in
+         * the message about images.
+         *
+         * Pinned to the same backend everywhere, so a red run means the
+         * feature broke rather than that the host was different. What a real
+         * container does is checked by the flags in the server suite, and by
+         * `npm run sandbox:check` on a machine that has one.
+         */
+        SANDBOX_BACKEND: 'process',
       },
     },
     {

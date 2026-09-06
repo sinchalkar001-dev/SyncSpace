@@ -36,25 +36,33 @@ async function choose() {
     return processBackend
   }
 
-  const dockerReady = await dockerBackend.available()
+  // Readiness, not merely presence. A daemon with no images answers every
+  // question correctly and still cannot run a program inside the time budget —
+  // it turns each run into a silent image download that ends as a timeout.
+  const docker = await dockerBackend.readiness()
 
   if (requested === 'docker') {
-    if (!dockerReady) {
+    if (!docker.ok) {
       // Deliberately not falling back. Someone asked for isolation.
-      logger.error('SANDBOX_BACKEND=docker but no container runtime answered; execution is disabled')
+      dockerRefusal = docker.reason
+      logger.error({ reason: docker.reason }, 'SANDBOX_BACKEND=docker cannot be honoured; execution is disabled')
       return null
     }
     return dockerBackend
   }
 
-  if (dockerReady) return dockerBackend
+  if (docker.ok) return dockerBackend
 
   logger.warn(
-    'no container runtime found; falling back to the process backend, which is not a sandbox. ' +
+    { reason: docker.reason },
+    'falling back to the process backend, which is not a sandbox. ' +
       'Set SANDBOX_BACKEND=docker to refuse unsandboxed execution instead.'
   )
   return processBackend
 }
+
+/** Kept so the refusal can say which of the two reasons it was. */
+let dockerRefusal = null
 
 /**
  * The backend, resolved once.
@@ -74,7 +82,8 @@ export async function requireBackend() {
 
   if (!backend) {
     throw unavailable(
-      'Isolated execution is not available on this server, so running code is switched off',
+      'Isolated execution is not available on this server, so running code is switched off' +
+        (dockerRefusal ? ' — ' + dockerRefusal : ''),
       'sandbox_unavailable'
     )
   }
@@ -90,6 +99,7 @@ export async function activeBackendName() {
 /** Test seam, and the hook the pull script uses after changing the setting. */
 export function resetBackendCache() {
   resolved = null
+  dockerRefusal = null
   dockerBackend.resetAvailabilityCache()
 }
 

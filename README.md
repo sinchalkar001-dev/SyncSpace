@@ -380,6 +380,13 @@ npm run sandbox:pull     # fetch the images; the first run of a language is othe
 npm run sandbox:check    # what this machine would really do with somebody else's program
 ```
 
+A container runtime with **no images pulled** does not count as available, and that is not a
+corner case — it is every CI runner and every laptop where Docker arrived with the operating
+system. `docker run` on a missing image is a silent download, which against a five-second
+execution budget is not a run but a timeout, on every language at once, with nothing in the
+message about images. `auto` falls back to the process backend and says why; `docker` refuses and
+names the fix. Either way, run `sandbox:pull` at deploy.
+
 Set **`SANDBOX_BACKEND=docker` in production.** The default is `auto`, which falls back to running
 programs as ordinary child processes when no container runtime answers — right for a laptop, wrong
 for a host anyone else can reach, and quiet about it either way. `docker` refuses to run code at

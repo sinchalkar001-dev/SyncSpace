@@ -18,6 +18,23 @@ export default defineConfig({
       // documentation endpoint out from under the docs tests.
       SWAGGER_ENABLED: 'true',
       SWAGGER_PATH: '/docs',
+
+      /**
+       * Which sandbox the suite runs against, pinned rather than discovered.
+       *
+       * Left on `auto` this is decided by whether the machine happens to have
+       * a container runtime — which means the suite tests one thing on a
+       * developer's laptop and a different thing on CI, where the runners ship
+       * with Docker. That is how this landed green locally and red on CI: every
+       * run there became `docker run` against images nobody had pulled, so each
+       * one was a silent image download that ended as a five-second timeout.
+       *
+       * The container path is covered by execution-docker.test.js, which
+       * asserts the argument list flag by flag without needing a daemon. What
+       * a real container does with those flags is not something a test can
+       * check without one, and pretending otherwise is worse than saying so.
+       */
+      SANDBOX_BACKEND: 'process',
     },
   },
 })
