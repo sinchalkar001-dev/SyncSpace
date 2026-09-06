@@ -18,7 +18,7 @@ const sessionSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
     /** The `jti` claim of the token this row stands for. */
-    jti: { type: String, required: true, unique: true },
+    jti: { type: String, required: true },
 
     /**
      * What the browser called itself, kept raw.

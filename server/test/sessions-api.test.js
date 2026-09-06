@@ -333,3 +333,23 @@ describe('live connections follow the session that owns them', () => {
     refused.disconnect()
   })
 })
+
+describe('one row per token', () => {
+  /**
+   * `jti` is what every authenticated request looks a session up by, so two
+   * rows carrying the same one would make "which session is this?" ambiguous.
+   * That uniqueness used to be declared twice — on the field and on the index —
+   * which Mongoose reports as a duplicate and builds once regardless. Only the
+   * index says it now, so this guards the constraint rather than the line that
+   * happens to spell it out.
+   */
+  it('refuses a second row for the same jti', async () => {
+    await Session.init()
+    await register(ALICE)
+    const existing = await Session.findOne({}).lean()
+
+    await expect(
+      Session.create({ user: existing.user, jti: existing.jti, expiresAt: existing.expiresAt })
+    ).rejects.toThrow()
+  })
+})
