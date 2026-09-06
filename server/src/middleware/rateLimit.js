@@ -68,6 +68,17 @@ export function createRateLimiters() {
       message: 'Too many runs from this address, try again later',
     }),
 
+    /**
+     * Each generation is a paid call to a model and the slowest request this
+     * server serves. Capped well below everything else, because the cost of
+     * abuse here is a bill rather than load.
+     */
+    generateLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.AI_RATE_LIMIT_MAX,
+      message: 'Too many generations from this address, try again later',
+    }),
+
     /** File uploads are expensive (disk I/O, bandwidth); cap them separately. */
     uploadLimiter: build({
       windowMs: env.RATE_LIMIT_WINDOW_MS,
@@ -98,6 +109,24 @@ export function createRateLimiters() {
     resendVerificationLimiter: auth(
       env.AUTH_RATE_LIMIT_RESEND_MAX,
       'Too many verification emails requested, try again later'
+    ),
+    forgotPasswordLimiter: auth(
+      env.AUTH_RATE_LIMIT_FORGOT_MAX,
+      'Too many password reset emails requested, try again later'
+    ),
+    resetPasswordLimiter: auth(
+      env.AUTH_RATE_LIMIT_RESET_MAX,
+      'Too many password reset attempts, try again later'
+    ),
+    /**
+     * Signing devices out. Authenticated and scoped to the caller's own
+     * account, so this is not a brute-force surface — it is capped because
+     * each call can close live connections, and a loop over it would be a
+     * cheap way to make the server do that work over and over.
+     */
+    sessionRevokeLimiter: auth(
+      env.AUTH_RATE_LIMIT_SESSION_REVOKE_MAX,
+      'Too many sign-out requests, try again later'
     ),
   }
 }

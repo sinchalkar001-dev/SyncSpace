@@ -6,6 +6,8 @@ import Home from './pages/Home.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import VerifyEmail from './pages/VerifyEmail.jsx'
+import ForgotPassword from './pages/ForgotPassword.jsx'
+import ResetPassword from './pages/ResetPassword.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import NotFound from './pages/NotFound.jsx'
 
@@ -28,6 +30,10 @@ export default function App() {
           the link is as likely to be opened on a phone that has never signed
           in as in the browser that registered. */}
       <Route path="/verify-email" element={<VerifyEmail />} />
+      {/* Recovery, and necessarily open to signed-out visitors: being unable
+          to sign in is the entire reason for coming here. */}
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/dashboard"
         element={

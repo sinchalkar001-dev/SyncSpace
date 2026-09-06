@@ -17,6 +17,15 @@ import {
   updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
+import {
+  applyGeneration,
+  getGeneration,
+  listGenerations,
+  readArchitecture,
+  runGeneration,
+  withPrevious,
+} from '../services/generation.service.js'
+import { TARGET_KEYS } from '../services/ai.service.js'
 import { runCode } from '../services/runner.service.js'
 import { getIo } from '../realtime/registry.js'
 import { env } from '../config/env.js'
@@ -26,6 +35,21 @@ import { badRequest, forbidden } from '../errors.js'
 const createSchema = z.object({
   name: z.string().trim().max(80).optional(),
   isPublic: z.boolean().optional(),
+})
+
+const generateSchema = z.object({
+  targets: z.array(z.enum(TARGET_KEYS)).min(1).max(TARGET_KEYS.length),
+  // Free text from the person who drew the diagram, and the one part of the
+  // prompt they control directly. Capped because it is forwarded to a model
+  // that charges by the token.
+  intent: z.string().trim().max(2000).optional(),
+})
+
+const applySchema = z.object({
+  // The files being accepted. Everything else in the change set is recorded
+  // as rejected, so an empty array is a meaningful answer — "none of this" —
+  // rather than a malformed one.
+  accept: z.array(z.string().regex(/^[0-9a-f]{24}$/i)).max(100),
 })
 
 const updateSchema = z
@@ -103,7 +127,7 @@ async function loadRosterRoom(req) {
 
 export function createRoomsRouter() {
   const roomsRouter = Router()
-  const { inviteLimiter, runLimiter } = createRateLimiters()
+  const { inviteLimiter, runLimiter, generateLimiter } = createRateLimiters()
 
   roomsRouter.post('/', requireAuth, validate(createSchema), async (req, res, next) => {
     try {
@@ -332,6 +356,163 @@ export function createRoomsRouter() {
           })
 
         res.json({ run })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /**
+   * What the server reads on the whiteboard, before any model is involved.
+   *
+   * The preview the UI shows, and the reason this feature is not a screenshot
+   * pipeline: the person sees the components, the connections and — above all
+   * — what could not be read, and gets to fix the diagram before paying for a
+   * generation against a misreading of it.
+   *
+   * `optionalAuth`, like the room read next to it: a guest who can open a
+   * public room can see what is drawn on it, because they are looking at it.
+   */
+  roomsRouter.get('/:roomId/architecture', optionalAuth, async (req, res, next) => {
+    try {
+      const room = await ensureRoom(req.params.roomId)
+      if (!canAccess(room, req.user?.id)) {
+        throw forbidden('You do not have access to this room', 'room_forbidden')
+      }
+
+      res.json({ architecture: await readArchitecture(req.params.roomId) })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /**
+   * Turns the diagram into a proposed change set.
+   *
+   * `requireAuth` rather than the `optionalAuth` used for running code: this
+   * one spends money on somebody's API key and writes a record that says who
+   * asked for it. A guest identity is a name typed into a box, which is not
+   * enough to hang either on.
+   */
+  roomsRouter.post(
+    '/:roomId/generate',
+    requireAuth,
+    generateLimiter,
+    validate(generateSchema),
+    async (req, res, next) => {
+      try {
+        const room = await ensureRoom(req.params.roomId)
+        if (!canAccess(room, req.user.id)) {
+          throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        const generation = await runGeneration({
+          roomId: req.params.roomId,
+          user: req.user,
+          targets: req.body.targets,
+          intent: req.body.intent,
+        })
+
+        /**
+         * Announced to the room, the way a code run is. Someone else's change
+         * set appearing in the panel is the point: the diagram was drawn
+         * together, so what it produced belongs to everyone looking at it.
+         * The summary, not the files — a change set is a large thing to push
+         * down a presence channel, and the panel fetches what it needs.
+         */
+        getIo()
+          ?.to(req.params.roomId)
+          .emit('ai:generation', {
+            roomId: req.params.roomId,
+            generation: {
+              id: generation.id,
+              status: generation.status,
+              summary: generation.summary,
+              counts: generation.counts,
+              targets: generation.targets,
+              requestedByName: generation.requestedByName,
+              createdAt: generation.createdAt,
+            },
+          })
+
+        res.status(201).json({ generation })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /** The room's AI history. Summaries only; the files are a separate read. */
+  roomsRouter.get('/:roomId/generations', requireAuth, async (req, res, next) => {
+    try {
+      const room = await ensureRoom(req.params.roomId)
+      if (!canAccess(room, req.user.id)) {
+        throw forbidden('You do not have access to this room', 'room_forbidden')
+      }
+
+      res.json({ generations: await listGenerations(req.params.roomId, req.query) })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /** One change set in full, for review. */
+  roomsRouter.get('/:roomId/generations/:generationId', requireAuth, async (req, res, next) => {
+    try {
+      const room = await ensureRoom(req.params.roomId)
+      if (!canAccess(room, req.user.id)) {
+        throw forbidden('You do not have access to this room', 'room_forbidden')
+      }
+
+      const generation = await getGeneration(req.params.roomId, req.params.generationId)
+      // Reopened change sets get the same comparison a fresh one has, read
+      // against the file as it stands now rather than as it stood then.
+      res.json({ generation: await withPrevious(req.params.roomId, generation.toPublic()) })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /**
+   * Accepts some of a change set and turns down the rest.
+   *
+   * Partial application is the whole shape of this endpoint rather than an
+   * option on it: the caller names what it accepts, and anything unnamed is
+   * recorded as rejected. Applying writes into the room's files through the
+   * upload service, so the same permission rules apply as to any other file.
+   */
+  roomsRouter.post(
+    '/:roomId/generations/:generationId/apply',
+    requireAuth,
+    validate(applySchema),
+    async (req, res, next) => {
+      try {
+        const room = await ensureRoom(req.params.roomId)
+        if (!canAccess(room, req.user.id)) {
+          throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        const result = await applyGeneration({
+          roomId: req.params.roomId,
+          generationId: req.params.generationId,
+          user: req.user,
+          accept: req.body.accept,
+        })
+
+        // The room's files just changed for everybody, not only the person who
+        // pressed apply — the files panel is shared.
+        getIo()
+          ?.to(req.params.roomId)
+          .emit('ai:applied', {
+            roomId: req.params.roomId,
+            generationId: req.params.generationId,
+            by: { id: req.user.id, name: req.user.name },
+            applied: result.applied,
+            rejected: result.rejected,
+            failed: result.failed,
+          })
+
+        res.json(result)
       } catch (err) {
         next(err)
       }

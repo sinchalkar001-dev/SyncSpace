@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Server as SocketServer } from 'socket.io'
 import { z } from 'zod'
-import { verifyToken } from '../services/auth.service.js'
+import { authenticate } from '../services/auth.service.js'
 import { canAccess, ensureRoom, recordParticipant } from '../services/room.service.js'
 import { env } from '../config/env.js'
 import { isAllowedOrigin } from '../config/cors.js'
@@ -45,18 +45,49 @@ export function createSocketServer(httpServer) {
     },
   })
 
-  io.use((socket, next) => {
-    const payload = verifyToken(socket.handshake.auth?.token)
+  io.use(async (socket, next) => {
+    let user
+    let revoked
+    try {
+      // Asks the account whether this session is still current, not only
+      // whether the token is well formed — the same check the REST guards and
+      // the collab handshake make. Without it a token killed by a password
+      // change could still open presence and chat.
+      ;({ user, revoked } = await authenticate(socket.handshake.auth?.token))
+    } catch (error) {
+      // A database failure must not silently admit the connection as a guest.
+      logger.warn({ err: error }, 'could not authenticate a socket connection')
+      next(new Error('Authentication unavailable'))
+      return
+    }
 
-    if (!payload && !env.ALLOW_ANONYMOUS) {
+    // Refused rather than demoted, for the same reason as the collab
+    // handshake: reappearing as "Guest" is harder to understand than being
+    // told the session ended.
+    if (revoked) {
+      next(new Error('Your session ended — sign in again'))
+      return
+    }
+
+    if (!user && !env.ALLOW_ANONYMOUS) {
       next(new Error('Authentication required'))
       return
     }
 
     const claimed = socket.handshake.auth?.user || {}
-    socket.data.user = payload
-      ? { id: payload.sub, name: payload.name, anonymous: false }
+    socket.data.user = user
+      ? { id: user.id, name: user.name, anonymous: false }
       : { id: randomUUID(), name: String(claimed.name || 'Guest').slice(0, 32), anonymous: true }
+
+    /**
+     * Which session this connection belongs to, so signing out one device can
+     * close exactly its connections rather than all of the account's.
+     *
+     * Kept beside `socket.data.user` rather than inside it on purpose: that
+     * object is broadcast to the whole room as presence, and an internal
+     * identifier has no business travelling to everyone else in it.
+     */
+    socket.data.sessionId = user?.sessionId ?? null
 
     next()
   })

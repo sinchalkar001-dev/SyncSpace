@@ -28,7 +28,19 @@ const error = (status, description, code, message) => ({
 })
 
 const validationError = () => error(400, 'Body failed schema validation', 'validation_failed', 'email: invalid email')
-const authRequired = () => error(401, 'Missing, malformed or expired bearer token', 'unauthorized', 'A valid bearer token is required')
+/**
+ * Two codes share this status. `unauthorized` means the token was missing,
+ * malformed or expired; `session_revoked` means it was a real session that has
+ * since been ended by a password change or reset, and is worth telling apart
+ * because the answer to it is "sign in again", not "something went wrong".
+ */
+const authRequired = () =>
+  error(
+    401,
+    'Missing, malformed or expired bearer token (`unauthorized`), or a session ended by a password change or reset (`session_revoked`)',
+    'unauthorized',
+    'A valid bearer token is required'
+  )
 const rateLimited = (message) => error(429, 'Per-IP rate budget exhausted; see RateLimit headers', 'rate_limited', message)
 
 export const openapiDocument = {
@@ -59,6 +71,7 @@ export const openapiDocument = {
     { name: 'Invitations', description: 'Granting and withdrawing access to a room' },
     { name: 'Replay', description: 'Timeline metadata and historical document state' },
     { name: 'Code execution', description: 'Running a room buffer and discovering runnable toolchains' },
+    { name: 'AI', description: 'Reading a system design off the whiteboard and generating an implementation from it' },
   ],
 
   security: [{ bearerAuth: [] }],
@@ -162,19 +175,18 @@ export const openapiDocument = {
       post: {
         tags: ['Auth'],
         summary: 'Rotate your password',
-        description: 'Existing tokens stay valid until they expire; there is no global revocation.',
+        description:
+          'Ends every session opened under the old password — on this account only — and answers ' +
+          'a replacement. The new token must be adopted: the one used to make this call is among ' +
+          'the sessions it just ended.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ChangePasswordInput' } } },
         },
         responses: {
           200: {
-            description: 'Password changed',
-            content: {
-              'application/json': {
-                schema: { type: 'object', properties: { user: { $ref: '#/components/schemas/User' } } },
-              },
-            },
+            description: 'Password changed, other sessions ended, replacement session issued',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthSession' } } },
           },
           ...validationError(),
           ...authRequired(),
@@ -206,6 +218,156 @@ export const openapiDocument = {
           ...validationError(),
           ...error(400, 'Token unknown, expired or already used', 'invalid_token', 'This verification link is invalid or has expired'),
           ...rateLimited('Too many verification attempts, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/ai': {
+      get: {
+        tags: ['AI'],
+        summary: 'Whether this server can generate code from a whiteboard',
+        description:
+          'A sibling of `/runners`: reachability of a model is a property of the deployment, not ' +
+          'of a room. `enabled` is false with a readable `reason` when no key is configured or the ' +
+          'feature is switched off. Never reports the key itself.',
+        security: [],
+        responses: {
+          200: {
+            description: 'Generation availability and the targets that can be asked for',
+            content: {
+              'application/json': {
+                example: {
+                  enabled: true,
+                  model: 'claude-sonnet-5',
+                  reason: null,
+                  targets: [{ key: 'backend', description: 'Server-side services and business logic' }],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/v1/auth/sessions': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Devices signed in to your account',
+        description:
+          'One entry per live session, newest first. `current` marks the one making the request. ' +
+          '`userAgent` is the raw header — turning it into "Chrome on Windows" is presentation. ' +
+          'Visible only to the account itself.',
+        responses: {
+          200: {
+            description: 'The account\'s live sessions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessions: { type: 'array', items: { $ref: '#/components/schemas/Session' } },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+        },
+      },
+      delete: {
+        tags: ['Auth'],
+        summary: 'Sign out every other device',
+        description:
+          'Ends every session on the account except the one making the request, and closes their ' +
+          'live document and presence connections. Answers how many were ended. The current ' +
+          'session is deliberately kept: signing it out is what the sign-out button does.',
+        responses: {
+          200: {
+            description: 'Sessions ended',
+            content: { 'application/json': { example: { revoked: 2 } } },
+          },
+          ...authRequired(),
+          ...rateLimited('Too many sign-out requests, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/auth/sessions/{sessionId}': {
+      delete: {
+        tags: ['Auth'],
+        summary: 'Sign out one device',
+        description:
+          'Ends a single session and closes its live connections. Reaches only the caller\'s own ' +
+          'sessions: an id belonging to somebody else answers 404, exactly as an unknown one does.',
+        parameters: [
+          {
+            name: 'sessionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^[0-9a-f]{24}$' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Session ended',
+            content: { 'application/json': { example: { revoked: 1 } } },
+          },
+          ...error(400, 'Not a session id', 'bad_session_id', 'That is not a session id'),
+          ...authRequired(),
+          ...error(404, 'No such live session on this account', 'session_not_found', 'That session is not signed in'),
+          ...rateLimited('Too many sign-out requests, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/auth/forgot-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Ask for a password reset link',
+        description:
+          'Always answers `{ sent: true }`, whether or not the address belongs to an account — ' +
+          'a different answer would turn this into a way to test which addresses are registered. ' +
+          'The emailed link lasts 60 minutes and can be used once; asking again invalidates the ' +
+          'previous one. With no SMTP configured the link is logged instead of sent.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ForgotPasswordInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'Request processed (`sent` means processed, not delivered, and not that the account exists)',
+            content: { 'application/json': { example: { sent: true } } },
+          },
+          ...validationError(),
+          ...rateLimited('Too many password reset emails requested, try again later'),
+        },
+      },
+    },
+
+    '/api/v1/auth/reset-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Set a new password with an emailed token',
+        description:
+          'Public: the token is the authorisation. Consumed on first use, and it verifies the ' +
+          'address as a side effect, since reading the email proves the same control ' +
+          '`/verify-email` asks for. Answers a session, so there is no need to sign in again. ' +
+          'Tokens issued before the reset stay valid until they expire — there is no global ' +
+          'revocation, exactly as for `/change-password`.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ResetPasswordInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'Password changed and signed in',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthSession' } } },
+          },
+          ...validationError(),
+          ...error(400, 'Token unknown, expired or already used', 'invalid_token', 'This reset link is invalid or has expired'),
+          ...rateLimited('Too many password reset attempts, try again later'),
         },
       },
     },
@@ -560,6 +722,170 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/architecture': {
+      get: {
+        tags: ['AI'],
+        summary: 'The system design read off the whiteboard',
+        description:
+          'The whiteboard stores drawings, not diagrams: an arrow is four numbers and a label is ' +
+          'an unrelated text shape sitting on a box. This recovers the graph geometrically — ' +
+          'components, connections, notes — and reports in `warnings` what the diagram could not ' +
+          'express. No model is involved. Read it before generating: the answer to a misread ' +
+          'diagram is fixing the diagram.',
+        parameters: [{ $ref: '#/components/parameters/roomId' }],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The architecture graph',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { architecture: { $ref: '#/components/schemas/Architecture' } },
+                },
+              },
+            },
+          },
+          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/generate': {
+      post: {
+        tags: ['AI'],
+        summary: 'Turn the whiteboard into a proposed change set',
+        description:
+          'Reads the architecture from the server\'s own copy of the document, asks a model for an ' +
+          'implementation, and records the result. Nothing is written to the room: the answer is a ' +
+          'proposal to be reviewed and applied. `create` and `modify` are decided here by comparing ' +
+          'each path against the room\'s existing files, not taken from the model, so an answer ' +
+          'cannot claim a path is free when it is not. Broadcast to the room as `ai:generation`.',
+        parameters: [{ $ref: '#/components/parameters/roomId' }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateInput' } } },
+        },
+        responses: {
+          201: {
+            description: 'A change set, proposed and unapplied',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { generation: { $ref: '#/components/schemas/Generation' } },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
+          ...rateLimited('Too many generations from this address, try again later'),
+          ...error(502, 'The model failed, timed out, or answered in the wrong shape', 'ai_failed', 'The model did not answer in the expected shape.'),
+          ...error(503, 'No model is configured on this server', 'ai_disabled', 'No ANTHROPIC_API_KEY is configured, so this server cannot reach a model.'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/generations': {
+      get: {
+        tags: ['AI'],
+        summary: "The room's AI history",
+        description: 'Summaries, newest first. Failures are recorded too. `limit` caps at 50.',
+        parameters: [{ $ref: '#/components/parameters/roomId' }],
+        responses: {
+          200: {
+            description: 'Past generations',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    generations: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/GenerationSummary' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/generations/{generationId}': {
+      get: {
+        tags: ['AI'],
+        summary: 'One change set in full',
+        description: 'Includes every proposed file and its contents, for review.',
+        parameters: [
+          { $ref: '#/components/parameters/roomId' },
+          { $ref: '#/components/parameters/generationId' },
+        ],
+        responses: {
+          200: {
+            description: 'The change set',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { generation: { $ref: '#/components/schemas/Generation' } },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+          ...error(404, 'No such generation in this room', 'generation_not_found', 'No such generation in this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/generations/{generationId}/apply': {
+      post: {
+        tags: ['AI'],
+        summary: 'Accept part of a change set',
+        description:
+          'Writes the accepted files into the room\'s files and records everything else as ' +
+          'rejected, so the change set always says what was decided rather than leaving it open. ' +
+          'Partial by construction — `accept` names what is wanted and an empty array means none ' +
+          'of it. A file that cannot be applied stays proposed with an error against it rather ' +
+          'than failing the rest. Broadcast as `ai:applied`.',
+        parameters: [
+          { $ref: '#/components/parameters/roomId' },
+          { $ref: '#/components/parameters/generationId' },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ApplyInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'What was applied, rejected and failed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    generation: { $ref: '#/components/schemas/Generation' },
+                    applied: { type: 'integer' },
+                    rejected: { type: 'integer' },
+                    failed: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(404, 'No such generation in this room', 'generation_not_found', 'No such generation in this room'),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/run': {
       parameters: [{ $ref: '#/components/parameters/roomId' }],
       post: {
@@ -684,6 +1010,13 @@ export const openapiDocument = {
     },
 
     parameters: {
+      generationId: {
+        name: 'generationId',
+        in: 'path',
+        required: true,
+        description: 'Id of a generation from the room history.',
+        schema: { type: 'string', pattern: '^[0-9a-f]{24}$' },
+      },
       roomId: {
         name: 'roomId',
         in: 'path',
@@ -768,6 +1101,240 @@ export const openapiDocument = {
         required: ['token'],
         properties: {
           token: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Hex token from the emailed link.' },
+        },
+      },
+
+      ArchitectureNode: {
+        type: 'object',
+        required: ['id', 'key', 'type', 'label'],
+        properties: {
+          id: { type: 'string', description: 'The whiteboard shape this came from' },
+          key: { type: 'string', description: 'Stable slug, unique within the graph; what edges refer to' },
+          type: {
+            type: 'string',
+            description: 'Inferred from the label and the shape: datastore, cache, queue, gateway, api, auth, client, worker, external, service, decision, component',
+          },
+          label: { type: 'string', description: 'Text found inside the shape' },
+          description: { type: ['string', 'null'], description: 'Further lines inside the same shape' },
+          shape: { type: 'string', enum: ['rect', 'diamond', 'ellipse'] },
+          author: { type: ['string', 'null'], description: 'Who drew it' },
+          createdAt: { type: ['number', 'null'] },
+        },
+      },
+
+      ArchitectureEdge: {
+        type: 'object',
+        required: ['id', 'source', 'target', 'directed'],
+        properties: {
+          id: { type: 'string' },
+          source: { type: 'string', description: 'Node key the connector starts at' },
+          target: { type: 'string', description: 'Node key it ends at' },
+          sourceId: { type: 'string' },
+          targetId: { type: 'string' },
+          directed: {
+            type: 'boolean',
+            description: 'True for an arrow. A plain line relates two things without saying which way it flows.',
+          },
+          relationship: {
+            type: ['string', 'null'],
+            description: 'Text written on the connector, if any',
+          },
+          author: { type: ['string', 'null'] },
+        },
+      },
+
+      Architecture: {
+        type: 'object',
+        required: ['nodes', 'edges', 'notes', 'warnings'],
+        properties: {
+          nodes: { type: 'array', items: { $ref: '#/components/schemas/ArchitectureNode' } },
+          edges: { type: 'array', items: { $ref: '#/components/schemas/ArchitectureEdge' } },
+          notes: {
+            type: 'array',
+            description: 'Text on the board that belongs to no shape and no connector',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                text: { type: 'string' },
+                author: { type: ['string', 'null'] },
+              },
+            },
+          },
+          warnings: {
+            type: 'array',
+            description:
+              'What the diagram could not express: an arrow reaching nothing, a box nobody labelled, two boxes with one name. Shown to the user and repeated to the model, so a gap is reported rather than invented.',
+            items: {
+              type: 'object',
+              properties: {
+                code: {
+                  type: 'string',
+                  enum: [
+                    'dangling_connector',
+                    'self_connector',
+                    'unlabelled_node',
+                    'isolated_node',
+                    'duplicate_label',
+                    'no_components',
+                  ],
+                },
+                message: { type: 'string' },
+                shapeId: { type: ['string', 'null'] },
+              },
+            },
+          },
+          source: {
+            type: 'string',
+            enum: ['live', 'snapshot', 'log'],
+            description: 'Where the shapes were read from. `live` is the in-memory document.',
+          },
+          stats: { type: 'object' },
+        },
+      },
+
+      GenerateInput: {
+        type: 'object',
+        required: ['targets'],
+        properties: {
+          targets: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string', enum: ['backend', 'api', 'database', 'frontend'] },
+          },
+          intent: {
+            type: 'string',
+            maxLength: 2000,
+            description: 'Anything the diagram cannot say — stack, conventions, constraints.',
+          },
+        },
+      },
+
+      ApplyInput: {
+        type: 'object',
+        required: ['accept'],
+        properties: {
+          accept: {
+            type: 'array',
+            description: 'Ids of the files being accepted. Everything else is recorded as rejected.',
+            items: { type: 'string', pattern: '^[0-9a-f]{24}$' },
+          },
+        },
+      },
+
+      ProposedFile: {
+        type: 'object',
+        required: ['id', 'path', 'action', 'status'],
+        properties: {
+          id: { type: 'string' },
+          path: { type: 'string', description: 'Relative path. Never absolute, never with `..`.' },
+          action: {
+            type: 'string',
+            enum: ['create', 'modify', 'delete'],
+            description: 'Decided by the server against the room\'s existing files, not by the model.',
+          },
+          language: { type: ['string', 'null'] },
+          contents: { type: 'string', description: 'The whole file. Empty for a delete.' },
+          rationale: { type: ['string', 'null'] },
+          size: { type: 'integer' },
+          status: { type: 'string', enum: ['proposed', 'applied', 'rejected'] },
+          appliedFileId: { type: ['string', 'null'], description: 'The room file this became' },
+          appliedAt: { type: ['string', 'null'], format: 'date-time' },
+          error: { type: ['string', 'null'], description: 'Why applying this one failed' },
+          previous: {
+            type: ['string', 'null'],
+            description: 'Current contents of the file being modified, so the change can be read. Only on the generate response.',
+          },
+        },
+      },
+
+      GenerationSummary: {
+        type: 'object',
+        required: ['id', 'status', 'createdAt'],
+        properties: {
+          id: { type: 'string' },
+          roomId: { type: 'string' },
+          status: { type: 'string', enum: ['succeeded', 'failed'] },
+          requestedBy: { type: ['string', 'null'] },
+          requestedByName: { type: ['string', 'null'] },
+          targets: { type: 'array', items: { type: 'string' } },
+          summary: { type: ['string', 'null'] },
+          counts: { type: 'object' },
+          nodes: { type: 'integer' },
+          edges: { type: 'integer' },
+          questions: { type: 'integer' },
+          model: { type: ['string', 'null'] },
+          durationMs: { type: ['integer', 'null'] },
+          error: { type: ['string', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      Generation: {
+        allOf: [
+          { $ref: '#/components/schemas/GenerationSummary' },
+          {
+            type: 'object',
+            properties: {
+              intent: { type: ['string', 'null'] },
+              architecture: { $ref: '#/components/schemas/Architecture' },
+              plan: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { step: { type: 'string' }, detail: { type: ['string', 'null'] } },
+                },
+              },
+              assumptions: {
+                type: 'array',
+                description: 'Decisions the model made that the diagram did not specify.',
+                items: { type: 'string' },
+              },
+              questions: {
+                type: 'array',
+                description: 'What the diagram is missing that a person needs to answer.',
+                items: { type: 'string' },
+              },
+              rejected: {
+                type: 'array',
+                description: 'What the server refused or corrected in the answer, and why.',
+                items: { type: 'string' },
+              },
+              usage: { type: 'object' },
+              files: { type: 'array', items: { $ref: '#/components/schemas/ProposedFile' } },
+            },
+          },
+        ],
+      },
+
+      Session: {
+        type: 'object',
+        required: ['id', 'lastSeenAt', 'createdAt', 'expiresAt'],
+        properties: {
+          id: { type: 'string', description: 'Pass to DELETE /auth/sessions/{sessionId}' },
+          userAgent: { type: ['string', 'null'], description: 'Raw User-Agent header, as sent' },
+          ip: { type: ['string', 'null'], description: 'Address the session was opened from' },
+          lastSeenAt: { type: 'string', format: 'date-time', description: 'Refreshed at most once a minute' },
+          createdAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          current: { type: 'boolean', description: 'The session making this request' },
+        },
+      },
+
+      ForgotPasswordInput: {
+        type: 'object',
+        required: ['email'],
+        properties: {
+          email: { type: 'string', format: 'email', maxLength: 160 },
+        },
+      },
+
+      ResetPasswordInput: {
+        type: 'object',
+        required: ['token', 'password'],
+        properties: {
+          token: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Hex token from the emailed link.' },
+          password: { type: 'string', minLength: 8, maxLength: 200, description: 'The new password.' },
         },
       },
 

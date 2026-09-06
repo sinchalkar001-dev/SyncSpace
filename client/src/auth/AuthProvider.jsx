@@ -60,6 +60,13 @@ export function AuthProvider({ children }) {
     return () => controller.abort()
   }, [])
 
+  /**
+   * Takes a `{ user, token }` the server has already issued and makes it the
+   * session. Exposed on the context as well as used by login and register,
+   * because a password reset answers a session too: the token from the email
+   * proved the address and the new password was just chosen, so asking the
+   * person to sign in again would only be asking them to retype it.
+   */
   const adopt = useCallback((payload) => {
     writeToken(payload.token)
     setAuthToken(payload.token)
@@ -108,8 +115,9 @@ export function AuthProvider({ children }) {
       logout,
       refresh,
       renameGuest,
+      adopt,
     }),
-    [status, user, token, identity, login, register, logout, refresh, renameGuest]
+    [status, user, token, identity, login, register, logout, refresh, renameGuest, adopt]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

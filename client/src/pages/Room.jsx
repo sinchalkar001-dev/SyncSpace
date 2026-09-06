@@ -14,6 +14,8 @@ import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceMenu } from '../components/PresenceMenu.jsx'
 import { ChatPanel } from '../components/ChatPanel.jsx'
 import { FilesPanel } from '../components/FilesPanel.jsx'
+import { GeneratePanel } from '../components/Generate/GeneratePanel.jsx'
+import { useGeneration } from '../hooks/useGeneration.js'
 import { useRoomChat } from '../hooks/useRoomChat.js'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { Segmented } from '../components/ui/Segmented.jsx'
@@ -62,7 +64,7 @@ function isTyping(target) {
 
 export default function Room() {
   const { roomId } = useParams()
-  const { user, identity, token, isAuthenticated, isLoading } = useAuth()
+  const { user, identity, token, isAuthenticated, isLoading, logout } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
 
@@ -80,6 +82,7 @@ export default function Room() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
+  const [generateOpen, setGenerateOpen] = useState(false)
   const copyTimer = useRef(null)
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
@@ -106,14 +109,88 @@ export default function Room() {
     [toast, navigate, isAuthenticated]
   )
 
+  /**
+   * The password changed somewhere else, so this token is dead.
+   *
+   * Without this the tab would sit in the room looking merely disconnected —
+   * the socket is gone and the collab provider's reconnect is refused — until
+   * something happened to make an API call. Clearing the session turns that
+   * into the sign-in page and a sentence explaining why.
+   */
+  const onSessionEnded = useCallback(
+    (payload) => {
+      logout()
+      toast.error(
+        payload?.reason === 'password_reset'
+          ? 'Your password was reset, so this session ended. Sign in again.'
+          : 'Your password was changed, so this session ended. Sign in again.'
+      )
+      navigate('/login')
+    },
+    [logout, toast, navigate]
+  )
+
+  /**
+   * Only asked for once the panel is opened. Reading the board is a request
+   * and checking availability is another, and a room nobody generates in
+   * should not pay for either.
+   */
+  const generationState = useGeneration(roomId, { enabled: generateOpen && isAuthenticated })
+
+  /**
+   * Somebody else in the room generated or applied something.
+   *
+   * The diagram was drawn together, so what it produced belongs to everyone
+   * looking at it — and an applied change set has just changed the room's
+   * files under everybody. Announced rather than opened: interrupting someone
+   * mid-drawing with a dialog they did not ask for would be worse than not
+   * telling them.
+   */
+  const onRemoteGeneration = useCallback(
+    (payload) => {
+      if (payload?.generation?.requestedByName === user?.name) return
+      toast.info(
+        (payload?.generation?.requestedByName ?? 'Someone') +
+          ' generated code from this whiteboard'
+      )
+      generationState.noteRemote()
+    },
+    // The refresh callback, not the whole state: that object is rebuilt every
+    // render, and depending on it would rebuild this handler every render too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [toast, user?.name, generationState.noteRemote]
+  )
+
+  const onRemoteApplied = useCallback(
+    (payload) => {
+      if (!payload?.applied) return
+      if (payload?.by?.id === user?.id) return
+      toast.info(
+        (payload?.by?.name ?? 'Someone') +
+          ' added ' +
+          payload.applied +
+          (payload.applied === 1 ? ' generated file' : ' generated files') +
+          ' to this room'
+      )
+    },
+    [toast, user?.id]
+  )
+
   const [chatOpen, setChatOpen] = useState(false)
   const socketRef = useRef(null)
   const chat = useRoomChat({ roomId, socketRef, self: identity, open: chatOpen })
 
   // Runs are announced to the whole room, so the console shows everyone's.
   const socketHandlers = useMemo(
-    () => ({ 'code:run': runner.receive, 'room:kicked': onKicked, 'room:chat': chat.receive }),
-    [runner.receive, onKicked, chat.receive]
+    () => ({
+      'code:run': runner.receive,
+      'room:kicked': onKicked,
+      'room:chat': chat.receive,
+      'session:ended': onSessionEnded,
+      'ai:generation': onRemoteGeneration,
+      'ai:applied': onRemoteApplied,
+    }),
+    [runner.receive, onKicked, chat.receive, onSessionEnded, onRemoteGeneration, onRemoteApplied]
   )
 
   // The same socket carries presence, runs and chat, so the panel sends on the
@@ -404,6 +481,23 @@ export default function Room() {
           {/* Every file route is behind requireAuth, so a guest is told why
               rather than shown a panel that can only fail. */}
           <FilesPanel roomId={roomId} user={user} canUse={isAuthenticated} />
+          {/* Turning the board into code. Generating needs an account — it
+              spends a real request and is recorded against whoever asked —
+              so a guest is told that rather than shown a button that fails. */}
+          <button
+            type="button"
+            className="presence-menu__trigger"
+            aria-label="Generate from whiteboard"
+            title={
+              isAuthenticated
+                ? 'Generate code from the whiteboard'
+                : 'Sign in to generate code from the whiteboard'
+            }
+            onClick={() => setGenerateOpen(true)}
+            disabled={!isAuthenticated}
+          >
+            <Icon name="zap" size={16} />
+          </button>
           {/* Replay reads the update log, which is optionalAuth like the room
               itself — whoever can open the room can watch how it was built. */}
           <button
@@ -466,6 +560,12 @@ export default function Room() {
           cached frames and the playback state, and unmounting says so more
           plainly than resetting six pieces of state would. */}
       {replayOpen && <ReplayViewer roomId={roomId} onClose={() => setReplayOpen(false)} />}
+
+      <GeneratePanel
+        open={generateOpen}
+        onClose={() => setGenerateOpen(false)}
+        generation={generationState}
+      />
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client.js'
+import { useAuth } from '../auth/useAuth.js'
 import { useToast } from './ui/useToast.js'
 import { Modal } from './ui/Modal.jsx'
 import { Field } from './ui/Field.jsx'
@@ -13,12 +14,14 @@ const EMPTY = { currentPassword: '', newPassword: '', confirmPassword: '' }
 /**
  * Changes the signed-in account's password.
  *
- * The server has accepted `POST /api/auth/change-password` since the backend
- * merge, but nothing in the client called it — this is the missing surface for
- * an endpoint that already exists, not new behaviour.
+ * The response now carries a replacement session, and adopting it is not
+ * optional: changing the password ends every session opened under the old one,
+ * and this tab was holding one of them. Ignoring the new token would sign the
+ * user out of the window they just used, one request later.
  */
 export function ChangePasswordDialog({ open, onClose }) {
   const toast = useToast()
+  const { adopt } = useAuth()
 
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState({})
@@ -63,11 +66,13 @@ export function ChangePasswordDialog({ open, onClose }) {
 
     setBusy(true)
     try {
-      await api.changePassword({
+      const session = await api.changePassword({
         currentPassword: form.currentPassword,
         newPassword: form.newPassword,
       })
-      toast.success('Password updated')
+      // Keeps this tab signed in; every other device is now signed out.
+      adopt(session)
+      toast.success('Password updated — other devices signed out')
       onClose()
     } catch (cause) {
       setFormError(cause.message)
@@ -80,7 +85,7 @@ export function ChangePasswordDialog({ open, onClose }) {
     <Modal
       open={open}
       title="Change password"
-      description="You stay signed in on this device. Other sessions keep their existing tokens until those expire."
+      description="You stay signed in here. Every other device is signed out, so this is also how you end a session on a computer you no longer have."
       onClose={onClose}
     >
       <form onSubmit={onSubmit} noValidate>

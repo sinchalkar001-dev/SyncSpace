@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const CLIENT = 'http://localhost:5180'
+const MODEL_STUB = 'http://127.0.0.1:4100'
 
 /**
  * End-to-end tests drive two real browser tabs against the real stack, so both
@@ -8,10 +9,12 @@ const CLIENT = 'http://localhost:5180'
  * MongoDB, so no local mongod is needed; a server already listening on 4000 is
  * reused as-is.
  *
- * The registration limiter is raised for this run only. At its production
+ * The credential limiters are raised for this run only. At the production
  * default of five per fifteen minutes, a second full run inside that window
  * fails at sign-up — and the failures surface much later, as missing rooms and
- * error toasts covering the thing a test was about to click.
+ * error toasts covering the thing a test was about to click. Password recovery
+ * has the same shape and the same trap: every request in the suite arrives
+ * from one address.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -35,6 +38,15 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
+      // Started before the backend, which is pointed at it. Waited on by port
+      // rather than by URL: this one only answers /v1/messages, and a health
+      // check against its root is a 404, which `url` would treat as not ready.
+      command: 'node e2e/fixtures/model-stub.js',
+      port: 4100,
+      reuseExistingServer: true,
+      timeout: 30000,
+    },
+    {
       command: 'npm run dev:memory --workspace server',
       url: 'http://127.0.0.1:4000/health',
       reuseExistingServer: true,
@@ -42,6 +54,24 @@ export default defineConfig({
       env: {
         AUTH_RATE_LIMIT_REGISTER_MAX: '500',
         AUTH_RATE_LIMIT_LOGIN_MAX: '500',
+        AUTH_RATE_LIMIT_FORGOT_MAX: '500',
+        AUTH_RATE_LIMIT_RESET_MAX: '500',
+        AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX: '500',
+        AI_RATE_LIMIT_MAX: '500',
+        /**
+         * Generation is pointed at a local stand-in for the Messages API (see
+         * e2e/fixtures/model-stub.js), so the whole path is exercised — the
+         * graph read off the board, the prompt, the answer parsed back, the
+         * refusals, the review and the apply — without a key, a bill, or a
+         * suite whose result depends on what a model felt like writing.
+         *
+         * The key is deliberately non-empty: the stub refuses a request
+         * without one, so forgetting to send it fails here rather than
+         * passing quietly.
+         */
+        ANTHROPIC_API_KEY: 'sk-ant-test-not-a-real-credential',
+        AI_BASE_URL: MODEL_STUB,
+        AI_ENABLED: 'true',
         // The suite runs the client on 5180, not the 5173 the server allows by
         // default. Vite proxies the API and the sockets but forwards the
         // browser's Origin as it is, so the collab upgrade is refused without

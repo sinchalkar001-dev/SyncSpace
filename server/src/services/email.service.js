@@ -120,6 +120,41 @@ export function sendVerificationEmail(to, { url }) {
 }
 
 /**
+ * The password reset message.
+ *
+ * Says plainly that the account is untouched until the link is used, and that
+ * ignoring the message is a complete answer. Someone who did not ask for this
+ * has just learned that a stranger typed their address into a login page, and
+ * the useful thing to tell them is that nothing has happened yet.
+ *
+ * `minutes` is passed in rather than written here so the text cannot drift
+ * away from the expiry the service actually enforces.
+ */
+export function sendPasswordResetEmail(to, { url, minutes }) {
+  const window_ = minutes + ' minutes'
+  const subject = 'Reset your SyncSpace password'
+  const text = [
+    'Someone asked to reset the password for this SyncSpace account.',
+    '',
+    'Choose a new password within ' + window_ + ':',
+    url,
+    '',
+    'The link can only be used once.',
+    '',
+    'If this was not you, ignore this email — your password has not changed ' +
+      'and nobody can sign in without it.',
+  ].join('\n')
+  const html =
+    '<p>Someone asked to reset the password for this SyncSpace account.</p>' +
+    '<p><a href="' + escapeHtml(url) + '">Choose a new password</a> within ' +
+    window_ + '. The link can only be used once.</p>' +
+    '<p>If this was not you, ignore this email — your password has not changed ' +
+    'and nobody can sign in without it.</p>'
+
+  return mailer.send({ to, subject, text, html })
+}
+
+/**
  * Anything a person typed is escaped before it reaches the HTML part. Room
  * names and display names are free text, and an email client is one more
  * place that will happily render a stray tag.

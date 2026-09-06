@@ -1,0 +1,539 @@
+/**
+ * Generate from whiteboard.
+ *
+ * Its own layer rather than more of components.css: this is one feature with
+ * two dense screens — the reading of the board, and the change set that came
+ * back — and keeping them together makes the whole surface reviewable in one
+ * place. Everything below uses the shared tokens and adds no new colours.
+ */
+
+.generate,
+.changeset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* A change set has no natural length; it scrolls inside the dialog rather
+     than growing it past the viewport. */
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+/* What the board says ------------------------------------------------------ */
+
+.arch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--glass);
+}
+
+.arch__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.arch__title {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.arch__count {
+  flex: 1;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.arch__nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.arch__node {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.arch__type {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+}
+
+/*
+ * Stores, edges and gateways read differently from ordinary services, and the
+ * type here is inferred rather than stated — colouring by role is what makes a
+ * misreading visible at a glance instead of buried in a list.
+ */
+.arch__type--datastore,
+.arch__type--cache {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.arch__type--client,
+.arch__type--external {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.arch__type--auth,
+.arch__type--gateway {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.arch__label {
+  font-weight: 600;
+}
+
+.arch__desc {
+  font-size: var(--text-xs);
+}
+
+.arch__edges {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+
+.arch__edge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.arch__edge code {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.arch__arrow {
+  color: var(--accent);
+}
+
+.arch__rel {
+  color: var(--text-faint);
+}
+
+.arch__notes h5,
+.arch__warnings h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-faint);
+}
+
+.arch__notes ul,
+.arch__warnings ul {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.arch__warning.is-error {
+  color: var(--danger);
+}
+
+.arch__warning.is-warn {
+  color: var(--warn);
+}
+
+/* Asking ------------------------------------------------------------------- */
+
+.generate__ask h5,
+.generate__history h5,
+.changeset__section h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-faint);
+}
+
+.generate__targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.generate__target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.generate__target.is-on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.generate__intent {
+  display: block;
+}
+
+.generate__intent textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.generate__go,
+.changeset__apply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+.generate__go p,
+.changeset__apply p {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* The room's AI history ---------------------------------------------------- */
+
+.generate__history ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.generate__historyitem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.generate__historyitem:hover:not(:disabled) {
+  background: var(--glass);
+}
+
+.generate__historyitem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.generate__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--ok);
+}
+
+.generate__dot.is-failed {
+  background: var(--danger);
+}
+
+.generate__historytext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.generate__historytext strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.generate__historytext .muted {
+  font-size: var(--text-2xs);
+}
+
+/* The change set ----------------------------------------------------------- */
+
+.changeset__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.changeset__head h4 {
+  margin: 0 0 2px;
+  font-size: var(--text-md);
+}
+
+.changeset__head p {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* What is still missing is a finding, not a footnote; it is given the weight
+   of one so it is not scrolled past on the way to the code. */
+.changeset__section--ask {
+  padding: var(--space-3);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+}
+
+.changeset__list,
+.changeset__plan {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.changeset__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.changeset__toolbar h5 {
+  margin: 0;
+}
+
+.changeset__bulk {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.changeset__group h6 {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.changeset__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changeset__file {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+/*
+ * What a file does is carried by the left edge as well as by the badge. The
+ * distinction between creating and replacing is the one that matters most
+ * here, and colour alone would be the only signal for anyone who cannot
+ * separate these three hues.
+ */
+.changeset__file.is-create {
+  border-left: 3px solid var(--ok);
+}
+
+.changeset__file.is-modify {
+  border-left: 3px solid var(--warn);
+}
+
+.changeset__file.is-delete {
+  border-left: 3px solid var(--danger);
+}
+
+.changeset__file.is-decided {
+  opacity: 0.7;
+}
+
+.changeset__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.changeset__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.changeset__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+}
+
+.changeset__action--create {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.changeset__action--modify {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.changeset__action--delete {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.changeset__path {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.changeset__meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+}
+
+.changeset__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-faint);
+}
+
+.changeset__status.is-applied {
+  color: var(--ok);
+}
+
+.changeset__why {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+}
+
+.changeset__error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.changeset__body {
+  margin-top: var(--space-3);
+}
+
+.changeset__side {
+  margin: var(--space-2) 0 4px;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-faint);
+}
+
+.changeset__code {
+  max-height: 320px;
+  margin: 0;
+  padding: var(--space-3);
+  /* Code is wide. It scrolls in its own box rather than widening the dialog
+     and putting the whole page into a horizontal scroll. */
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--glass-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  white-space: pre;
+}
+
+.changeset__code--old {
+  max-height: 200px;
+  border-left: 2px solid var(--danger);
+  opacity: 0.75;
+}
+
+.changeset__done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.changeset__buttons {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .changeset__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .generate__go,
+  .changeset__apply {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -5,6 +5,7 @@ import { useToast } from './ui/useToast.js'
 import { useDismissable } from '../hooks/useDismissable.js'
 import { Icon } from './ui/Icon.jsx'
 import { ChangePasswordDialog } from './ChangePasswordDialog.jsx'
+import { SessionsDialog } from './SessionsDialog.jsx'
 
 /**
  * Account menu. Signed-in users get their account controls and sign-out;
@@ -18,6 +19,7 @@ export function UserMenu({ compact = false }) {
 
   const [open, setOpen] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
+  const [showingDevices, setShowingDevices] = useState(false)
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
 
@@ -88,6 +90,18 @@ export function UserMenu({ compact = false }) {
               </button>
               <button
                 type="button"
+                className="usermenu__item"
+                role="menuitem"
+                onClick={() => {
+                  close()
+                  setShowingDevices(true)
+                }}
+              >
+                <Icon name="globe" size={15} />
+                Signed-in devices
+              </button>
+              <button
+                type="button"
                 className="usermenu__item usermenu__item--danger"
                 role="menuitem"
                 onClick={onSignOut}
@@ -128,6 +142,8 @@ export function UserMenu({ compact = false }) {
         open={changingPassword}
         onClose={() => setChangingPassword(false)}
       />
+
+      <SessionsDialog open={showingDevices} onClose={() => setShowingDevices(false)} />
     </div>
   )
 }

@@ -1,25 +1,23 @@
-import { createHash, randomBytes } from 'node:crypto'
 import { User } from '../models/User.js'
 import { badRequest, conflict, notFound } from '../errors.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
+import { hashToken, randomToken } from '../utils/token.js'
 import { sendVerificationEmail as sendMessage } from './email.service.js'
 
 // Verification links should be used promptly; 24h is the usual balance.
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
-/** Only the hash is persisted, so the raw token exists in exactly one place: the email. */
-function hashToken(raw) {
-  return createHash('sha256').update(raw).digest('hex')
-}
-
 /**
  * Generates a verification token for `user`, storing only its hash and an
  * expiry. Re-issuing invalidates any previous token. Returns the raw token
  * so a future mailer can build the confirm link.
+ *
+ * Only the hash is persisted, so the raw token exists in exactly one place:
+ * the email.
  */
 export async function issueVerificationToken(user) {
-  const raw = randomBytes(32).toString('hex')
+  const raw = randomToken()
 
   user.verificationTokenHash = hashToken(raw)
   user.verificationTokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MS)

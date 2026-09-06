@@ -12,3 +12,9 @@ export const unauthorized = (m, c) => new AppError(401, m || 'Unauthorized', c |
 export const forbidden = (m, c) => new AppError(403, m || 'Forbidden', c || 'forbidden')
 export const notFound = (m, c) => new AppError(404, m || 'Not found', c || 'not_found')
 export const conflict = (m, c) => new AppError(409, m, c || 'conflict')
+
+/** Something this deployment is not set up to do, rather than a bad request. */
+export const unavailable = (m, c) => new AppError(503, m, c || 'unavailable')
+
+/** An upstream service answered badly, or did not answer. */
+export const upstream = (m, c) => new AppError(502, m, c || 'upstream_failed')

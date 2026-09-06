@@ -63,9 +63,62 @@ production with `ALLOW_ANONYMOUS=true`.
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
 
-**Outgoing mail.** Two things are sent: the sign-up confirmation link, valid for 24 hours, and a
-room invitation. With no relay configured both are written to the server log instead, which is all
-development needs — the invite toast says as much and hands you the room code to pass on yourself.
+**Forgotten passwords.** "Reset it" on the sign-in page emails a link, valid for one hour and good
+for a single use; it opens a page to choose a new password and signs you in once it is saved.
+Asking again replaces the previous link.
+
+Three details are deliberate. The endpoint answers the same `{ sent: true }` whether or not the
+address has an account — saying otherwise would turn a public, unauthenticated route into a way to
+test which addresses are registered here — so the screen can only ever say *if* that address has an
+account. It also answers *before* looking the address up: a registered address costs a document
+write that an unregistered one does not, and a response that waited for it would have a duration
+carrying the answer the body refuses to give. And a successful reset marks the address verified,
+because reading the email is the same proof `/verify-email` asks for.
+
+**A reset ends every session on the account**, which matters most here: the reason someone resets a
+password they cannot remember is often that somebody else can, and a reset that left the intruder
+signed in would be the appearance of security rather than security. A fresh session is opened
+immediately after, so the person resetting stays signed in.
+
+## Signed-in devices
+
+**Account menu → Signed-in devices.** Every browser holding a session for the account, named from
+its User-Agent, with where it signed in from and when it was last used. The row you are reading it
+on is marked **This device** and has no sign-out button — without the marker the list is a row of
+indistinguishable browsers, and with the button it would be the likeliest misclick in the dialog.
+Any other row can be signed out on its own, or **Sign out all other devices** ends the lot.
+
+Signing a device out takes effect immediately, not at the next page load: its live document and
+presence connections are closed on the spot, so it stops being able to type on a whiteboard as well
+as stopping being able to call the API.
+
+How it works, since a signed JWT cannot be withdrawn. Each session is a row; the token carries its
+`jti` and every authenticated request follows that back to the row. Revoking is deleting it — there
+is no `revoked` flag to forget to filter on, and the IP address stops being held the moment the
+session ends. The check runs at all four doors a token can arrive at (both REST guards, the collab
+handshake, the socket handshake), and rows expire themselves through a TTL index so the collection
+cannot grow forever. The cost is one read on a unique index per authenticated request, and none at
+all for a request carrying no token, which is every guest.
+
+The shape of that record is what decides the feature: a single marker on the account can revoke
+everything at once but cannot *name* the sessions, so "what is signed in?" and "sign out that one"
+have no answer. A row each answers both.
+
+> **Deploy note.** A token issued before sessions were recorded names no row, so it is refused
+> rather than grandfathered — accepting it would leave tokens that "sign out all other devices"
+> cannot reach, which is the hole the feature exists to close. Deploying therefore signs everyone
+> out once.
+
+**What is stored, and for how long.** The raw `User-Agent` and the IP address, per session, visible
+only to the account itself. Both are kept deliberately — "somewhere I do not recognise" is the whole
+reason anyone opens this list — and both are deleted with the row when the session ends or expires.
+`req.ip` follows Express's `trust proxy`; behind a load balancer without it set, every session
+records the balancer's address instead, which is useless rather than misleading.
+
+**Outgoing mail.** Three things are sent: the sign-up confirmation link, valid for 24 hours, the
+password reset link above, and a room invitation. With no relay configured all are written to the
+server log instead, which is all development needs — the invite toast says as much and hands you
+the room code to pass on yourself, and the reset link is in the log to follow.
 
 Copy `server/.env.example` to `server/.env` and fill in the relay. For Gmail that means turning on
 [2-Step Verification](https://myaccount.google.com/signinoptions/twosv) first — app passwords do not
@@ -299,6 +352,73 @@ completely static — an animated gradient or a fading canvas hint inside that r
 tests flake. Both rules are commented where they apply, in
 [layout.css](client/src/styles/layout.css).
 
+## Whiteboard to code
+
+Draw a system on the board — boxes with labels, arrows between them — and ask for an
+implementation. The **⚡ button** in the room header opens it.
+
+**It reads the diagram, not a screenshot.** That distinction is the feature. The whiteboard stores
+drawings, not diagrams: an arrow is four numbers, and a label is an unrelated `text` shape that
+happens to sit on top of a box. Nothing records that the arrow between "API" and "Database" *means*
+anything. So the graph is recovered geometrically — arrows resolve to the nearest box at each end,
+text inside a box becomes its label, text on a line becomes that connection's relationship — and the
+result is an explicit list of components, connections and notes.
+
+```
+[Client]  ->  [API]  ->  [Auth Service]  ->  [Database]
+```
+
+becomes
+
+| | |
+| --- | --- |
+| **nodes** | `client` (client), `api` (api), `auth-service` (auth), `database` (datastore) |
+| **edges** | `client → api`, `api → auth-service`, `auth-service → database` |
+
+Component types are inferred from the label and the shape (`database`/`store` → data store,
+`queue`/`kafka` → queue, a diamond → decision), which is a hint for the model and something for you
+to correct — not a rule anything depends on.
+
+**The reading is shown before anything is generated.** It is inference and it is sometimes wrong,
+and the right answer to a misread diagram is fixing the diagram. The panel also lists what the
+diagram *could not* say — an arrow that reaches nothing, a box nobody labelled, two boxes with the
+same name — and those go to the model as gaps rather than being guessed at. `GET /api/rooms/:id/architecture`
+returns exactly this, and involves no model at all.
+
+**What comes back is a proposal, never a write.** The model returns a plan, a set of whole files,
+the assumptions it had to make, and the questions the diagram left open. Then:
+
+- **`create` and `modify` are decided by the server**, not taken from the answer. The model has
+  never seen the room's files, so its "create" means "I wrote a new file" — not "this path is free",
+  which it is in no position to claim. Anything landing on a name the room already has becomes a
+  modification, and arrives carrying the current contents so the change can be read. That is the
+  whole of *do not blindly overwrite*: nothing is replaced that was not first shown.
+- **Every path is checked.** Absolute paths, `..`, backslashes, null bytes and oversized files are
+  refused and reported rather than repaired — silently rewriting `../../etc/passwd` into something
+  harmless would hide that it was proposed.
+- **Nothing is applied until you tick it.** Accept some, reject the rest; what you leave unticked is
+  recorded as rejected rather than left undecided. Accepted files are written into the room's files
+  through the same upload path as any other, so the same permissions apply.
+
+Generation needs an account (it spends a real request and is recorded against whoever asked) and
+room access. Every run — including failures — is kept as the room's **AI timeline**, and both
+generating and applying are announced to everyone in the room over the socket.
+
+**Switching it on.** Set one key in `server/.env` — `ANTHROPIC_API_KEY=sk-ant-…`
+([console](https://console.anthropic.com/settings/keys)) or `GOOGLE_API_KEY=AIza…`
+([AI Studio](https://aistudio.google.com/apikey)). Which service gets called is worked out from the
+shape of the key, so there is no second setting to keep in step with it; `AI_PROVIDER` overrides the
+guess for a gateway whose keys look like neither. Both are driven through their function-calling
+APIs so the answer arrives as structured arguments rather than prose that has to be dug out of a
+paragraph — one code path, either vendor.
+
+Model defaults to `claude-sonnet-5` or `gemini-3.6-flash`. Note that Google's older `2.5` names are
+still listed by its models endpoint but are closed to new keys, and answer a 404 that reads like the
+model does not exist.
+
+Without a key the panel says so and the architecture reading still works, because that needs no
+model at all.
+
 ## API
 
 | Method | Path | Notes |
@@ -306,9 +426,14 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/health` | Liveness plus database state |
 | `POST` | `/api/auth/register` · `/login` | Returns `{ user, token }` |
 | `GET` | `/api/auth/me` | Requires bearer token |
-| `POST` | `/api/auth/change-password` | Requires bearer token; from the account menu |
+| `POST` | `/api/auth/change-password` | Requires bearer token; ends every session and returns `{ user, token }` — the replacement must be adopted |
+| `GET` | `/api/auth/sessions` | Devices signed in to your account; `current` marks the caller |
+| `DELETE` | `/api/auth/sessions` | Signs out every device except this one; answers `{ revoked }` |
+| `DELETE` | `/api/auth/sessions/:sessionId` | Signs out one device and closes its live connections |
 | `POST` | `/api/auth/verify-email` | Confirms the address with the emailed token; returns `{ user }` |
 | `POST` | `/api/auth/resend-verification` | Requires bearer token; re-issues the email unless already verified |
+| `POST` | `/api/auth/forgot-password` | Emails a reset link. Always answers `{ sent: true }`, registered or not — and answers before looking the address up, so the timing says nothing either |
+| `POST` | `/api/auth/reset-password` | Spends the emailed token and sets a new password; returns `{ user, token }` |
 | `POST` | `/api/rooms` | Creates a private room |
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
@@ -323,6 +448,12 @@ tests flake. Both rules are commented where they apply, in
 | `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point; `X-Updates-Applied` counts the entries folded and `X-Checkpoint-Seq` says which checkpoint the fold started from (0 = the whole log) |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
+| `GET` | `/api/ai` | Whether this server can generate code, why not if it cannot, and what it can be asked for |
+| `GET` | `/api/rooms/:roomId/architecture` | The system design read off the whiteboard: nodes, edges, notes, and what could not be read. No model involved |
+| `POST` | `/api/rooms/:roomId/generate` | Turns the diagram into a proposed change set. Writes nothing |
+| `GET` | `/api/rooms/:roomId/generations` | The room's AI timeline, newest first, failures included |
+| `GET` | `/api/rooms/:roomId/generations/:id` | One change set in full, with every proposed file |
+| `POST` | `/api/rooms/:roomId/generations/:id/apply` | Accepts the named files and records the rest as rejected |
 
 The whole surface is also browsable as OpenAPI: Swagger UI at `/docs/`, machine-readable
 spec at `/docs/openapi.json`. Both move with `SWAGGER_PATH` and disappear entirely with
@@ -345,12 +476,17 @@ client/src
 ├── components/   TopBar, UserMenu, RoomCard, SplitPane, ProductPreview, dialogs,
 │                 Whiteboard/ (ToolRail, CanvasControls, TextComposer), Editor/,
 │                 ui/ (Button, Field, Icon, Modal, Segmented, Skeleton, StatCard, …)
-└── pages/        Home, Login, Register, Dashboard, Room, NotFound
+└── pages/        Home, Login, Register, VerifyEmail, ForgotPassword, ResetPassword,
+                  Dashboard, Room, NotFound
 
 server/src
 ├── config/       env.js (zod-validated), cors.js (shared origin policy), logger.js
-├── models/       User, Room, Snapshot, DocUpdate (append-only)
-├── services/       auth, room, replay, verification · email
+├── models/       User, Session (one per signed-in device), Room, Snapshot,
+│                 DocUpdate (append-only), Generation (one change set)
+├── services/     auth, room, replay, verification, password-reset, session,
+│                 architecture (whiteboard -> graph), ai (graph -> proposal),
+│                 generation (orchestration + apply) · email
+├── utils/        token.js — hashed single-use email secrets, and session ids
 ├── routes/       auth.routes.js, rooms.routes.js
 ├── middleware/   auth, validate, error
 ├── collab/       hocuspocus.js, persistence.js
@@ -412,8 +548,16 @@ The app is solid for a demo or an internal tool. Before putting it in front of u
 - **Token storage.** The JWT sits in `localStorage`, which any injected script can read. Moving to an
   httpOnly, SameSite cookie plus a short-lived access token and refresh rotation is the real fix, and
   it changes how the WebSocket handshake authenticates.
-- **No refresh tokens.** Sessions last `JWT_EXPIRES_IN` (7d default) and cannot be revoked before
-  they expire. There is no logout-everywhere and no server-side session list.
+- **No refresh tokens.** Sessions last `JWT_EXPIRES_IN` (7d default) and cannot be extended without
+  signing in again, so a working session simply stops after a week. Revocation itself is solved —
+  each session is a row that can be listed and deleted — but the short-lived-access-token plus
+  rotation design is what the httpOnly-cookie move above would want, and it would let a stolen token
+  be useful for minutes rather than days.
+- **Session rows are per-node truth only in one respect.** The rows themselves are in MongoDB and
+  shared, so revoking works across processes. Hanging up *live* connections does not: it walks the
+  Hocuspocus documents and Socket.io sockets held by the process that served the request, so on a
+  multi-node deployment the signed-out device's websocket on another node stays open until it next
+  reconnects. Redis adapters for both would close that gap; see the single-node note above.
 - **Transport.** Serve over HTTPS/WSS behind a proxy, set HSTS, and tighten the helmet CSP — the
   defaults here are permissive enough for Vite's dev server.
 - **Observability.** pino logs to stdout with no aggregation, tracing, or alerting, and the error

@@ -18,6 +18,11 @@ coverage/
 test-results/
 playwright-report/
 
+# Whatever people have shared into a room, and whatever a generation wrote
+# there. Runtime data, not source: it belongs to whoever uploaded it, this is
+# a public repository, and UPLOAD_DIR points here by default.
+server/uploads/
+
 .DS_Store
 Thumbs.db
 desktop.ini

@@ -148,7 +148,10 @@ describe('socket.io room lifecycle', () => {
   it('keeps the token identity over a claimed name', async () => {
     const room = nextRoom()
     const { issueToken } = await import('../src/services/auth.service.js')
-    const token = issueToken({ id: '507f1f77bcf86cd799439011', name: 'Real Name' })
+    // Issuing a token opens a session row for it to point at, so this is
+    // asynchronous now — without the await the socket is handed a Promise,
+    // fails to verify it, and quietly connects as a guest.
+    const token = await issueToken({ id: '507f1f77bcf86cd799439011', name: 'Real Name' })
 
     const socket = connectSocket({ token })
     const presence = []

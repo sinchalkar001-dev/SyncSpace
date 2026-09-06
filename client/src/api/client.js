@@ -199,6 +199,11 @@ export const api = {
   register: (body) => apiFetch('/auth/register', { method: 'POST', body, retry: 2 }),
   login: (body) => apiFetch('/auth/login', { method: 'POST', body, retry: 2 }),
   me: (signal) => apiFetch('/auth/me', { signal, retry: 2 }),
+  /**
+   * Answers `{ user, token }`. The token is not optional to use: changing the
+   * password ends every session opened under the old one, including the one
+   * that made this call, so the caller must adopt the replacement.
+   */
   changePassword: (body) => apiFetch('/auth/change-password', { method: 'POST', body }),
 
   /** Spends the token from a confirmation email. Single-use, so never retried. */
@@ -206,6 +211,31 @@ export const api = {
 
   /** Issues a fresh confirmation email for the signed-in account. */
   resendVerification: () => apiFetch('/auth/resend-verification', { method: 'POST' }),
+
+  /**
+   * Asks for a reset link. Answers `{ sent: true }` whether or not the address
+   * has an account — the server refuses to say, so nothing here can display a
+   * "no such account" the server deliberately withheld.
+   *
+   * Retried like register, which also emails on success: the retry only fires
+   * when the request did not reach the application, and being told to try
+   * again is worse for someone who is already locked out.
+   */
+  forgotPassword: (email) => apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, retry: 2 }),
+
+  /** Spends the token from a reset email. Single-use, so never retried. */
+  resetPassword: (token, password) =>
+    apiFetch('/auth/reset-password', { method: 'POST', body: { token, password } }),
+
+  /** Every device signed in to this account; `current` marks this one. */
+  sessions: (signal) => apiFetch('/auth/sessions', { signal, retry: 2 }),
+
+  /** Signs out one device. The id comes from the list above. */
+  revokeSession: (sessionId) =>
+    apiFetch('/auth/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' }),
+
+  /** Signs out every device except this one. Answers `{ revoked }`. */
+  revokeOtherSessions: () => apiFetch('/auth/sessions', { method: 'DELETE' }),
   listRooms: (signal) => apiFetch('/rooms', { signal }),
   createRoom: (body) => apiFetch('/rooms', { method: 'POST', body }),
   getRoom: (roomId, signal) => apiFetch('/rooms/' + encodeURIComponent(roomId), { signal }),
@@ -240,6 +270,56 @@ export const api = {
 
   /** What this server can run, and whether running is switched on at all. */
   runners: (signal) => apiFetch('/runners', { signal }),
+
+  /** Whether this server can generate code, and what it can be asked for. */
+  ai: (signal) => apiFetch('/ai', { signal, retry: 2 }),
+
+  /**
+   * The system design the server reads on the whiteboard. No model involved,
+   * so it is cheap enough to fetch whenever the panel opens.
+   */
+  architecture: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/architecture', { signal, retry: 2 }),
+
+  /**
+   * Turns the diagram into a proposed change set.
+   *
+   * Never retried, and slow enough to want its own signal: each call is a paid
+   * request to a model, so repeating one that may well have worked would cost
+   * twice and record two change sets for one press of the button.
+   */
+  generate: (roomId, body, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/generate', {
+      method: 'POST',
+      body,
+      signal,
+    }),
+
+  /** The room's AI history, newest first. */
+  generations: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/generations', { signal, retry: 2 }),
+
+  /** One change set in full, including every proposed file. */
+  generation: (roomId, generationId, signal) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/generations/' + encodeURIComponent(generationId),
+      { signal, retry: 2 }
+    ),
+
+  /**
+   * Accepts part of a change set. `accept` is the ids being taken; everything
+   * else in the set is recorded as rejected, so an empty array is a real
+   * answer rather than a no-op.
+   */
+  applyGeneration: (roomId, generationId, accept) =>
+    apiFetch(
+      '/rooms/' +
+        encodeURIComponent(roomId) +
+        '/generations/' +
+        encodeURIComponent(generationId) +
+        '/apply',
+      { method: 'POST', body: { accept } }
+    ),
 
   /** Runs a program and resolves with its output; a crash is a result, not a throw. */
   run: (roomId, body, signal) =>

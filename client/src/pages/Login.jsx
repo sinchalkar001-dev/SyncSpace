@@ -48,6 +48,11 @@ export default function Login() {
       subtitle="Your rooms and their history follow your account."
       footer={
         <>
+          {/* Nearest the submit button on purpose: this is where someone looks
+              the moment a sign-in is refused. */}
+          <span>
+            Forgot your password? <Link to="/forgot-password">Reset it</Link>
+          </span>
           <span>
             No account? <Link to="/register">Create one</Link>
           </span>

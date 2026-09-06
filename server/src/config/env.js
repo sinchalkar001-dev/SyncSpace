@@ -164,6 +164,41 @@ const schema = z
     RUN_MAX_CONCURRENT: z.coerce.number().int().positive().default(4),
     RUN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 
+    /**
+     * Turning a whiteboard into code calls a model, which costs money per
+     * request and is the only thing here that reaches outside this machine.
+     * With no key the feature reports itself unavailable and explains why,
+     * exactly as a missing compiler does on /runners — the UI never offers a
+     * button that cannot work.
+     */
+    AI_ENABLED: booleanish.default('true'),
+
+    /**
+     * One key, either vendor.
+     *
+     * Which service to call is worked out from the key itself — Anthropic's
+     * begin `sk-ant-`, Google's begin `AIza` — because that is a fact about
+     * the credential rather than a second setting to keep in step with it. A
+     * mismatched pair is the kind of misconfiguration that fails at the first
+     * request with an unhelpful 401, and there is no reason to invite it.
+     * `AI_PROVIDER` overrides the guess for anything self-hosted.
+     */
+    ANTHROPIC_API_KEY: blankIsUnset(z.string().trim().min(1).optional()),
+    GOOGLE_API_KEY: blankIsUnset(z.string().trim().min(1).optional()),
+    AI_PROVIDER: z.enum(['anthropic', 'google']).optional(),
+
+    // Left unset, each provider's own default endpoint and model are used.
+    AI_BASE_URL: blankIsUnset(z.string().url().optional()),
+    AI_MODEL: blankIsUnset(z.string().trim().min(1).optional()),
+    // A whole change set in one answer; below about 4k the last file is
+    // routinely cut off, which costs the request and produces nothing.
+    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(64000).default(8000),
+    // Generation holds an HTTP request open, so this is the ceiling on how
+    // long somebody sits watching a spinner before being told it failed.
+    AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(120000),
+    // Far tighter than the general budget: each call is a real cost.
+    AI_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
 
@@ -179,6 +214,19 @@ const schema = z
     // own tight budgets inside the shared auth window.
     AUTH_RATE_LIMIT_VERIFY_MAX: z.coerce.number().int().positive().default(10),
     AUTH_RATE_LIMIT_RESEND_MAX: z.coerce.number().int().positive().default(5),
+
+    // Password recovery, split the same way: asking hands out an email to
+    // somebody else's address, so it is budgeted like resending, while
+    // spending a reset token is a guess at 256 bits and budgeted like
+    // confirming. Sharing one budget would let a flood of requests for other
+    // people's addresses lock a legitimate user out of finishing their own.
+    AUTH_RATE_LIMIT_FORGOT_MAX: z.coerce.number().int().positive().default(5),
+    AUTH_RATE_LIMIT_RESET_MAX: z.coerce.number().int().positive().default(10),
+
+    // Signing devices out. Higher than the rest of this group because it is
+    // authenticated and can only reach the caller's own sessions, so it is
+    // capped against repeated connection-closing work rather than guessing.
+    AUTH_RATE_LIMIT_SESSION_REVOKE_MAX: z.coerce.number().int().positive().default(30),
 
     // Invites grant room access, so cap them well below the general budget
     // while leaving normal collaboration untouched.

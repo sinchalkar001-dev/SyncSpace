@@ -1,6 +1,6 @@
 import { Hocuspocus } from '@hocuspocus/server'
 import { MongoPersistence } from './persistence.js'
-import { verifyToken } from '../services/auth.service.js'
+import { authenticate } from '../services/auth.service.js'
 import { canAccess, ensureRoom } from '../services/room.service.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
@@ -35,24 +35,42 @@ export function createHocuspocus() {
      * `authenticationFailed`. The document name is the room id.
      */
     async onAuthenticate({ token, documentName }) {
-      const payload = verifyToken(token)
+      const { user, revoked } = await authenticate(token)
       const room = await ensureRoom(documentName)
 
-      if (!payload) {
+      /**
+       * A session that ended is refused outright rather than quietly demoted
+       * to a guest. Both would stop the edits counting as that account, but
+       * silently becoming "Guest" in a room you were named in is the kind of
+       * thing people notice ten minutes later; being told to sign in again is
+       * something they can act on.
+       */
+      if (revoked) throw refuse('Your session ended — sign in again to rejoin this room')
+
+      if (!user) {
         if (!env.ALLOW_ANONYMOUS) throw refuse('Sign in to open this room')
         if (!room.isPublic) throw refuse('This room is private — ask its owner for an invite')
         return { user: { id: null, name: 'Guest', anonymous: true } }
       }
 
-      if (room.isBlocked(payload.sub)) {
+      if (room.isBlocked(user.id)) {
         throw refuse('You were removed from this room by its owner')
       }
 
-      if (!canAccess(room, payload.sub)) {
+      if (!canAccess(room, user.id)) {
         throw refuse('This room is private and you are not on its guest list')
       }
 
-      return { user: { id: payload.sub, name: payload.name, anonymous: false } }
+      /**
+       * The session id travels with the connection so signing out one device
+       * can find and close exactly its connections, rather than every one the
+       * account has open. It sits beside the user rather than inside it, so
+       * that anything which forwards the identity cannot carry it along.
+       */
+      return {
+        user: { id: user.id, name: user.name, anonymous: false },
+        sessionId: user.sessionId,
+      }
     },
 
     async onConnect({ documentName }) {

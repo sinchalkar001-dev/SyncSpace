@@ -15,11 +15,16 @@ beforeAll(() => {
 
 const documentedPaths = [
   '/health',
+  '/api/v1/ai',
   '/api/v1/auth/change-password',
+  '/api/v1/auth/forgot-password',
   '/api/v1/auth/login',
   '/api/v1/auth/me',
   '/api/v1/auth/register',
   '/api/v1/auth/resend-verification',
+  '/api/v1/auth/reset-password',
+  '/api/v1/auth/sessions',
+  '/api/v1/auth/sessions/{sessionId}',
   '/api/v1/auth/verify-email',
   '/api/v1/rooms',
   '/api/v1/rooms/{roomId}',
@@ -30,6 +35,11 @@ const documentedPaths = [
   '/api/v1/rooms/{roomId}/people',
   '/api/v1/rooms/{roomId}/replay',
   '/api/v1/rooms/{roomId}/replay/{seq}',
+  '/api/v1/rooms/{roomId}/architecture',
+  '/api/v1/rooms/{roomId}/generate',
+  '/api/v1/rooms/{roomId}/generations',
+  '/api/v1/rooms/{roomId}/generations/{generationId}',
+  '/api/v1/rooms/{roomId}/generations/{generationId}/apply',
   '/api/v1/rooms/{roomId}/run',
   '/api/v1/runners',
 ]
