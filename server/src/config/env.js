@@ -193,9 +193,17 @@ const schema = z
     // A whole change set in one answer; below about 4k the last file is
     // routinely cut off, which costs the request and produces nothing.
     AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(64000).default(8000),
-    // Generation holds an HTTP request open, so this is the ceiling on how
-    // long somebody sits watching a spinner before being told it failed.
-    AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(120000),
+    /**
+     * Generation holds an HTTP request open, so this is the ceiling on how
+     * long somebody watches a spinner before being told it failed.
+     *
+     * Three minutes rather than two, from measurement: a single-target run
+     * against gemini-3.6-flash took 112s while the provider was busy enough
+     * to be answering 503s elsewhere. A 120s cap would have failed that after
+     * doing all the work and paying for it, and four targets at once is a
+     * larger answer than one.
+     */
+    AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(180000),
     // Far tighter than the general budget: each call is a real cost.
     AI_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
 

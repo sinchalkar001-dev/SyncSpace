@@ -17,11 +17,18 @@ import { env } from '../config/env.js'
  * says which service issued it.
  */
 
-/** Anthropic keys begin `sk-ant-`; Google's begin `AIza`. */
+/**
+ * Which vendor issued this key.
+ *
+ * Anthropic's begin `sk-ant-`. Google has two formats in circulation: the long
+ * standing `AIza…`, and `AQ.…`, which is what AI Studio hands out now — a key
+ * created today is the second kind, and recognising only the first turns a
+ * perfectly good key into "unrecognised" the moment somebody rotates one.
+ */
 export function providerFor(key) {
   if (!key) return null
   if (key.startsWith('sk-ant-')) return 'anthropic'
-  if (key.startsWith('AIza')) return 'google'
+  if (key.startsWith('AIza') || key.startsWith('AQ.')) return 'google'
   return null
 }
 

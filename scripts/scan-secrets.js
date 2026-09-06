@@ -32,6 +32,12 @@ import { readFileSync, statSync } from 'node:fs'
  */
 const SIGNATURES = [
   { name: 'Google API key', test: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+  /**
+   * The format AI Studio issues now. Shorter and differently shaped, so the
+   * `AIza` rule above does not see it — a scanner that only knows last year's
+   * format is exactly the kind that lets the current one through.
+   */
+  { name: 'Google API key', test: /\bAQ\.[A-Za-z0-9_-]{30,}/ },
   { name: 'Anthropic API key', test: /\bsk-ant-[0-9A-Za-z_-]{24,}/ },
   { name: 'OpenAI API key', test: /\bsk-[A-Za-z0-9]{32,}\b/ },
   { name: 'AWS access key id', test: /\bAKIA[0-9A-Z]{16}\b/ },

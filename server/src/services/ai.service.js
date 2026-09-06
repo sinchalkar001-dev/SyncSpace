@@ -78,8 +78,8 @@ export function aiStatus() {
       model: null,
       provider: null,
       reason:
-        'The configured key is not recognisably an Anthropic (sk-ant-…) or Google (AIza…) key. ' +
-        'Set AI_PROVIDER to say which service to call.',
+        'The configured key is not recognisably an Anthropic (sk-ant-…) or Google (AIza… or AQ.…) ' +
+        'key. Set AI_PROVIDER to say which service to call.',
     }
   }
 
@@ -367,11 +367,27 @@ export async function askForImplementation({ architecture, targets, intent, mode
       { status: response.status, detail: detail.slice(0, 500) },
       'AI request was refused'
     )
+    /**
+     * "Refused" is the wrong word for most of these, and the wrong word sends
+     * somebody looking for a fault in their diagram.
+     *
+     * 429 and 503 are both temporary and both mean try again — 503 especially,
+     * which is the provider being busy and has nothing to do with the request.
+     * 401 and 403 mean the key, which is a different job entirely. Only what
+     * is left is genuinely a refusal.
+     */
+    const temporary = response.status === 429 || response.status === 503
+    const credential = response.status === 401 || response.status === 403
+
     throw upstream(
-      response.status === 429
-        ? 'The model is rate limiting this server. Try again shortly.'
-        : 'The model refused the request (HTTP ' + response.status + ').',
-      response.status === 429 ? 'ai_rate_limited' : 'ai_failed'
+      temporary
+        ? response.status === 429
+          ? 'The model is rate limiting this server. Try again shortly.'
+          : 'The model is busy right now. Try again in a moment.'
+        : credential
+          ? 'The model rejected this server\'s API key (HTTP ' + response.status + ').'
+          : 'The model refused the request (HTTP ' + response.status + ').',
+      temporary ? 'ai_unavailable' : credential ? 'ai_bad_key' : 'ai_failed'
     )
   }
 

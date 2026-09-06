@@ -16,6 +16,8 @@ import { scanText } from './scan-secrets.js'
  */
 
 const googleKey = 'AIza' + 'Sy' + 'B'.repeat(33)
+/** What AI Studio issues now — a different shape, and easy to miss. */
+const googleKeyNew = 'AQ.' + 'Ab8' + 'C'.repeat(45)
 const anthropicKey = 'sk-' + 'ant-' + 'api03-' + 'x'.repeat(40)
 const awsKey = 'AKIA' + 'B'.repeat(16)
 const githubToken = 'ghp_' + 'a'.repeat(36)
@@ -28,6 +30,17 @@ describe('finds a real credential', () => {
     expect(found).toHaveLength(1)
     expect(found[0].what).toMatch(/google/i)
     expect(found[0].line).toBe(1)
+  })
+
+  /**
+   * A scanner that only knows last year's format is the kind that lets the
+   * current one through — and the current one is what a rotation produces.
+   */
+  it('catches the newer Google key format too', () => {
+    const found = scanText('server/config.js', 'const key = "' + googleKeyNew + '"')
+
+    expect(found).toHaveLength(1)
+    expect(found[0].what).toMatch(/google/i)
   })
 
   it('catches the other formats worth knowing by sight', () => {

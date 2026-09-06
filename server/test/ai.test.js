@@ -241,6 +241,19 @@ describe('aiStatus', () => {
     expect(aiStatus()).toMatchObject({ provider: 'google', model: 'gemini-3.6-flash' })
   })
 
+  /**
+   * The format AI Studio issues now. Recognising only `AIza` meant a key
+   * created today read as "unrecognised" — so rotating one, which is the
+   * thing you do after a key leaks, broke the feature.
+   */
+  it('recognises the newer Google key format as well as the old one', () => {
+    env.AI_ENABLED = true
+    env.ANTHROPIC_API_KEY = undefined
+    env.GOOGLE_API_KEY = 'AQ.' + 'Ab8' + 'x'.repeat(45)
+
+    expect(aiStatus()).toMatchObject({ enabled: true, provider: 'google' })
+  })
+
   it('refuses to guess at a key it does not recognise', () => {
     env.AI_ENABLED = true
     env.ANTHROPIC_API_KEY = 'some-gateway-token'
@@ -442,12 +455,33 @@ describe('askForImplementation', () => {
     expect(result.proposal.rejected).toHaveLength(1)
   })
 
-  it('reports a rate limit as its own thing', async () => {
-    answer({ error: 'slow down' }, false, 429)
+  /**
+   * "Refused" sends somebody looking for a fault in their diagram. A busy
+   * provider and a bad key are neither refusals nor each other.
+   */
+  it('tells a busy provider, a rate limit, a bad key and a refusal apart', async () => {
+    const ask = () => askForImplementation({ architecture, targets: ['backend'] })
 
-    await expect(
-      askForImplementation({ architecture, targets: ['backend'] })
-    ).rejects.toMatchObject({ code: 'ai_rate_limited' })
+    answer({ error: 'slow down' }, false, 429)
+    await expect(ask()).rejects.toMatchObject({ code: 'ai_unavailable' })
+
+    vi.restoreAllMocks()
+    answer({ error: 'high demand' }, false, 503)
+    await expect(ask()).rejects.toMatchObject({
+      code: 'ai_unavailable',
+      message: expect.stringMatching(/busy/i),
+    })
+
+    vi.restoreAllMocks()
+    answer({ error: 'bad key' }, false, 401)
+    await expect(ask()).rejects.toMatchObject({
+      code: 'ai_bad_key',
+      message: expect.stringMatching(/API key/i),
+    })
+
+    vi.restoreAllMocks()
+    answer({ error: 'nope' }, false, 400)
+    await expect(ask()).rejects.toMatchObject({ code: 'ai_failed' })
   })
 
   /** An answer cut off mid-file is the most likely real failure. */
