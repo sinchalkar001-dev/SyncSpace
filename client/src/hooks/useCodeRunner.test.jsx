@@ -192,7 +192,23 @@ describe('a run still in flight', () => {
 
     await act(() => hook.current.cancel())
 
-    expect(cancel).toHaveBeenCalledWith('room-1', 'exec-1')
+    expect(cancel).toHaveBeenCalledWith('room-1', 'exec-1', undefined)
+  })
+
+  /**
+   * A guest has no account, so the name they run under is the only thing that
+   * says the program is theirs to stop. Omitting it made a guest a stranger to
+   * their own run: the server refused, and the program went on to its timeout.
+   */
+  it('says who it is, so a guest can stop their own program', async () => {
+    const cancel = vi.spyOn(api, 'cancelRun').mockResolvedValue({ cancelled: true, state: 'cancelled' })
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1', 'Guest-Qn2F'))
+    act(() => hook.current.receiveState(running()))
+
+    await act(() => hook.current.cancel())
+
+    expect(cancel).toHaveBeenCalledWith('room-1', 'exec-1', 'Guest-Qn2F')
   })
 
   it('does nothing when there is nothing running', async () => {
@@ -208,8 +224,9 @@ describe('a run still in flight', () => {
    * Losing the race with a program that was about to finish anyway is not
    * worth an error toast.
    */
-  it('stays quiet when the cancel arrives too late', async () => {
-    vi.spyOn(api, 'cancelRun').mockRejectedValue(new Error('No such execution'))
+  it('stays quiet when the run has already gone', async () => {
+    const gone = Object.assign(new Error('No such execution'), { code: 'execution_not_found' })
+    vi.spyOn(api, 'cancelRun').mockRejectedValue(gone)
 
     const { result: hook } = renderHook(() => useCodeRunner('room-1'))
     act(() => hook.current.receiveState(running()))
@@ -218,6 +235,24 @@ describe('a run still in flight', () => {
 
     expect(hook.current.error).toBeNull()
     expect(hook.current.cancelling).toBe(false)
+  })
+
+  /**
+   * But a real refusal has to be visible. Swallowing everything is what let a
+   * guest press a Cancel button that silently did nothing at all.
+   */
+  it('shows a refusal rather than swallowing it', async () => {
+    const refused = Object.assign(new Error('You can only stop a program you started'), {
+      code: 'execution_forbidden',
+    })
+    vi.spyOn(api, 'cancelRun').mockRejectedValue(refused)
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    act(() => hook.current.receiveState(running()))
+
+    await act(() => hook.current.cancel())
+
+    expect(hook.current.error).toBe('You can only stop a program you started')
   })
 })
 

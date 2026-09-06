@@ -9,7 +9,7 @@ import { logger } from '../config/logger.js'
 import { Execution } from '../models/Execution.js'
 import { getIo } from '../realtime/registry.js'
 import { activeBackendName, requireBackend } from './execution/backend.js'
-import { describeIsolation, resolveLimits, TERMINATION } from './execution/limits.js'
+import { describeIsolation, isTerminal, resolveLimits, TERMINATION } from './execution/limits.js'
 import { createExecutionQueue } from './execution/queue.js'
 import { createRedactor } from './execution/redact.js'
 import { RECIPES, RUNNABLE_LANGUAGES } from './execution/recipes.js'
@@ -28,6 +28,18 @@ import { RECIPES, RUNNABLE_LANGUAGES } from './execution/recipes.js'
  */
 
 const sourceHashOf = (code) => createHash('sha256').update(code, 'utf8').digest('hex')
+
+/**
+ * Who a run belongs to, for the queue's purposes.
+ *
+ * Guests have no id, so the name they are running under is what keeps two of
+ * them apart. It is a weak key and deliberately so — a guest limit is a speed
+ * bump, and the real budget for anonymous callers is the per-IP rate limiter
+ * above it. What matters is that this is computed the same way when a run
+ * starts and when somebody tries to stop it: the two disagreeing is how a
+ * guest ends up unable to cancel their own program.
+ */
+const ownerKeyFor = (user) => user?.id ?? 'guest:' + (user?.name ?? 'anonymous')
 
 const caps = () => ({
   concurrent: env.RUN_MAX_CONCURRENT,
@@ -240,10 +252,7 @@ export async function startExecution({ language, code, stdin = '', room, user, r
 
   return queue.submit({
     roomId: room ?? 'adhoc',
-    // Guests have no id, so the name is what keeps two of them apart. It is a
-    // weak key and deliberately so — a guest limit is a speed bump, and the
-    // real budget for anonymous callers is the per-IP rate limiter above it.
-    userKey: user?.id ?? 'guest:' + (user?.name ?? 'anonymous'),
+    userKey: ownerKeyFor(user),
     user: user ?? null,
     language,
     sourceHash: sourceHashOf(code),
@@ -269,12 +278,16 @@ export async function cancelExecution({ executionId, user, canCancelAnything = f
     return { cancelled: false, state: record.state }
   }
 
-  const owner = user?.id ?? 'guest:' + (user?.name ?? 'anonymous')
-  const cancelled = queue.cancel(executionId, canCancelAnything ? {} : { userKey: owner })
+  // Asked before ownership, because a finished run is not something anybody
+  // is cancelling. Refusing a stranger permission to stop a program that
+  // stopped by itself is a true statement and a confusing one.
+  if (isTerminal(job.state)) return { cancelled: false, state: job.state }
 
-  if (!cancelled && job.userKey !== owner && !canCancelAnything) {
+  if (!canCancelAnything && job.userKey !== ownerKeyFor(user)) {
     throw forbidden('You can only stop a program you started', 'execution_forbidden')
   }
+
+  const cancelled = queue.cancel(executionId, canCancelAnything ? {} : { userKey: ownerKeyFor(user) })
 
   return { cancelled, state: queue.get(executionId)?.state ?? 'cancelled' }
 }

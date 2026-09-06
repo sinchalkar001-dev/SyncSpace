@@ -291,3 +291,81 @@ describe('what /runners says about isolation', () => {
     }
   })
 })
+
+/**
+ * A guest stopping their own program.
+ *
+ * This is the case that broke: a guest has no account, so the name they run
+ * under is the only thing that says a program is theirs. The client was not
+ * sending it on the cancel, the server computed "guest:anonymous", and it did
+ * not match the "guest:Guest-Qn2F" the run was started with — so a person
+ * pressing Cancel on their own program was refused as a stranger, and the
+ * program went on until it hit the timeout.
+ *
+ * It went unnoticed because the client swallowed the refusal. Both halves are
+ * fixed, and both halves are covered: this holds the server to identifying a
+ * guest the same way in both directions.
+ */
+describe('a guest stopping their own run', () => {
+  const guestRun = (roomId, body) =>
+    request(app).post('/api/v1/rooms/' + roomId + '/run').send(body)
+
+  const guestStop = (roomId, executionId, as) =>
+    request(app).delete(
+      '/api/v1/rooms/' +
+        roomId +
+        '/executions/' +
+        executionId +
+        (as ? '?as=' + encodeURIComponent(as) : '')
+    )
+
+  it('stops it when they say who they are', async () => {
+    env.RUN_TIMEOUT_MS = 15000
+
+    const pending = inFlight(
+      guestRun('guest-room', { language: 'javascript', code: SLOW, as: 'Guest-Qn2F' })
+    )
+    const executionId = await waitFor(announcedId, { label: 'the run to be announced' })
+
+    const res = await guestStop('guest-room', executionId, 'Guest-Qn2F')
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ cancelled: true, state: 'cancelled' })
+
+    const finished = await pending
+    expect(finished.body.run.state).toBe('cancelled')
+  }, 30000)
+
+  /** The exact shape of the bug: the name is missing, so nobody owns it. */
+  it('is refused when the cancel forgets to say who it is', async () => {
+    env.RUN_TIMEOUT_MS = 15000
+
+    const pending = inFlight(
+      guestRun('guest-room-2', { language: 'javascript', code: SLOW, as: 'Guest-Qn2F' })
+    )
+    const executionId = await waitFor(announcedId, { label: 'the run to be announced' })
+
+    const res = await guestStop('guest-room-2', executionId)
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('execution_forbidden')
+
+    await guestStop('guest-room-2', executionId, 'Guest-Qn2F')
+    await pending
+  }, 30000)
+
+  it('will not let one guest stop another', async () => {
+    env.RUN_TIMEOUT_MS = 15000
+
+    const pending = inFlight(
+      guestRun('guest-room-3', { language: 'javascript', code: SLOW, as: 'Guest-Qn2F' })
+    )
+    const executionId = await waitFor(announcedId, { label: 'the run to be announced' })
+
+    const res = await guestStop('guest-room-3', executionId, 'Someone-Else')
+    expect(res.status).toBe(403)
+
+    await guestStop('guest-room-3', executionId, 'Guest-Qn2F')
+    await pending
+  }, 30000)
+})

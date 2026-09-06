@@ -298,9 +298,16 @@ describe('what a program is told about the host', () => {
     const result = await run('throw new Error("boom")')
 
     expect(result.stderr).toContain('boom')
-    expect(result.stderr).not.toContain(os.tmpdir())
-    expect(result.stderr).not.toContain(os.homedir())
+
+    // The directory this run got is the disclosure that matters, and it is
+    // named after the product on every platform.
     expect(result.stderr).not.toContain('syncspace-run-')
+    expect(result.stderr).not.toContain(os.homedir())
+
+    // Only where the temp directory is somewhere private. On Linux it is
+    // already `/tmp`, which is both the real location and the stand-in, so
+    // there is nothing here to be absent.
+    if (os.tmpdir() !== '/tmp') expect(result.stderr).not.toContain(os.tmpdir())
 
     const account = process.env.USERNAME || process.env.USER
     if (account) expect(result.stderr).not.toContain(account)

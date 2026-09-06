@@ -135,9 +135,12 @@ export function useCodeRunner(roomId, displayName) {
   /**
    * Stops whatever is running.
    *
-   * Failure is deliberately quiet. The common reason is that the program
-   * finished half a second ago, and an error toast for losing that race would
-   * be noise about nothing.
+   * The refusal is shown rather than swallowed. Losing the race with a program
+   * that was about to end anyway is not a failure — the server answers that
+   * with `cancelled: false` and a 200 — so anything that actually throws here
+   * is a real refusal, and the first version of this hid one: a guest sending
+   * no name was a stranger to their own run, got a 403, and saw a Cancel
+   * button that silently did nothing until the timeout.
    */
   const cancel = useCallback(async () => {
     const target = live?.executionId
@@ -145,11 +148,15 @@ export function useCodeRunner(roomId, displayName) {
 
     setCancelling(true)
     try {
-      await api.cancelRun(roomId, target)
-    } catch {
+      await api.cancelRun(roomId, target, displayName || undefined)
+    } catch (cause) {
       setCancelling(false)
+      // Except the one genuine race: it is already gone, which is what was
+      // wanted anyway.
+      if (cause?.code === 'execution_not_found') return
+      setError(cause?.message || 'Could not stop this')
     }
-  }, [roomId, live, cancelling])
+  }, [roomId, live, cancelling, displayName])
 
   const clear = useCallback(() => {
     setResult(null)

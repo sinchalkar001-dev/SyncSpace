@@ -1034,8 +1034,19 @@ export const openapiDocument = {
           'Whoever started a run can stop it, and so can the room owner — somebody has to be able to end a program in their own room without waiting out the timeout.',
           '',
           'A run that has already finished answers `{ cancelled: false }` with its final state rather than an error: pressing Cancel as a program exits is a race, not a mistake.',
+          '',
+          'Anonymous callers must pass `as` with the same name the run was started under — a guest has no account, so that name is the only thing that says the program is theirs. Signed-in callers are identified from their token and `as` is ignored.',
         ].join('\n'),
         security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'as',
+            in: 'query',
+            required: false,
+            description: 'The guest name the run was started under. Ignored for signed-in callers.',
+            schema: { type: 'string', maxLength: 32 },
+          },
+        ],
         responses: {
           200: {
             description: 'Whether anything was actually stopped',

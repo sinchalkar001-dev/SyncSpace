@@ -446,12 +446,19 @@ export function createRoomsRouter() {
 
         const owns = Boolean(req.user?.id) && room.owner?.toString() === req.user.id
 
+        // `as` in the query rather than a body, because this is a DELETE and
+        // bodies on those are unreliable through proxies. It has to be sent
+        // and it has to match what the run was started with: a guest is
+        // identified by the name they are running under, and a cancel that
+        // forgets to say who it is arrives as somebody else entirely.
+        const claimed = typeof req.query.as === 'string' ? req.query.as.trim().slice(0, 32) : ''
+
         const outcome = await cancelExecution({
           executionId: req.params.executionId,
           user: req.user
             ? { id: req.user.id, name: req.user.name }
-            : req.body?.as
-              ? { id: null, name: req.body.as }
+            : claimed
+              ? { id: null, name: claimed }
               : null,
           canCancelAnything: owns,
         })

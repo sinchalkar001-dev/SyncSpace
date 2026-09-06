@@ -284,12 +284,16 @@ export const api = {
    * Answers `{ cancelled: false }` rather than failing when the program has
    * already finished, so a Cancel pressed at the last moment is not an error.
    */
-  cancelRun: (roomId, executionId) =>
+  cancelRun: (roomId, executionId, as) =>
     apiFetch(
       '/rooms/' +
         encodeURIComponent(roomId) +
         '/executions/' +
-        encodeURIComponent(executionId),
+        encodeURIComponent(executionId) +
+        // The same name the run was started under. A guest has no id, so this
+        // is the only thing that says the program is theirs to stop —
+        // omitting it makes a guest a stranger to their own run.
+        (as ? '?as=' + encodeURIComponent(as) : ''),
       { method: 'DELETE' }
     ),
 
