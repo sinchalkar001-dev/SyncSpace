@@ -147,6 +147,19 @@ one thing the app itself will never tell you.
 | `MAIL_FROM` | `SMTP_USER` | From-header, e.g. `SyncSpace <no-reply@syncspace.example>`. Required when the login is not itself an address |
 | `CLIENT_URL` | first `CORS_ORIGIN` | Absolute origin the emailed links point at |
 
+**Keeping credentials out of the repository.** A gitignore only lists the mistakes somebody already
+thought of — `server/uploads/` was missing from it until a test run staged the files it had written
+there. So `scripts/scan-secrets.js` looks at what is actually about to be committed: it refuses any
+`.env` by name, and refuses content matching the shapes that are unambiguous (Google `AIza…`,
+Anthropic `sk-ant-…`, AWS, GitHub, Slack, private-key blocks, JWTs), plus any long opaque value
+assigned to a `KEY`/`SECRET`/`TOKEN`/`PASSWORD` name inside an env file.
+
+It runs two places. `npm install` points `core.hooksPath` at `.githooks/`, so the pre-commit hook is
+versioned and reviewable rather than living unversioned in `.git/hooks` — and CI runs the same scan
+over every tracked file, because a hook lives on one machine and `--no-verify` is one flag away.
+A deliberate fixture can carry `secret-scan: allow` on its line or the one above it. Run it by hand
+with `npm run scan:secrets`.
+
 Credentials live only in the environment — never in code or logs. Delivery failures are logged with
 a masked recipient and an error code only, and the resend endpoint reports "sent" without exposing
 provider state. A relay outage never fails sign-up or an invite: the account and the membership

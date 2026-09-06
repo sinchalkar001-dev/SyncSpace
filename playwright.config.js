@@ -69,7 +69,9 @@ export default defineConfig({
          * without one, so forgetting to send it fails here rather than
          * passing quietly.
          */
-        ANTHROPIC_API_KEY: 'sk-ant-test-not-a-real-credential',
+        // A deliberate fake, shaped like a real key so the provider is
+        // inferred correctly. The stub is the only thing it ever reaches.
+        ANTHROPIC_API_KEY: 'sk-ant-test-not-a-real-credential', // secret-scan: allow
         AI_BASE_URL: MODEL_STUB,
         AI_ENABLED: 'true',
         // The suite runs the client on 5180, not the 5173 the server allows by

@@ -16,6 +16,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # First, and deliberately cheap: a pushed credential is public from the
+  # moment it lands, and no amount of history rewriting takes it back. The
+  # pre-commit hook catches this earlier, but a hook lives on one machine and
+  # `--no-verify` is one flag away — this is the copy that cannot be skipped.
+  secrets:
+    name: Secrets — nothing credential-shaped in the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scan every tracked file
+        run: npm run scan:secrets
+
+      - name: The scanner's own tests
+        run: npx vitest run scripts/scan-secrets.test.js --environment node
+
   client:
     name: Client — lint, test, build
     runs-on: ubuntu-latest

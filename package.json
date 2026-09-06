@@ -16,7 +16,10 @@
     "dev:server": "npm run dev --workspace server",
     "dev:server:memory": "npm run dev:memory --workspace server",
     "test": "npm run test --workspace server",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "scan:secrets": "node scripts/scan-secrets.js --all",
+    "test:secrets": "vitest run scripts/scan-secrets.test.js --environment node",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "engines": {
     "node": ">=20"

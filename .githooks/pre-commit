@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# Refuses a commit that carries a credential.
+#
+# Enabled by `core.hooksPath`, which the root package.json sets from its
+# `prepare` script — so `npm install` is all a new clone needs, and the hook is
+# reviewable in the repository rather than living unversioned in .git/hooks.
+#
+# It reads the *staged* content, not the working tree: what is about to be
+# committed is the only thing that matters, and `git add -p` makes those two
+# different more often than people expect.
+#
+# To get past it in an emergency: `git commit --no-verify`. If you do that with
+# a real key staged, rotate the key.
+
+exec node scripts/scan-secrets.js
