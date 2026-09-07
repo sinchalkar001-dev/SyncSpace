@@ -1,7 +1,8 @@
 import { useAuth } from '../auth/useAuth.js'
 import { useRoomPeople } from '../hooks/useRoomPeople.js'
 import { formatWhen, roomLabel } from '../lib/rooms.js'
-import { InviteForm, PersonRow } from './PeopleList.jsx'
+import { InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../hooks/useRoomAccess.js'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 import { Icon } from './ui/Icon.jsx'
@@ -29,11 +30,14 @@ function PeopleSkeleton() {
  * from real visits, so it includes guests who never had an account. The owner
  * also gets the controls: invite by email, put somebody out, let them back.
  */
-export function RoomPeopleDialog({ room, open, onClose }) {
+export function RoomPeopleDialog({ room, open, onClose, access }) {
   const { user } = useAuth()
-  const { state, people, error, pending, invite, remove, allow, cancelInvite } = useRoomPeople(room?.roomId, {
-    enabled: open && Boolean(room),
-  })
+  const { state, people, error, pending, invite, remove, allow, cancelInvite, setRole } =
+    useRoomPeople(room?.roomId, { enabled: open && Boolean(room) })
+
+  // What this person may hand out, straight from the server. Empty for anyone
+  // who cannot manage roles, which is what removes the control entirely.
+  const assignable = access?.assignable ?? []
 
   const isOwner = Boolean(room?.owner && user?.id && room.owner === user.id)
 
@@ -64,7 +68,20 @@ export function RoomPeopleDialog({ room, open, onClose }) {
                   key={member.id}
                   name={member.name}
                   detail={member.email}
-                  tag={member.role}
+                  tag={
+                    member.id === room.owner ? (
+                      ROLE_LABELS.owner
+                    ) : (
+                      <RoleSelect
+                        value={member.role}
+                        options={assignable}
+                        busy={pending === member.id}
+                        onChange={(role) => setRole(member, role)}
+                        labels={ROLE_LABELS}
+                        descriptions={ROLE_DESCRIPTIONS}
+                      />
+                    )
+                  }
                   action={
                     isOwner && member.id !== room.owner
                       ? {

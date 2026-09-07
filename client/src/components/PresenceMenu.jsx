@@ -4,7 +4,8 @@ import { useDismissable } from '../hooks/useDismissable.js'
 import { useRoomPeople } from '../hooks/useRoomPeople.js'
 import { useToast } from './ui/useToast.js'
 import { PresenceBar } from './PresenceBar.jsx'
-import { InviteForm, PersonRow } from './PeopleList.jsx'
+import { InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../hooks/useRoomAccess.js'
 import { Button } from './ui/Button.jsx'
 import { Icon } from './ui/Icon.jsx'
 import { Skeleton } from './ui/Skeleton.jsx'
@@ -22,7 +23,7 @@ import { Skeleton } from './ui/Skeleton.jsx'
  * count on the trigger exactly. The invited half needs the roster endpoint,
  * which is members-only — hence `useRoomPeople` being switched off for guests.
  */
-export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) {
+export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, access }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -33,7 +34,8 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
   useDismissable(open, close, { containerRef, triggerRef, captureEscape: true })
 
   const isOwner = Boolean(room?.owner && user?.id && room.owner === user.id)
-  const { state, people, error, pending, invite, remove, allow, cancelInvite } = useRoomPeople(roomId, {
+  const assignable = access?.assignable ?? []
+  const { state, people, error, pending, invite, remove, allow, cancelInvite, setRole } = useRoomPeople(roomId, {
     enabled: open && Boolean(user?.id),
   })
 
@@ -149,7 +151,20 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange }) 
                     key={member.id}
                     name={member.name}
                     detail={member.email}
-                    tag={member.role}
+                    tag={
+                      member.id === room?.owner ? (
+                        ROLE_LABELS.owner
+                      ) : (
+                        <RoleSelect
+                          value={member.role}
+                          options={assignable}
+                          busy={pending === member.id}
+                          onChange={(role) => setRole(member, role)}
+                          labels={ROLE_LABELS}
+                          descriptions={ROLE_DESCRIPTIONS}
+                        />
+                      )
+                    }
                     muted
                     action={
                       isOwner && member.id !== room?.owner

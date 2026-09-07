@@ -1,7 +1,8 @@
 import { Hocuspocus } from '@hocuspocus/server'
 import { MongoPersistence } from './persistence.js'
 import { authenticate } from '../services/auth.service.js'
-import { canAccess, ensureRoom } from '../services/room.service.js'
+import { ensureRoom } from '../services/room.service.js'
+import { CAPABILITIES, can, roleFor } from '../permissions.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 
@@ -16,6 +17,34 @@ function refuse(reason) {
   const error = new Error(reason)
   error.reason = reason
   return error
+}
+
+
+/**
+ * Marks the connection read-only unless this person may change the document.
+ *
+ * This is the enforcement that matters most in the whole permission system.
+ * Every REST guard in the codebase could be perfect and a viewer would still
+ * be able to rewrite the room, because the whiteboard and the code buffer do
+ * not travel over REST at all — they are Yjs updates on this socket. Hiding
+ * the toolbar in the client is decoration; this is the part that says no.
+ *
+ * Hocuspocus enforces it by dropping incoming updates from a read-only
+ * connection rather than by closing it, which is the behaviour worth having:
+ * a viewer stays connected, keeps receiving everybody else's edits, and simply
+ * cannot contribute any.
+ *
+ * One limitation, stated because it is invisible otherwise: the whiteboard and
+ * the code buffer share a single Yjs document, so there is one flag for both.
+ * A role that could draw but not type could not be enforced here without
+ * splitting the document. No current role needs that — every role that can
+ * edit one can edit the other — but a future one would have to.
+ */
+function applyWriteAccess(connection, room, userId) {
+  const mayWrite =
+    can(room, userId, CAPABILITIES.CODE_EDIT) || can(room, userId, CAPABILITIES.WHITEBOARD_EDIT)
+
+  if (connection && !mayWrite) connection.readOnly = true
 }
 
 /**
@@ -34,7 +63,7 @@ export function createHocuspocus() {
      * Throwing here rejects the connection and the client receives
      * `authenticationFailed`. The document name is the room id.
      */
-    async onAuthenticate({ token, documentName }) {
+    async onAuthenticate({ token, documentName, connection }) {
       const { user, revoked } = await authenticate(token)
       const room = await ensureRoom(documentName)
 
@@ -50,16 +79,20 @@ export function createHocuspocus() {
       if (!user) {
         if (!env.ALLOW_ANONYMOUS) throw refuse('Sign in to open this room')
         if (!room.isPublic) throw refuse('This room is private — ask its owner for an invite')
-        return { user: { id: null, name: 'Guest', anonymous: true } }
+
+        applyWriteAccess(connection, room, null)
+        return { user: { id: null, name: 'Guest', anonymous: true }, role: roleFor(room, null) }
       }
 
       if (room.isBlocked(user.id)) {
         throw refuse('You were removed from this room by its owner')
       }
 
-      if (!canAccess(room, user.id)) {
+      if (!can(room, user.id, CAPABILITIES.ROOM_VIEW)) {
         throw refuse('This room is private and you are not on its guest list')
       }
+
+      applyWriteAccess(connection, room, user.id)
 
       /**
        * The session id travels with the connection so signing out one device
@@ -69,6 +102,7 @@ export function createHocuspocus() {
        */
       return {
         user: { id: user.id, name: user.name, anonymous: false },
+        role: roleFor(room, user.id),
         sessionId: user.sessionId,
       }
     },

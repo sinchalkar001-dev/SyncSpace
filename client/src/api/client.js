@@ -258,6 +258,26 @@ export const api = {
       method: 'DELETE',
     }),
 
+  /**
+   * Changes what somebody may do in a room.
+   *
+   * Refused by the server when the role is at or above the caller's own — the
+   * dropdown only offers what `access.assignable` lists, but the rule that
+   * matters is the one on the other end.
+   */
+  setMemberRole: (roomId, userId, role) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/members/' + encodeURIComponent(userId),
+      { method: 'PATCH', body: { role } }
+    ),
+
+  /** Hands the room to another member. The previous owner becomes an admin. */
+  transferRoom: (roomId, userId) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/transfer', {
+      method: 'POST',
+      body: { userId },
+    }),
+
   /** Undoes a removal. */
   unblockMember: (roomId, userId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/blocked/' + encodeURIComponent(userId), {

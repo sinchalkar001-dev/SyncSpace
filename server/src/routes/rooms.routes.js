@@ -4,7 +4,6 @@ import { validate } from '../middleware/validate.js'
 import { optionalAuth, requireAuth } from '../middleware/auth.js'
 import {
   cancelPendingInvite,
-  canAccess,
   createRoom,
   deleteRoom,
   ensureRoom,
@@ -13,6 +12,8 @@ import {
   listPeople,
   listRoomsForUser,
   removeMember,
+  setMemberRole,
+  transferOwnership,
   unblockMember,
   updateRoom,
 } from '../services/room.service.js'
@@ -36,6 +37,8 @@ import { getIo } from '../realtime/registry.js'
 import { env } from '../config/env.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
+import { CAPABILITIES, ROLE_NAMES, ROLES, can, describeAccess } from '../permissions.js'
+import { refusalFor } from '../middleware/permissions.js'
 
 const createSchema = z.object({
   name: z.string().trim().max(80).optional(),
@@ -83,6 +86,16 @@ const runSchema = z.object({
   as: z.string().trim().max(32).optional(),
 })
 
+const roleSchema = z.object({
+  // Ownership is deliberately absent: it moves by transfer, never by editing
+  // a membership row.
+  role: z.enum(ROLE_NAMES.filter((name) => name !== ROLES.OWNER)),
+})
+
+const transferSchema = z.object({
+  userId: z.string().regex(/^[a-f\d]{24}$/i, 'must be a user id'),
+})
+
 const USER_ID = /^[a-f\d]{24}$/i
 
 /**
@@ -95,7 +108,7 @@ const inviteSchema = z
   .object({
     userId: z.string().regex(USER_ID, 'must be a user id').optional(),
     email: z.string().trim().max(254).email('must be an email address').optional(),
-    role: z.enum(['editor', 'viewer']).optional(),
+    role: z.enum(ROLE_NAMES.filter((role) => role !== ROLES.OWNER)).optional(),
   })
   .refine((value) => Boolean(value.userId) !== Boolean(value.email), {
     message: 'provide either a userId or an email',
@@ -112,7 +125,7 @@ function userIdParam(req) {
 /** Shared guard: the room must exist and be readable by the caller. */
 async function loadAccessibleRoom(req) {
   const room = await getRoom(req.params.roomId)
-  if (!canAccess(room, req.user?.id)) {
+  if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
     throw forbidden('You do not have access to this room', 'room_forbidden')
   }
   return room
@@ -125,7 +138,7 @@ async function loadAccessibleRoom(req) {
  */
 async function loadRosterRoom(req) {
   const room = await getRoom(req.params.roomId)
-  const allowed = room.owner ? room.hasMember(req.user.id) : canAccess(room, req.user.id)
+  const allowed = room.owner ? room.hasMember(req.user.id) : can(room, req.user.id, CAPABILITIES.ROOM_VIEW)
   if (!allowed) throw forbidden('You do not have access to this room', 'room_forbidden')
   return room
 }
@@ -159,7 +172,13 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId', optionalAuth, async (req, res, next) => {
     try {
       const room = await loadAccessibleRoom(req)
-      res.json({ room: room.toPublic() })
+      /**
+       * The capabilities travel with the room so the interface can hide what
+       * it cannot do rather than offering buttons that fail. The client is
+       * sent the list rather than the role alone — a second copy of the
+       * role-to-capability mapping is a second thing to get out of step.
+       */
+      res.json({ room: room.toPublic(), access: describeAccess(room, req.user?.id) })
     } catch (err) {
       next(err)
     }
@@ -218,6 +237,60 @@ export function createRoomsRouter() {
           role: req.body.role,
         })
         res.json({ room: room.toPublic(), invited })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /**
+   * Changes what somebody may do in this room.
+   *
+   * Two separate refusals, deliberately. Not being allowed to manage roles at
+   * all is `not_owner`; being allowed to, but not to hand out *that* role to
+   * *that* person, is `role_forbidden` — which is the one an admin meets when
+   * they try to appoint a second admin, and the difference matters to whoever
+   * is reading the message.
+   */
+  roomsRouter.patch(
+    '/:roomId/members/:userId',
+    requireAuth,
+    validate(roleSchema),
+    async (req, res, next) => {
+      try {
+        const room = await setMemberRole({
+          roomId: req.params.roomId,
+          actorId: req.user.id,
+          userId: userIdParam(req),
+          role: req.body.role,
+        })
+        res.json({ room: room.toPublic(), people: await listPeople(req.params.roomId) })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /**
+   * Hands the room to somebody else.
+   *
+   * Separate from role assignment on purpose: ownership carries the two powers
+   * an admin is deliberately denied, so moving it is one explicit act rather
+   * than a value in a dropdown somebody picks by accident. The previous owner
+   * stays on as an admin.
+   */
+  roomsRouter.post(
+    '/:roomId/transfer',
+    requireAuth,
+    validate(transferSchema),
+    async (req, res, next) => {
+      try {
+        const room = await transferOwnership({
+          roomId: req.params.roomId,
+          actorId: req.user.id,
+          userId: req.body.userId,
+        })
+        res.json({ room: room.toPublic(), people: await listPeople(req.params.roomId) })
       } catch (err) {
         next(err)
       }
@@ -332,7 +405,7 @@ export function createRoomsRouter() {
         // "Room not found" on the first Run of a brand new room is nonsense.
         // The socket layer treats a join the same way.
         const room = await ensureRoom(req.params.roomId)
-        if (!canAccess(room, req.user?.id)) {
+        if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
           throw forbidden('You do not have access to this room', 'room_forbidden')
         }
 
@@ -344,6 +417,10 @@ export function createRoomsRouter() {
           : req.body.as
             ? { id: null, name: req.body.as }
             : null
+
+        if (!can(room, req.user?.id, CAPABILITIES.CODE_EXECUTE)) {
+          throw refusalFor(room, req.user?.id, CAPABILITIES.CODE_EXECUTE)
+        }
 
         const run = await runCode({
           language: req.body.language,
@@ -389,7 +466,7 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/executions', optionalAuth, runLimiter, async (req, res, next) => {
     try {
       const room = await ensureRoom(req.params.roomId)
-      if (!canAccess(room, req.user?.id)) {
+      if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
         throw forbidden('You do not have access to this room', 'room_forbidden')
       }
 
@@ -403,7 +480,7 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/executions/:executionId', optionalAuth, async (req, res, next) => {
     try {
       const room = await ensureRoom(req.params.roomId)
-      if (!canAccess(room, req.user?.id)) {
+      if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
         throw forbidden('You do not have access to this room', 'room_forbidden')
       }
 
@@ -435,7 +512,7 @@ export function createRoomsRouter() {
     async (req, res, next) => {
       try {
         const room = await ensureRoom(req.params.roomId)
-        if (!canAccess(room, req.user?.id)) {
+        if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
           throw forbidden('You do not have access to this room', 'room_forbidden')
         }
 
@@ -484,7 +561,7 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/architecture', optionalAuth, async (req, res, next) => {
     try {
       const room = await ensureRoom(req.params.roomId)
-      if (!canAccess(room, req.user?.id)) {
+      if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
         throw forbidden('You do not have access to this room', 'room_forbidden')
       }
 
@@ -510,8 +587,12 @@ export function createRoomsRouter() {
     async (req, res, next) => {
       try {
         const room = await ensureRoom(req.params.roomId)
-        if (!canAccess(room, req.user.id)) {
+        if (!can(room, req.user.id, CAPABILITIES.ROOM_VIEW)) {
           throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        if (!can(room, req.user.id, CAPABILITIES.AI_GENERATE)) {
+          throw refusalFor(room, req.user.id, CAPABILITIES.AI_GENERATE)
         }
 
         const generation = await runGeneration({
@@ -554,7 +635,7 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/generations', requireAuth, async (req, res, next) => {
     try {
       const room = await ensureRoom(req.params.roomId)
-      if (!canAccess(room, req.user.id)) {
+      if (!can(room, req.user.id, CAPABILITIES.ROOM_VIEW)) {
         throw forbidden('You do not have access to this room', 'room_forbidden')
       }
 
@@ -568,7 +649,7 @@ export function createRoomsRouter() {
   roomsRouter.get('/:roomId/generations/:generationId', requireAuth, async (req, res, next) => {
     try {
       const room = await ensureRoom(req.params.roomId)
-      if (!canAccess(room, req.user.id)) {
+      if (!can(room, req.user.id, CAPABILITIES.ROOM_VIEW)) {
         throw forbidden('You do not have access to this room', 'room_forbidden')
       }
 
@@ -596,8 +677,12 @@ export function createRoomsRouter() {
     async (req, res, next) => {
       try {
         const room = await ensureRoom(req.params.roomId)
-        if (!canAccess(room, req.user.id)) {
+        if (!can(room, req.user.id, CAPABILITIES.ROOM_VIEW)) {
           throw forbidden('You do not have access to this room', 'room_forbidden')
+        }
+
+        if (!can(room, req.user.id, CAPABILITIES.CODE_EDIT)) {
+          throw refusalFor(room, req.user.id, CAPABILITIES.CODE_EDIT)
         }
 
         const result = await applyGeneration({

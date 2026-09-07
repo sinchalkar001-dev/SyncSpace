@@ -186,7 +186,10 @@ describe('dashboard room management', () => {
     expect(within(dialog).getByText('Candidate')).toBeInTheDocument()
     expect(within(dialog).getByText(/3 visits/)).toBeInTheDocument()
     expect(within(dialog).getByText('guest')).toBeInTheDocument()
-    expect(within(dialog).getByText('owner')).toBeInTheDocument()
+    // The role tag specifically, not any text reading "Owner": roles now
+    // render as labels rather than the raw stored value, and this fixture's
+    // member happens to be named Owner too, so a plain text match finds both.
+    expect(dialog.querySelector('.people__tag')?.textContent).toBe('Owner')
   })
 
   it('offers rename and a visibility switch in the menu', async () => {

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { Server as SocketServer } from 'socket.io'
 import { z } from 'zod'
 import { authenticate } from '../services/auth.service.js'
-import { canAccess, ensureRoom, recordParticipant } from '../services/room.service.js'
+import { ensureRoom, recordParticipant } from '../services/room.service.js'
+import { CAPABILITIES, can, describeAccess, roleFor } from '../permissions.js'
 import { env } from '../config/env.js'
 import { isAllowedOrigin } from '../config/cors.js'
 import { logger } from '../config/logger.js'
@@ -22,6 +23,17 @@ const chatSchema = z.object({
   roomId: z.string().min(1).max(64),
   text: z.string().trim().min(1).max(2000),
 })
+
+
+/**
+ * The account behind a socket, or null for a guest.
+ *
+ * A guest is given a random id so presence can tell two of them apart, and
+ * that id must never be mistaken for an account: passing it to the permission
+ * model would make a guest look like a member who simply is not in the list,
+ * and quietly grant them everything the room gives to signed-in strangers.
+ */
+const actorOf = (socket) => (socket.data.user?.anonymous ? null : socket.data.user?.id ?? null)
 
 /** Everyone currently in a Socket.io room, as plain objects. */
 async function roster(io, roomId) {
@@ -103,10 +115,14 @@ export function createSocketServer(httpServer) {
       const { roomId } = parsed.data
       const room = await ensureRoom(roomId)
 
-      if (!canAccess(room, socket.data.user.id)) {
+      if (!can(room, actorOf(socket), CAPABILITIES.ROOM_VIEW)) {
         ack?.({ ok: false, error: 'forbidden' })
         return
       }
+
+      // Kept so presence can show what each person may do, and so the client
+      // knows its own standing without a second request.
+      socket.data.role = roleFor(room, actorOf(socket))
 
       // A guest may pick a display name when joining. An authenticated socket
       // always keeps the name from its token, so nobody can spoof an identity.
@@ -124,7 +140,14 @@ export function createSocketServer(httpServer) {
 
       socket.to(roomId).emit('room:joined', { user: socket.data.user, socketId: socket.id })
       io.to(roomId).emit('room:presence', { roomId, members: await roster(io, roomId) })
-      ack?.({ ok: true, room: room.toPublic() })
+      /**
+       * The join carries what this person may do, and it is the only place
+       * that can for an ad-hoc room: `GET /rooms/:roomId` answers 404 until
+       * something writes the record, so a room typed into the address bar has
+       * no capabilities to report over REST. The socket has already ensured
+       * the room exists, which is exactly the moment the answer becomes real.
+       */
+      ack?.({ ok: true, room: room.toPublic(), access: describeAccess(room, actorOf(socket)) })
 
       logger.debug({ room: roomId, socket: socket.id }, 'socket joined room')
     })
@@ -137,7 +160,7 @@ export function createSocketServer(httpServer) {
       io.to(target).emit('room:presence', { roomId: target, members: await roster(io, target) })
     })
 
-    socket.on('room:chat', (payload, ack) => {
+    socket.on('room:chat', async (payload, ack) => {
       const parsed = chatSchema.safeParse(payload)
       if (!parsed.success) {
         ack?.({ ok: false, error: 'invalid_payload' })
@@ -145,6 +168,22 @@ export function createSocketServer(httpServer) {
       }
       if (socket.data.roomId !== parsed.data.roomId) {
         ack?.({ ok: false, error: 'not_in_room' })
+        return
+      }
+
+      /**
+       * Asked again here rather than trusted from the join.
+       *
+       * A connection can outlive the permission that opened it — somebody
+       * demoted to viewer mid-session still holds an open socket, and a role
+       * checked once at join would let them keep talking for as long as they
+       * stay connected. One indexed read per message is the price of the
+       * answer being current.
+       */
+      const room = await ensureRoom(parsed.data.roomId)
+
+      if (!can(room, actorOf(socket), CAPABILITIES.CHAT_SEND)) {
+        ack?.({ ok: false, error: 'permission_denied', message: 'You cannot send messages in this room' })
         return
       }
 

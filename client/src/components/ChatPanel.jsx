@@ -26,7 +26,7 @@ const at = (iso) => {
  * Nothing is persisted, on either side — the transcript starts empty on join,
  * and the panel says so rather than looking broken.
  */
-export function ChatPanel({ messages, unread, onSend, open, onOpenChange }) {
+export function ChatPanel({ messages, unread, onSend, open, onOpenChange, canSend = true }) {
   const [draft, setDraft] = useState('')
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
@@ -99,17 +99,26 @@ export function ChatPanel({ messages, unread, onSend, open, onOpenChange }) {
             )}
           </div>
 
+          {/* Disabled rather than removed: a compose box that vanishes reads
+              as a broken panel, while one that says why reads as a rule. The
+              server refuses the message either way. */}
           <form className="chat__compose" onSubmit={submit}>
             <input
               ref={inputRef}
               className="input"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Message the room"
+              placeholder={canSend ? 'Message the room' : 'Your role here does not allow chatting'}
               aria-label="Message the room"
               maxLength={2000}
+              disabled={!canSend}
             />
-            <Button type="submit" variant="primary" icon="arrowRight" disabled={!draft.trim()}>
+            <Button
+              type="submit"
+              variant="primary"
+              icon="arrowRight"
+              disabled={!canSend || !draft.trim()}
+            >
               Send
             </Button>
           </form>

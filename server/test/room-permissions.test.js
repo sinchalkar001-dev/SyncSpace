@@ -180,10 +180,13 @@ describe('invite validation', () => {
     const bob = (await register(BOB)).body
     const room = await makeRoom(alice.token)
 
+    // `admin` used to be rejected here because it was not a role at all. It is
+    // one now, so the invalid value has to be something genuinely invented —
+    // and an owner inviting an admin is tested below as the success it is.
     const res = await request(app)
       .post('/api/v1/rooms/' + room.roomId + '/invite')
       .set(auth(alice.token))
-      .send({ userId: bob.user.id, role: 'admin' })
+      .send({ userId: bob.user.id, role: 'superuser' })
     expect(res.status).toBe(400)
     expect(res.body.error.code).toBe('validation_failed')
   })

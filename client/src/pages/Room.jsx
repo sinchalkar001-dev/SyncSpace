@@ -6,6 +6,7 @@ import { useUIStore } from '../store/uiStore.js'
 import { useAuth } from '../auth/useAuth.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useCodeRunner } from '../hooks/useCodeRunner.js'
+import { CAP, useRoomAccess } from '../hooks/useRoomAccess.js'
 import { useAwareness } from '../hooks/useAwareness.js'
 import { useRoomSocket } from '../hooks/useRoomSocket.js'
 import { useToast } from '../components/ui/useToast.js'
@@ -70,6 +71,7 @@ export default function Room() {
 
   const [copied, setCopied] = useState(false)
   const [room, setRoom] = useState(null)
+  const access = useRoomAccess()
   const paneMode = useUIStore((state) => state.paneMode)
   const setPaneMode = useUIStore((state) => state.setPaneMode)
   const setTool = useUIStore((state) => state.setTool)
@@ -206,7 +208,18 @@ export default function Room() {
 
   // The same socket carries presence, runs and chat, so the panel sends on the
   // connection the room already has rather than opening one of its own.
-  const liveSocket = useRoomSocket(roomId, identity, token, socketHandlers)
+  /**
+   * The join tells us what this person may do here.
+   *
+   * The REST read does too, but it answers 404 for a room nobody has written
+   * a record for yet — which is every room opened by typing its URL. Taking
+   * the answer from both means an ad-hoc room is not stuck with everything
+   * disabled while it waits for a record that only the join creates.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onJoined = useCallback((ack) => access.receive(ack?.access), [access.receive])
+
+  const liveSocket = useRoomSocket(roomId, identity, token, socketHandlers, onJoined)
   socketRef.current = liveSocket.current
 
   // A dropped connection is worth telling the user about; a restored one too.
@@ -229,10 +242,19 @@ export default function Room() {
     const controller = new AbortController()
     api
       .getRoom(roomId, controller.signal)
-      .then((payload) => setRoom(payload.room))
+      .then((payload) => {
+        setRoom(payload.room)
+        // What this person may do arrives with the room, so the interface
+        // never has to work it out from a role name of its own.
+        access.receive(payload.access)
+      })
       .catch(() => setRoom(null))
     return () => controller.abort()
-  }, [roomId])
+    // `access.receive` rather than `access`: the object is rebuilt whenever the
+    // capabilities change, and depending on it would refetch the room every
+    // time the answer arrived — including the refetch that caused it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, access.receive])
 
   const onCopy = useCallback(async () => {
     try {
@@ -481,6 +503,7 @@ export default function Room() {
             peers={peers}
             user={user}
             onRoomChange={setRoom}
+            access={access}
           />
           <ChatPanel
             messages={chat.messages}
@@ -488,10 +511,17 @@ export default function Room() {
             onSend={chat.send}
             open={chatOpen}
             onOpenChange={setChatOpen}
+            canSend={access.can(CAP.CHAT_SEND)}
           />
           {/* Every file route is behind requireAuth, so a guest is told why
               rather than shown a panel that can only fail. */}
-          <FilesPanel roomId={roomId} user={user} canUse={isAuthenticated} />
+          <FilesPanel
+            roomId={roomId}
+            user={user}
+            canUse={isAuthenticated}
+            canUpload={access.can(CAP.FILES_UPLOAD)}
+            canDelete={access.can(CAP.FILES_DELETE)}
+          />
           {/* Turning the board into code. Generating needs an account — it
               spends a real request and is recorded against whoever asked —
               so a guest is told that rather than shown a button that fails. */}
@@ -543,6 +573,7 @@ export default function Room() {
               undoManager={session.undoManager}
               peers={peers}
               user={identity}
+              readOnly={!access.can(CAP.WHITEBOARD_EDIT)}
             />
           }
           right={
@@ -553,6 +584,9 @@ export default function Room() {
               status={status}
               synced={synced}
               runner={runner}
+              canEdit={access.can(CAP.CODE_EDIT)}
+              canExecute={access.can(CAP.CODE_EXECUTE)}
+              accessLoaded={access.loaded}
             />
           }
         />

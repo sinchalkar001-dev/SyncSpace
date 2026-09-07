@@ -1,9 +1,10 @@
 import mongoose from 'mongoose'
+import { ROLES, ROLE_NAMES } from '../permissions.js'
 
 const memberSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    role: { type: String, enum: ['owner', 'editor', 'viewer'], default: 'editor' },
+    role: { type: String, enum: ROLE_NAMES, default: ROLES.EDITOR },
   },
   { _id: false }
 )
@@ -33,7 +34,12 @@ const blockedSchema = new mongoose.Schema(
 const pendingInviteSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, lowercase: true, trim: true },
-    role: { type: String, enum: ['editor', 'viewer'], default: 'editor' },
+    // Ownership is never handed out by invitation; it moves only by transfer.
+    role: {
+      type: String,
+      enum: ROLE_NAMES.filter((role) => role !== ROLES.OWNER),
+      default: ROLES.EDITOR,
+    },
     invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     at: { type: Date, default: Date.now },
   },
@@ -52,6 +58,21 @@ const roomSchema = new mongoose.Schema(
     // Rooms created ad hoc by opening a URL are public. Rooms created through
     // the API belong to their owner and are invite-only.
     isPublic: { type: Boolean, default: true },
+
+    /**
+     * What somebody with no account gets in a public room.
+     *
+     * Editor, because that is what a public room has always granted and
+     * quietly demoting every existing guest to read-only would break rooms
+     * that work today. It is a field rather than a constant so an owner can
+     * express "anyone may watch, nobody may touch" — which was not something
+     * the room could say before.
+     */
+    guestRole: {
+      type: String,
+      enum: ROLE_NAMES.filter((role) => role !== ROLES.OWNER && role !== ROLES.ADMIN),
+      default: ROLES.EDITOR,
+    },
     lastActivityAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

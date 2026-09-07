@@ -18,18 +18,23 @@ const ENABLED = import.meta.env.VITE_ENABLE_ROOM_SOCKET !== 'false'
  * tearing down the connection — reconnecting on every keystroke in the room
  * would drop presence and lose messages.
  */
-export function useRoomSocket(roomId, user, token, handlers) {
+export function useRoomSocket(roomId, user, token, handlers, onJoined) {
   const socketRef = useRef(null)
   const handlersRef = useRef(handlers)
+  // Read at connect time for the same reason as the handlers: the caller may
+  // pass a fresh function every render, and a new connection per render would
+  // drop presence and lose messages.
+  const joinedRef = useRef(onJoined)
 
   useEffect(() => {
     handlersRef.current = handlers
+    joinedRef.current = onJoined
   })
 
   useEffect(() => {
     if (!ENABLED || !roomId) return undefined
 
-    const socket = createRoomSocket({ roomId, user, token })
+    const socket = createRoomSocket({ roomId, user, token, onJoined: (ack) => joinedRef.current?.(ack) })
     socketRef.current = socket
 
     // One listener for everything: which events matter is the caller's

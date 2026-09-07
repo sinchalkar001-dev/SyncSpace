@@ -63,6 +63,9 @@ export function CodeEditor({
   status = 'connecting',
   synced = false,
   runner,
+  canEdit = true,
+  canExecute = true,
+  accessLoaded = true,
 }) {
   const bindingRef = useRef(null)
   const editorRef = useRef(null)
@@ -104,8 +107,20 @@ export function CodeEditor({
       matchBrackets: 'always',
       renderWhitespace: 'selection',
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+
+      /**
+       * Read-only until the server says otherwise, and again while the answer
+       * is still in flight — a buffer that accepts keystrokes and then drops
+       * them on the Yjs connection is worse than one that never invited them.
+       *
+       * This is a courtesy, not the control. The connection itself is opened
+       * read-only for anybody without `code:edit`, so an editor made writable
+       * in devtools still changes nothing anybody else sees.
+       */
+      readOnly: !canEdit || !accessLoaded,
+      domReadOnly: !canEdit || !accessLoaded,
     }),
-    [editorPrefs]
+    [editorPrefs, canEdit, accessLoaded]
   )
 
   const handleMount = useCallback(
@@ -161,7 +176,13 @@ export function CodeEditor({
 
   // blocker() answers null when the language can run, so this cannot be a ??
   // — that would read "nothing is wrong" as a reason to disable the button.
-  const blocker = runner ? runner.blocker(language) : 'Running code is unavailable'
+  const blocker = !canExecute
+    ? accessLoaded
+      ? 'Your role in this room does not allow running code'
+      : 'Checking what you can do here…'
+    : runner
+      ? runner.blocker(language)
+      : 'Running code is unavailable'
   const running = runner?.status === 'running'
 
   const run = useCallback(() => {

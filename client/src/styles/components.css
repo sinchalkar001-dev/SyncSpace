@@ -2426,3 +2426,28 @@
     grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
+
+/*
+  The role control in a roster row.
+
+  Sized to sit where the plain text tag used to, so a row with a select and a
+  row with "Owner" line up rather than stepping around each other.
+*/
+.people__role {
+  display: inline-flex;
+  flex: none;
+}
+
+.people__role-select {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.people__role-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

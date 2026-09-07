@@ -164,5 +164,42 @@ export function useRoomPeople(roomId, { enabled = true } = {}) {
     [act, roomId]
   )
 
-  return { state, people, error, pending, reload: load, invite, remove, allow, cancelInvite }
+  /**
+   * Changes somebody's role.
+   *
+   * The response carries the fresh roster, so the list updates from what the
+   * server actually recorded rather than from what the dropdown assumed — the
+   * two differ whenever the change was refused for a reason the client could
+   * not see.
+   */
+  const setRole = useCallback(
+    async (member, role) => {
+      setPending(member.id)
+      try {
+        const payload = await api.setMemberRole(roomId, member.id, role)
+        if (payload?.people) setPeople(payload.people)
+        toast.success(member.name + ' is now ' + role)
+        return true
+      } catch (cause) {
+        toast.error(cause?.message || 'Could not change that role')
+        return false
+      } finally {
+        setPending(null)
+      }
+    },
+    [roomId, toast]
+  )
+
+  return {
+    state,
+    people,
+    error,
+    pending,
+    reload: load,
+    invite,
+    remove,
+    allow,
+    cancelInvite,
+    setRole,
+  }
 }

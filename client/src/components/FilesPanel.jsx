@@ -18,7 +18,7 @@ import { ACCEPTS, formatSize, iconFor, MAX_BYTES, rejectionFor } from '../lib/fi
  * Every route here needs an account, so a guest sees the button explain that
  * rather than a panel that can only fail.
  */
-export function FilesPanel({ roomId, user, canUse = true }) {
+export function FilesPanel({ roomId, user, canUse = true, canUpload = true, canDelete = true }) {
   const [open, setOpen] = useState(false)
   const [rejected, setRejected] = useState(null)
   const containerRef = useRef(null)
@@ -104,7 +104,10 @@ export function FilesPanel({ roomId, user, canUse = true }) {
                     // Deleting is the uploader's or the owner's to do; the
                     // server enforces it, and offering it to anyone else would
                     // be a button that only ever fails.
-                    const mine = user?.id && String(file.userId) === String(user.id)
+                    // The uploader's or the owner's to do, and now also
+                    // gated by the role: a runner or a commenter may read
+                    // everything here and remove nothing.
+                    const mine = canDelete && user?.id && String(file.userId) === String(user.id)
                     const busy = pending === file.id
 
                     return (
@@ -158,28 +161,38 @@ export function FilesPanel({ roomId, user, canUse = true }) {
                 </div>
               )}
 
-              <div className="files__add">
-                <input
-                  ref={inputRef}
-                  type="file"
-                  className="sr-only"
-                  accept={ACCEPTS.join(',')}
-                  aria-label="Choose a file to share"
-                  onChange={choose}
-                />
-                <Button
-                  variant="primary"
-                  icon="plus"
-                  loading={pending === 'upload'}
-                  onClick={() => inputRef.current?.click()}
-                >
-                  Share a file
-                </Button>
+              {/* Reading the room's files is a viewer's right; adding to them
+                  is not. The picker is withheld rather than disabled, because
+                  a file dialog that opens and then refuses the upload wastes
+                  somebody choosing a file first. */}
+              {canUpload ? (
+                <div className="files__add">
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    className="sr-only"
+                    accept={ACCEPTS.join(',')}
+                    aria-label="Choose a file to share"
+                    onChange={choose}
+                  />
+                  <Button
+                    variant="primary"
+                    icon="plus"
+                    loading={pending === 'upload'}
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    Share a file
+                  </Button>
+                  <p className="people__hint">
+                    Images, PDFs and text files, up to {formatSize(MAX_BYTES)}. Everyone in the room
+                    can open what you share.
+                  </p>
+                </div>
+              ) : (
                 <p className="people__hint">
-                  Images, PDFs and text files, up to {formatSize(MAX_BYTES)}. Everyone in the room
-                  can open what you share.
+                  Your role in this room lets you open shared files, but not add or remove them.
                 </p>
-              </div>
+              )}
             </>
           )}
         </div>

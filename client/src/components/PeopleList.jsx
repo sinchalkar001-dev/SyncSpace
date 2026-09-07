@@ -88,3 +88,41 @@ export function InviteForm({ onInvite, pending, hint }) {
     </form>
   )
 }
+
+/**
+ * The control that changes what somebody may do.
+ *
+ * Offers only what the server said this person may hand out — `assignable`
+ * comes back with the room, and an owner sees Admin in the list where an admin
+ * does not. That is a convenience rather than the rule: the same comparison
+ * runs again on the server, so a dropdown edited in devtools changes nothing.
+ *
+ * A plain select rather than a menu of buttons: it is a single-choice field
+ * with six options and a current value, which is exactly what a select is for,
+ * and it comes with keyboard behaviour nobody has to reimplement.
+ */
+export function RoleSelect({ value, options, disabled, busy, onChange, labels, descriptions }) {
+  if (!options?.length) return <span className="people__tag">{labels?.[value] ?? value}</span>
+
+  return (
+    <label className="people__role">
+      <span className="sr-only">Role</span>
+      <select
+        className="input people__role-select"
+        value={value}
+        disabled={disabled || busy}
+        onChange={(event) => onChange(event.target.value)}
+        title={descriptions?.[value]}
+      >
+        {/* The current role is always listed, even when it is not one this
+            person could assign — otherwise the select would silently show the
+            wrong value for anybody above them. */}
+        {[...new Set([value, ...options])].map((role) => (
+          <option key={role} value={role} disabled={role === value ? false : !options.includes(role)}>
+            {labels?.[role] ?? role}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}

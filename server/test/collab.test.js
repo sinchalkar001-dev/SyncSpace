@@ -262,3 +262,112 @@ describe('access control', () => {
     }
   })
 })
+
+/**
+ * The enforcement that decides whether any of this is real.
+ *
+ * The whiteboard and the code buffer never travel over REST — they are Yjs
+ * updates on this socket. Every guard in the HTTP layer could be perfect and a
+ * viewer would still be able to rewrite the room, because none of those guards
+ * is on the path the document actually takes. Hiding the toolbar in the client
+ * is decoration; this is the part that says no.
+ */
+describe('write access to the document', () => {
+  const tokenFor = async (who) => {
+    const res = await request(server.app ?? server)
+      .post('/api/v1/auth/register')
+      .send(who)
+    return res.body
+  }
+
+  it('drops edits from somebody who may only look', async () => {
+    const room = nextRoom()
+    const owner = await tokenFor({
+      email: 'owner-' + room + '@collab.test',
+      password: 'owner-passphrase-1',
+      name: 'Owner',
+    })
+    const watcher = await tokenFor({
+      email: 'watcher-' + room + '@collab.test',
+      password: 'watcher-passphrase',
+      name: 'Watcher',
+    })
+
+    await Room.create({
+      roomId: room,
+      owner: owner.user.id,
+      isPublic: false,
+      members: [
+        { user: owner.user.id, role: 'owner' },
+        { user: watcher.user.id, role: 'viewer' },
+      ],
+    })
+
+    const editor = connect(room, owner.token)
+    const viewer = connect(room, watcher.token)
+
+    try {
+      await synced(editor, 'owner sync')
+      await synced(viewer, 'viewer sync')
+
+      // The viewer is connected and receiving: read-only is not a disconnect.
+      editor.doc.getText('code').insert(0, 'written by the owner')
+      await waitFor(() => viewer.doc.getText('code').toString().includes('written by the owner'), {
+        label: 'owner edit reaching the viewer',
+      })
+
+      // Now the viewer tries to contribute.
+      viewer.doc.getText('code').insert(0, 'VIEWER WAS HERE ')
+
+      // Give it every chance to arrive before concluding it did not.
+      await new Promise((resolve) => setTimeout(resolve, 800))
+
+      expect(editor.doc.getText('code').toString()).toBe('written by the owner')
+      expect(editor.doc.getText('code').toString()).not.toContain('VIEWER WAS HERE')
+    } finally {
+      editor.close()
+      viewer.close()
+    }
+  }, 30000)
+
+  it('lets an editor write, so the refusal above is about the role', async () => {
+    const room = nextRoom()
+    const owner = await tokenFor({
+      email: 'owner2-' + room + '@collab.test',
+      password: 'owner-passphrase-2',
+      name: 'Owner',
+    })
+    const mate = await tokenFor({
+      email: 'mate-' + room + '@collab.test',
+      password: 'mate-passphrase-1',
+      name: 'Mate',
+    })
+
+    await Room.create({
+      roomId: room,
+      owner: owner.user.id,
+      isPublic: false,
+      members: [
+        { user: owner.user.id, role: 'owner' },
+        { user: mate.user.id, role: 'editor' },
+      ],
+    })
+
+    const a = connect(room, owner.token)
+    const b = connect(room, mate.token)
+
+    try {
+      await synced(a, 'owner sync')
+      await synced(b, 'editor sync')
+
+      b.doc.getText('code').insert(0, 'written by the editor')
+
+      await waitFor(() => a.doc.getText('code').toString().includes('written by the editor'), {
+        label: 'editor edit reaching the owner',
+      })
+    } finally {
+      a.close()
+      b.close()
+    }
+  }, 30000)
+})

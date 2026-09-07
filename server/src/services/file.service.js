@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { File } from '../models/File.js'
-import { canAccess, getRoom } from './room.service.js'
+import { getRoom } from './room.service.js'
+import { CAPABILITIES, can } from '../permissions.js'
 import { UPLOAD_DIR } from '../config/upload.js'
 import { sanitizeFilename, generateStoredName } from '../utils/filename.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
@@ -33,6 +34,24 @@ function storagePath(file) {
  * @param {Object} opts.file - multer file object (buffer, originalname, mimetype, size)
  * @returns {Promise<Object>} File metadata (toPublic)
  */
+/**
+ * Refuses unless the caller holds `capability` in the room.
+ *
+ * Reading a file needs only access to the room; putting one in it, or taking
+ * one out, is a change to shared state and needs the capability for it. The
+ * two refusals read differently on purpose — being told you cannot see a room
+ * you are plainly looking at is worse than being told what you cannot do.
+ */
+function requireInRoom(room, userId, capability) {
+  if (can(room, userId, capability)) return
+
+  if (!can(room, userId, CAPABILITIES.ROOM_VIEW)) {
+    throw forbidden('You do not have access to this room', 'room_forbidden')
+  }
+
+  throw forbidden('You do not have permission to change files in this room', 'permission_denied')
+}
+
 export async function uploadFile({ roomId, userId, file }) {
   if (!file) {
     throw badRequest('No file provided', 'no_file')
@@ -42,9 +61,7 @@ export async function uploadFile({ roomId, userId, file }) {
   if (!room) {
     throw notFound('Room not found', 'room_not_found')
   }
-  if (!canAccess(room, userId)) {
-    throw forbidden('You do not have access to this room', 'room_forbidden')
-  }
+  requireInRoom(room, userId, CAPABILITIES.FILES_UPLOAD)
 
   const originalName = sanitizeFilename(file.originalname)
   if (!originalName) {
@@ -78,9 +95,7 @@ export async function listFiles(roomId, { userId, limit = 50, offset = 0 } = {})
   if (!room) {
     throw notFound('Room not found', 'room_not_found')
   }
-  if (!canAccess(room, userId)) {
-    throw forbidden('You do not have access to this room', 'room_forbidden')
-  }
+  requireInRoom(room, userId, CAPABILITIES.ROOM_VIEW)
 
   const [files, total] = await Promise.all([
     File.findByRoom(roomId, { limit, offset }),
@@ -113,9 +128,7 @@ export async function getFileInfo(fileId, { userId }) {
   }
 
   const room = await getRoom(file.roomId)
-  if (!canAccess(room, userId)) {
-    throw forbidden('You do not have access to this file', 'room_forbidden')
-  }
+  requireInRoom(room, userId, CAPABILITIES.ROOM_VIEW)
 
   return {
     id: String(file._id),
@@ -138,9 +151,7 @@ export async function getFilePath(fileId, { userId }) {
   }
 
   const room = await getRoom(file.roomId)
-  if (!canAccess(room, userId)) {
-    throw forbidden('You do not have access to this file', 'room_forbidden')
-  }
+  requireInRoom(room, userId, CAPABILITIES.ROOM_VIEW)
 
   return {
     absolutePath: path.join(UPLOAD_DIR, storagePath(file)),
@@ -161,9 +172,7 @@ export async function deleteFile(fileId, { userId }) {
   }
 
   const room = await getRoom(file.roomId)
-  if (!canAccess(room, userId)) {
-    throw forbidden('You do not have access to this file', 'room_forbidden')
-  }
+  requireInRoom(room, userId, CAPABILITIES.FILES_DELETE)
 
   // Only uploader or room owner can delete
   const isOwner = room.owner && String(room.owner) === userId

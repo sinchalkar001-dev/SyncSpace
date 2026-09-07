@@ -578,11 +578,120 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/transfer': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      post: {
+        tags: ['Invitations'],
+        summary: 'Hand the room to somebody else',
+        description: [
+          'Owner only, and separate from role assignment on purpose: ownership carries the three powers an admin is deliberately denied — deleting the room, transferring it, and appointing admins — so moving it is one explicit act rather than a value in a dropdown.',
+          '',
+          'The previous owner stays on as an admin. The recipient must already be a member.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['userId'],
+                properties: { userId: { type: 'string', pattern: '^[0-9a-f]{24}$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Ownership moved',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    people: { $ref: '#/components/schemas/PeopleRoster' },
+                  },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...error(403, 'Only the owner may transfer a room', 'not_owner', 'Only the room owner can transfer this room'),
+          ...error(404, 'The recipient is not in this room', 'not_a_member', 'That person is not in this room'),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/members/{userId}': {
       parameters: [
         { $ref: '#/components/parameters/roomId' },
         { $ref: '#/components/parameters/userId' },
       ],
+      patch: {
+        tags: ['Invitations'],
+        summary: 'Change what somebody may do in a room',
+        description: [
+          'Owner or admin. The role decides every capability the person has — see the `Role` schema for what each one grants.',
+          '',
+          'Two refusals, and the difference matters. `not_owner` means you do not deal in roles at all. `role_forbidden` means you do, but not *that* role for *that* person: you may never grant a role at or above your own, never change somebody at or above your own rank, and only an owner deals in admins. Ownership is not assignable here — it moves by transfer.',
+          '',
+          'Demoting somebody who is connected closes their document connection so they reconnect read-only; a promotion between two editing roles does not interrupt them.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['role'],
+                properties: { role: { $ref: '#/components/schemas/AssignableRole' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Role changed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    people: { $ref: '#/components/schemas/PeopleRoster' },
+                  },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...{
+            403: {
+              description:
+                'Either you cannot manage roles here at all (`not_owner`), or you can but not this one (`role_forbidden`) — the escalation rules above.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    not_owner: {
+                      summary: 'Not an owner or admin',
+                      value: { error: { code: 'not_owner', message: 'Only the room owner or an admin can remove people' } },
+                    },
+                    role_forbidden: {
+                      summary: 'An admin trying to appoint another admin',
+                      value: { error: { code: 'role_forbidden', message: 'You cannot give somebody that role' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...error(400, 'The owner’s role moves by transfer', 'cannot_demote_owner', 'The owner’s role is changed by transferring the room'),
+          ...error(404, 'Not a member of this room', 'not_a_member', 'That person is not in this room'),
+        },
+      },
       delete: {
         tags: ['Invitations'],
         summary: 'Remove someone from a room',
@@ -1645,6 +1754,47 @@ export const openapiDocument = {
             maxLength: 32,
             description: 'Guest display name for attribution; ignored for signed-in callers.',
           },
+        },
+      },
+
+      Role: {
+        type: 'string',
+        enum: ['owner', 'admin', 'editor', 'runner', 'commenter', 'viewer'],
+        description: [
+          'What somebody may do in a room. Each role grants everything the one below it does, plus more:',
+          '',
+          '- `viewer` — read the room and its history, nothing else',
+          '- `commenter` — a viewer who may also send chat messages',
+          '- `runner` — a commenter who may also run code, without being able to change it',
+          '- `editor` — draw, edit code, upload and delete files, run code, generate from the whiteboard',
+          '- `admin` — an editor who may also change room settings, invite and remove people, and assign roles below their own',
+          '- `owner` — everything, including deleting the room, transferring it, and appointing admins',
+        ].join('\n'),
+      },
+
+      AssignableRole: {
+        type: 'string',
+        enum: ['admin', 'editor', 'runner', 'commenter', 'viewer'],
+        description: 'Ownership is absent deliberately: it moves by transfer, never by editing a membership.',
+      },
+
+      RoomAccess: {
+        type: 'object',
+        description:
+          'What the caller may do in this room, sent with the room so a client can hide what it cannot do rather than offering buttons that fail. The capability list is sent rather than the role alone, so the mapping lives in one place.',
+        properties: {
+          role: { allOf: [{ $ref: '#/components/schemas/Role' }], nullable: true },
+          capabilities: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'e.g. `code:edit`, `code:execute`, `files:upload`, `chat:send`, `roles:manage`.',
+          },
+          assignable: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AssignableRole' },
+            description: 'Roles this caller may hand out. Empty for anybody who cannot manage roles.',
+          },
+          isGuest: { type: 'boolean', description: 'True when there is no account behind the request.' },
         },
       },
 

@@ -49,6 +49,76 @@ Two ways in, both first-class:
   create are private and invite-only.
 - **Guest** — open a room link and pick a display name. Guests reach public rooms only.
 
+### Roles
+
+Six of them. Each grants everything the one below it does, plus more:
+
+| Role | Adds |
+| --- | --- |
+| **Viewer** | Read the room and its history |
+| **Commenter** | Chat |
+| **Runner** | Run the code, without being able to change it |
+| **Editor** | Draw, edit code, upload and delete files, generate from the whiteboard |
+| **Admin** | Room settings, invite and remove people, assign roles below their own |
+| **Owner** | Delete the room, transfer it, appoint admins |
+
+**Runner** is the one worth explaining. An editor could always run code, so a separate role only
+earns its place by granting execution *without* editing — which is the interview case this room was
+built for: a candidate runs the tests, and the buffer stays as the interviewer left it.
+
+Roles are set from the same roster panel, in a dropdown beside each name. It offers only what the
+server said you may hand out, and the server checks again regardless.
+
+### How it is enforced
+
+One module — [server/src/permissions.js](server/src/permissions.js) — answers every authorization
+question in the system. Not for tidiness: a permission system with two implementations has one
+implementation and one hole, and the hole is always the surface nobody remembered.
+
+There are four such surfaces, and only one of them is REST:
+
+| Where | What stops you |
+| --- | --- |
+| REST | `requirePermission` on the route, before the handler runs |
+| **Yjs document** | The connection is opened **read-only** for anybody without edit rights |
+| Socket.io | Checked on join, and again on every chat message |
+| Files, execution | The capability, checked in the service rather than the route |
+
+The Yjs one is the load-bearing one. The whiteboard and the code buffer never travel over REST —
+they are Yjs updates on a WebSocket — so every REST guard could be perfect and a viewer would still
+be able to rewrite the room. Hocuspocus drops their updates rather than closing the connection, so
+a viewer stays connected, keeps seeing everyone else's edits, and simply cannot contribute any.
+
+Demoting somebody who is connected closes their document connection, because a connection outlives
+the permission that opened it: read-only is decided at the handshake, so without that they would
+keep writing until they happened to reconnect.
+
+### Privilege escalation
+
+Three rules, compared by rank rather than listed as forbidden pairs — a list needs revisiting every
+time a role is added:
+
+- You cannot grant a role at or above your own.
+- You cannot change anybody at or above your own rank.
+- Only an owner deals in admins, in either direction.
+
+Ownership is never granted through role assignment. It moves by transfer, one deliberate act, and
+the previous owner stays on as an admin.
+
+The invitation endpoint is bound by the same rules. That is not obvious and it matters: being
+allowed to invite is not the same as being allowed to invite *at any rank*, and without the check
+an admin who cannot promote a member to admin could simply invite a fresh account as one.
+
+### Guests
+
+A public room still lets anyone who opens the link draw on it — that is what `guestRole` defaults
+to, because quietly demoting every existing guest to read-only would break rooms that work today.
+An owner who wants "anyone may watch, nobody may touch" can now say so.
+
+Whatever the guest role, anything that permanently names a person or changes who may enter needs an
+account: uploading files, generating from the whiteboard, inviting, assigning roles, room settings.
+A guest identity is a display name typed into a box, which is not something to hang either on.
+
 Inside a room, the avatar stack in the header opens the same roster: who is connected right now,
 who is invited but away, and — for the owner — an invite field and a **Remove** button beside each
 name. Removing someone withdraws their membership *and* keeps them out of a public room, which a

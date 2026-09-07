@@ -8,6 +8,7 @@ import { Participant } from '../models/Participant.js'
 import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
 import { sendRoomInviteEmail } from './email.service.js'
+import { CAPABILITIES, ROLES, can, canAssignRole, roleFor } from '../permissions.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
@@ -53,12 +54,20 @@ export async function getRoom(roomId) {
   return room
 }
 
-/** Loads a room for an operation only its owner may perform. */
-async function ownedRoom(roomId, actorId, message) {
+/**
+ * Loads a room for an operation the caller must hold a capability to perform.
+ *
+ * This was `ownedRoom`, and it asked one question: are you the owner. Widening
+ * it to a capability is what lets an admin run a room without being handed the
+ * two things ownership means — deleting it and giving it away.
+ *
+ * The refusal keeps the `not_owner` code it has always used. Nothing about
+ * these endpoints got stricter, only more permissive, and clients that already
+ * recognise that code should not have to learn a new one to keep working.
+ */
+async function roomForCapability(roomId, actorId, capability, message) {
   const room = await getRoom(roomId)
-  if (!room.owner || String(room.owner) !== String(actorId)) {
-    throw forbidden(message, 'not_owner')
-  }
+  if (!can(room, actorId, capability)) throw forbidden(message, 'not_owner')
   return room
 }
 
@@ -187,7 +196,19 @@ async function notifyInvitee({ room, address, inviter, newcomer = false }) {
  * same as no invite at all.
  */
 export async function inviteMember({ roomId, actorId, userId, email, role = 'editor' }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can invite people')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.MEMBERS_INVITE, 'Only the room owner or an admin can invite people')
+
+  /**
+   * An invitation grants a role, so it is bound by the same rule as changing
+   * one. Without this the invite endpoint is a way around `setMemberRole`: an
+   * admin who cannot promote an existing member to admin could simply invite a
+   * fresh account as one, and appoint a peer that way. Being allowed to invite
+   * is not the same as being allowed to invite *at any rank*.
+   */
+  if (!canAssignRole({ actorRole: roleFor(room, actorId), targetRole: null, nextRole: role })) {
+    throw forbidden('You cannot invite somebody at that level', 'role_forbidden')
+  }
+
   const inviter = await User.findById(actorId)
 
   // An id can only ever mean an existing account. An address is what a host
@@ -279,7 +300,7 @@ export async function claimPendingInvites(user) {
  * out — the address simply stops being expected.
  */
 export async function cancelPendingInvite({ roomId, actorId, email }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.MEMBERS_REMOVE, 'Only the room owner or an admin can remove people')
   const address = normaliseEmail(email)
 
   if (!room.pendingInviteFor(address)) {
@@ -304,7 +325,7 @@ export async function cancelPendingInvite({ roomId, actorId, email }) {
  * present reads like two different people.
  */
 export async function removeMember({ roomId, actorId, userId }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.MEMBERS_REMOVE, 'Only the room owner or an admin can remove people')
   const target = await findAccount({ userId })
   const targetId = target._id.toString()
 
@@ -329,7 +350,7 @@ export async function removeMember({ roomId, actorId, userId }) {
 
 /** Lets a removed person back in, as far as the room's own rules allow. */
 export async function unblockMember({ roomId, actorId, userId }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can remove people')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.MEMBERS_REMOVE, 'Only the room owner or an admin can remove people')
   const id = String(userId)
 
   room.blocked = room.blocked.filter((entry) => String(entry.user) !== id)
@@ -342,12 +363,103 @@ export async function unblockMember({ roomId, actorId, userId }) {
 /**
  * Public rooms are open to anyone; private rooms require membership. Someone
  * the owner has removed is refused either way.
+ *
+ * Kept as a name because callers and tests use it, but it is no longer a
+ * second implementation of that rule — it asks the permission model the same
+ * question every other guard asks. Two implementations of "may this person be
+ * here" is one implementation and one hole.
  */
+/**
+ * Changes what somebody may do in a room.
+ *
+ * Two guards, and they answer different questions. `ROLES_MANAGE` asks whether
+ * the actor deals in roles at all; `canAssignRole` asks whether *this* actor
+ * may hand out *this* role to *this* person, which is the one that stops an
+ * admin quietly promoting themselves a peer.
+ */
+export async function setMemberRole({ roomId, actorId, userId, role }) {
+  const room = await getRoom(roomId)
+
+  const actorRole = roleFor(room, actorId)
+  const member = room.members.find((entry) => String(entry.user) === String(userId))
+
+  if (!member) throw notFound('That person is not in this room', 'not_a_member')
+
+  if (String(room.owner) === String(userId)) {
+    throw badRequest('The owner’s role is changed by transferring the room', 'cannot_demote_owner')
+  }
+
+  const targetRole = roleFor(room, userId)
+
+  if (!canAssignRole({ actorRole, targetRole, nextRole: role })) {
+    throw forbidden('You cannot give somebody that role', 'role_forbidden')
+  }
+
+  const couldWrite = can(room, userId, CAPABILITIES.CODE_EDIT)
+  member.role = role
+  await room.save()
+
+  /**
+   * A live connection outlives the permission that opened it.
+   *
+   * Hocuspocus decides read-only once, at the handshake, so somebody demoted
+   * to viewer keeps writing to the document until they reconnect — the change
+   * would appear to work everywhere except the one place it matters. Closing
+   * their connection makes the client reconnect and be told the new answer.
+   * Only when write access actually changed, so a promotion between two
+   * editing roles does not interrupt anybody mid-sentence.
+   */
+  if (couldWrite !== can(room, userId, CAPABILITIES.CODE_EDIT)) {
+    await hangUp({
+      roomId,
+      reason: 'role_changed',
+      matches: (user) => String(user?.id) === String(userId),
+    })
+  }
+
+  logger.info({ room: roomId, actor: actorId, target: userId, role }, 'member role changed')
+  return room
+}
+
+/**
+ * Hands the room to somebody else.
+ *
+ * Ownership never moves through role assignment — it is one deliberate act
+ * with one obvious consequence, and the previous owner becomes an admin rather
+ * than being dropped, because a room whose creator can no longer manage it is
+ * a support request waiting to happen.
+ */
+export async function transferOwnership({ roomId, actorId, userId }) {
+  const room = await getRoom(roomId)
+
+  if (!can(room, actorId, CAPABILITIES.ROOM_TRANSFER)) {
+    throw forbidden('Only the room owner can transfer this room', 'not_owner')
+  }
+
+  if (String(actorId) === String(userId)) {
+    throw badRequest('You already own this room', 'already_owner')
+  }
+
+  const target = room.members.find((entry) => String(entry.user) === String(userId))
+  if (!target) throw notFound('That person is not in this room', 'not_a_member')
+
+  const previous = room.owner
+
+  room.owner = userId
+  target.role = ROLES.OWNER
+
+  const previousMembership = room.members.find((entry) => String(entry.user) === String(previous))
+  if (previousMembership) previousMembership.role = ROLES.ADMIN
+  else if (previous) room.members.push({ user: previous, role: ROLES.ADMIN })
+
+  await room.save()
+
+  logger.info({ room: roomId, from: String(previous), to: String(userId) }, 'room ownership transferred')
+  return room
+}
+
 export function canAccess(room, userId) {
-  if (!room) return false
-  if (room.isBlocked(userId)) return false
-  if (room.isPublic) return true
-  return room.hasMember(userId)
+  return can(room, userId, CAPABILITIES.ROOM_VIEW)
 }
 
 export async function listRoomsForUser(userId) {
@@ -432,7 +544,7 @@ export async function listPeople(roomId) {
  * visitor has no account to remove.
  */
 export async function updateRoom({ roomId, actorId, patch }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can change this room')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.ROOM_SETTINGS, 'Only the room owner or an admin can change this room')
 
   const closing = patch.isPublic === false && room.isPublic === true
 
@@ -461,7 +573,7 @@ export async function updateRoom({ roomId, actorId, patch }) {
  * deliberately, bypassing that guard.
  */
 export async function deleteRoom({ roomId, actorId }) {
-  const room = await ownedRoom(roomId, actorId, 'Only the room owner can delete this room')
+  const room = await roomForCapability(roomId, actorId, CAPABILITIES.ROOM_DELETE, 'Only the room owner can delete this room')
 
   // Hang up everyone still in the room so they stop writing to it.
   await hangUp({ roomId, reason: 'room_deleted', matches: () => true })
