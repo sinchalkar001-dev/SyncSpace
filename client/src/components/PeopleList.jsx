@@ -26,28 +26,39 @@ export function Avatar({ name, color, muted }) {
  */
 export function PersonRow({ name, detail, tag, color, muted, action }) {
   return (
-    <li>
+    <li className="people__person">
       <Avatar name={name} color={color} muted={muted} />
 
       <span className="people__who">
-        <strong>{name}</strong>
-        {detail && <span className="muted">{detail}</span>}
+        <strong title={typeof name === 'string' ? name : undefined}>{name}</strong>
+        {detail && (
+          <span className="muted" title={typeof detail === 'string' ? detail : undefined}>
+            {detail}
+          </span>
+        )}
       </span>
 
-      {tag && <span className="people__tag">{tag}</span>}
+      {(tag || action) && (
+        <span className="people__controls">
+          {/* A word gets the pill. A control does not: a select inside one
+              inherits its padding and its lowercasing, and ends up wearing two
+              borders while pushing the name it belongs to off the row. */}
+          {typeof tag === 'string' ? <span className="people__tag">{tag}</span> : tag}
 
-      {action && (
-        <Button
-          size="sm"
-          variant={action.variant || 'ghost'}
-          icon={action.icon}
-          loading={action.loading}
-          disabled={action.disabled}
-          onClick={action.onClick}
-          title={action.title}
-        >
-          {action.label}
-        </Button>
+          {action && (
+            <Button
+              size="sm"
+              variant={action.variant || 'ghost'}
+              icon={action.icon}
+              loading={action.loading}
+              disabled={action.disabled}
+              onClick={action.onClick}
+              title={action.title}
+            >
+              {action.label}
+            </Button>
+          )}
+        </span>
       )}
     </li>
   )

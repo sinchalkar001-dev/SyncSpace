@@ -1329,6 +1329,41 @@
   text-transform: lowercase;
 }
 
+/*
+  A roster row, once it carries controls as well as a name.
+
+  Everything but the name is `flex: none`, so on a single line the name is the
+  only thing that can give — and in a 21rem popover holding an avatar, a role
+  select and a Remove button, what it gives is all of itself. A row of initials
+  beside two dropdowns tells you nothing about who you are about to promote.
+
+  So the controls keep their size and the name keeps a floor. 7rem of basis is
+  the threshold, measured rather than guessed: in the 21rem popover it leaves
+  room for a lone button (93px) or a lone pill, and none for a role select and
+  a button together (200px) — which is exactly the row that was unreadable. A
+  row that cannot fit both drops the controls to a second line and hands the
+  full width back to the name. In the 560px dialog everything fits on one line
+  and nothing moves.
+*/
+.people__person {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.people__person .people__who {
+  flex: 1 1 7rem;
+}
+
+/* Kept together so they wrap as one, and stay at the end of whichever line
+   they land on rather than drifting under the avatar. */
+.people__controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
 .people__empty {
   padding: var(--space-3) var(--space-2);
   font-size: var(--text-sm);
@@ -2430,20 +2465,28 @@
 /*
   The role control in a roster row.
 
-  Sized to sit where the plain text tag used to, so a row with a select and a
-  row with "Owner" line up rather than stepping around each other.
+  Matched to the small button beside it rather than to a full-height field:
+  these two sit shoulder to shoulder at the end of a row, and a 40px select
+  next to a 31px button reads as a mistake. `min-height` has to be said out
+  loud because `.input` sets 40px, and a min beats a height.
+
+  Held to 9rem so one long label — Commenter — cannot widen every row it
+  appears in; the text ellipsises, and the full word is in the open list.
 */
 .people__role {
   display: inline-flex;
   flex: none;
+  max-width: 9rem;
 }
 
 .people__role-select {
-  height: 26px;
+  height: 31px;
+  min-height: 31px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   color: var(--text-dim);
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
