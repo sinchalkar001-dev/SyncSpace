@@ -1332,18 +1332,22 @@
 /*
   A roster row, once it carries controls as well as a name.
 
-  Everything but the name is `flex: none`, so on a single line the name is the
-  only thing that can give — and in a 21rem popover holding an avatar, a role
-  select and a Remove button, what it gives is all of itself. A row of initials
-  beside two dropdowns tells you nothing about who you are about to promote.
+  Everything but the name is `flex: none`, so the name is the only thing that
+  can give — and asked to hold an avatar, a role select and a Remove button in
+  a 21rem popover, what it gave was all of itself. A row of initials beside two
+  dropdowns tells you nothing about who you are about to promote.
 
-  So the controls keep their size and the name keeps a floor. 7rem of basis is
-  the threshold, measured rather than guessed: in the 21rem popover it leaves
-  room for a lone button (93px) or a lone pill, and none for a role select and
-  a button together (200px) — which is exactly the row that was unreadable. A
-  row that cannot fit both drops the controls to a second line and hands the
-  full width back to the name. In the 560px dialog everything fits on one line
-  and nothing moves.
+  A roster is a list you read down, so the row stays on one line and the panel
+  is widened to afford it (see `.presence-menu__panel`). That is what keeps
+  twenty people legible: one line each, every select in one column and every
+  button in another, so the eye runs down the names instead of stepping over a
+  second line between each one.
+
+  The wrap is the fallback, not the arrangement. 7rem of basis is the floor the
+  name will not go below, measured rather than guessed: the panel affords it at
+  every desktop width, and only a phone — where the panel clamps to the
+  viewport — cannot, so there the controls drop to their own line rather than
+  crushing the name again.
 */
 .people__person {
   flex-wrap: wrap;
@@ -1354,8 +1358,8 @@
   flex: 1 1 7rem;
 }
 
-/* Kept together so they wrap as one, and stay at the end of whichever line
-   they land on rather than drifting under the avatar. */
+/* One element, so they hold their column, wrap as a unit, and sit at the end
+   of whichever line they land on rather than drifting under the avatar. */
 .people__controls {
   display: flex;
   flex: none;
@@ -1428,6 +1432,20 @@
   transform: rotate(180deg);
 }
 
+/*
+  Width is a requirement here, not a preference.
+
+  The roster row is an avatar, a name over an address, a role select and a
+  Remove button, and all but the name are fixed. Measured against the real
+  stylesheet with a scrollbar in the gutter, the row needs 30rem before the
+  name column reaches 161px — enough for the longest name in a sample of
+  twenty (151px). At 28rem it is 129px and names start disappearing; at 26rem
+  the row cannot hold the controls at all and folds onto two lines, which for
+  twenty people is 2111px of scrolling instead of 1251px.
+
+  So 30rem, and it clamps to the viewport on a phone, where the fold is the
+  right answer rather than a failure.
+*/
 .presence-menu__panel {
   position: absolute;
   right: 0;
@@ -1435,7 +1453,7 @@
   z-index: var(--z-popover);
   display: grid;
   gap: var(--space-4);
-  width: min(21rem, calc(100vw - var(--space-5) * 2));
+  width: min(30rem, calc(100vw - var(--space-5) * 2));
   max-height: min(30rem, calc(100vh - 5rem));
   overflow-y: auto;
   padding: var(--space-4);
