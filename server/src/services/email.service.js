@@ -1,5 +1,10 @@
 import { logger } from '../config/logger.js'
 import { env } from '../config/env.js'
+import {
+  invitationEmail,
+  passwordResetEmail,
+  verificationEmail,
+} from './email.templates.js'
 
 /**
  * Hides the local part of an address before anything reaches the logs.
@@ -39,6 +44,14 @@ export function relayOptions() {
  * than taking the API down.
  */
 function loadTransport() {
+  /**
+   * `mock` is decided here rather than at send time, so that a transport
+   * handed to `createMailer` explicitly is still used. That injection is the
+   * seam the mailer's own tests rely on, and a provider check inside `send`
+   * overrode it — the tests then proved the mock worked rather than the mailer.
+   */
+  if (env.EMAIL_PROVIDER === 'mock') return Promise.resolve(null)
+
   const relay = relayOptions()
   if (!relay) return Promise.resolve(null)
 
@@ -58,6 +71,38 @@ function loadTransport() {
 const defaultTransport = loadTransport()
 
 /**
+ * The last few messages that were composed but not actually sent.
+ *
+ * Only filled when nothing is being delivered — `EMAIL_PROVIDER=mock`, or no
+ * relay configured at all. It exists so a test can read the verification code
+ * out of the message instead of scraping it from log output, which was how
+ * this suite used to do it: a test that parses a log line breaks when somebody
+ * improves the wording, and quietly stops checking anything when it does.
+ *
+ * Bounded, because an unbounded list of every email a long-running development
+ * server has composed is a memory leak with personal data in it.
+ */
+const OUTBOX_LIMIT = 50
+const outbox = []
+
+const capture = (message) => {
+  outbox.push({ ...message, at: new Date() })
+  if (outbox.length > OUTBOX_LIMIT) outbox.shift()
+}
+
+/** The most recent message, or the most recent one to `address`. */
+export function lastMessage(address) {
+  const match = address
+    ? [...outbox].reverse().find((message) => message.to === address)
+    : outbox[outbox.length - 1]
+  return match ?? null
+}
+
+export const clearOutbox = () => {
+  outbox.length = 0
+}
+
+/**
  * Creates a mailer over a transport. Injected in tests; the app-wide instance
  * is `mailer` below. Every failure mode ends here, so callers get a plain
  * `{ delivered }` answer instead of an exception carrying provider internals.
@@ -73,8 +118,17 @@ export function createMailer({ transport = defaultTransport, from = env.MAIL_FRO
       const client = await transport
 
       if (!client) {
-        // No relay configured (development, tests): the message itself is
-        // the delivery, so the link stays reachable in the log output.
+        /**
+         * Nothing is being sent, so the message itself is the delivery: it
+         * goes to the log where a developer can follow the link, and to the
+         * outbox where a test can read the code.
+         *
+         * `EMAIL_PROVIDER=mock` arrives here as a null transport, which is
+         * what lets the suite run on a machine holding real credentials
+         * without mailing anybody. Production refuses the setting outright —
+         * see env.js.
+         */
+        capture({ to, subject, text, html })
         logger.info({ to: maskEmail(to), subject }, text)
         return { delivered: false }
       }
@@ -101,22 +155,16 @@ export const mailer = createMailer()
  * the verification service; everything else here is presentation, kept in
  * one place so future emails reuse the same frame.
  */
-export function sendVerificationEmail(to, { url }) {
-  const subject = 'Verify your SyncSpace email'
-  const text = [
-    'Welcome to SyncSpace.',
-    '',
-    'Confirm this address by opening the link within 24 hours:',
-    url,
-    '',
-    'If you did not create an account, you can ignore this email.',
-  ].join('\n')
-  const html =
-    '<p>Welcome to SyncSpace.</p>' +
-    '<p><a href="' + url + '">Confirm this email address</a> within 24 hours.</p>' +
-    '<p>If you did not create an account, you can ignore this email.</p>'
-
-  return mailer.send({ to, subject, text, html })
+/**
+ * Account confirmation.
+ *
+ * Takes the code and both expiries rather than writing them here, so the
+ * message cannot promise a window the service does not actually enforce —
+ * which is exactly what happened before: the text said 24 hours because a
+ * constant elsewhere said 24 hours, and nothing connected the two.
+ */
+export function sendVerificationEmail(to, { url, code, tokenMinutes, codeMinutes }) {
+  return mailer.send({ to, ...verificationEmail({ url, code, tokenMinutes, codeMinutes }) })
 }
 
 /**
@@ -131,106 +179,31 @@ export function sendVerificationEmail(to, { url }) {
  * away from the expiry the service actually enforces.
  */
 export function sendPasswordResetEmail(to, { url, minutes }) {
-  const window_ = minutes + ' minutes'
-  const subject = 'Reset your SyncSpace password'
-  const text = [
-    'Someone asked to reset the password for this SyncSpace account.',
-    '',
-    'Choose a new password within ' + window_ + ':',
-    url,
-    '',
-    'The link can only be used once.',
-    '',
-    'If this was not you, ignore this email — your password has not changed ' +
-      'and nobody can sign in without it.',
-  ].join('\n')
-  const html =
-    '<p>Someone asked to reset the password for this SyncSpace account.</p>' +
-    '<p><a href="' + escapeHtml(url) + '">Choose a new password</a> within ' +
-    window_ + '. The link can only be used once.</p>' +
-    '<p>If this was not you, ignore this email — your password has not changed ' +
-    'and nobody can sign in without it.</p>'
-
-  return mailer.send({ to, subject, text, html })
+  return mailer.send({ to, ...passwordResetEmail({ url, minutes }) })
 }
 
 /**
- * Anything a person typed is escaped before it reaches the HTML part. Room
- * names and display names are free text, and an email client is one more
- * place that will happily render a stray tag.
- */
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-/**
- * The room invitation.
+ * A room invitation.
  *
  * A private room is invisible to everyone outside it, so this message is the
- * only thing that tells the invitee it exists. It carries both ways in: the
- * link for one click, and the code underneath it, because a code can be typed
- * into the dashboard by someone who would rather not follow a link in an
- * email — and because it is what gets read out loud over a call.
+ * only thing that tells the invitee it exists. `signUpUrl` is set when nobody
+ * has signed up under this address yet: the room link would only turn such a
+ * person away, so their copy leads with creating the account the invitation is
+ * already waiting on.
  *
- * `signUpUrl` is set when nobody has signed up under this address yet. The
- * room link would only turn such a person away, so their copy leads with
- * creating the account that the invitation is already waiting on.
+ * `code` is still accepted so existing callers keep working, but the link is
+ * what the invitation is now tied to — see invitation.service.js.
  */
-export function sendRoomInviteEmail(to, { inviter, room, code, url, signUpUrl = null }) {
-  const who = inviter || 'Someone'
-  const what = room || code
-
-  const opening = who + ' invited you to collaborate on "' + what + '" in SyncSpace.'
-  const subject = who + ' invited you to ' + what + ' on SyncSpace'
-
-  const text = (
-    signUpUrl
-      ? [
-          opening,
-          '',
-          'Create an account with this address and the room is waiting for you:',
-          signUpUrl,
-          '',
-          'The room itself:',
-          url,
-          '',
-          'Or join from your dashboard with this room code: ' + code,
-          '',
-          'The invitation is tied to this address, so sign up with it.',
-        ]
-      : [
-          opening,
-          '',
-          'Open the room:',
-          url,
-          '',
-          'Or go to your dashboard and join with this room code: ' + code,
-          '',
-          'The room is private, so sign in with this address to get in.',
-        ]
-  ).join('\n')
-
-  const lead = '<p><strong>' + escapeHtml(who) + '</strong> invited you to collaborate on ' +
-    '<strong>' + escapeHtml(what) + '</strong> in SyncSpace.</p>'
-
-  const code_ = '<p>Or join from your dashboard with the room code ' +
-    '<strong>' + escapeHtml(code) + '</strong>.</p>'
-
-  const html = signUpUrl
-    ? lead +
-      '<p><a href="' + escapeHtml(signUpUrl) + '">Create an account</a> with this address and the ' +
-      'room is waiting for you.</p>' +
-      '<p>The room itself: <a href="' + escapeHtml(url) + '">' + escapeHtml(code) + '</a></p>' +
-      code_ +
-      '<p>The invitation is tied to this address, so sign up with it.</p>'
-    : lead +
-      '<p><a href="' + escapeHtml(url) + '">Open the room</a></p>' +
-      code_ +
-      '<p>The room is private, so sign in with this address to get in.</p>'
-
-  return mailer.send({ to, subject, text, html })
+export function sendRoomInviteEmail(to, { inviter, room, code, url, signUpUrl = null, hours }) {
+  return mailer.send({
+    to,
+    ...invitationEmail({
+      inviter,
+      room,
+      code,
+      url,
+      signUpUrl,
+      hours: hours ?? env.INVITATION_EXPIRY_HOURS,
+    }),
+  })
 }

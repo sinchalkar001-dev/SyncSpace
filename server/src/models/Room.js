@@ -42,6 +42,21 @@ const pendingInviteSchema = new mongoose.Schema(
     },
     invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     at: { type: Date, default: Date.now },
+
+    /**
+     * The invitation itself, hashed.
+     *
+     * An invitation used to be nothing but a row saying "this address is
+     * expected" — no secret, nothing to present, and no way to accept it other
+     * than signing up and having it applied silently. That made it impossible
+     * to expire one, impossible to use one only once, and impossible to tell
+     * an invitation apart from a guess at an address.
+     *
+     * Only the hash is stored, so the raw token exists in exactly one place:
+     * the email. Losing the database does not hand anybody a way into a room.
+     */
+    tokenHash: { type: String, default: null },
+    expiresAt: { type: Date, default: null },
   },
   { _id: false }
 )
@@ -83,6 +98,8 @@ roomSchema.index({ 'members.user': 1, lastActivityAt: -1 })
 // Every registration asks "was this address invited anywhere?", so the lookup
 // has to be an index rather than a scan of every room.
 roomSchema.index({ 'pendingInvites.email': 1 })
+// Accepting one is a lookup by the token's hash, across every room.
+roomSchema.index({ 'pendingInvites.tokenHash': 1 })
 
 roomSchema.methods.hasMember = function hasMember(userId) {
   if (!userId) return false

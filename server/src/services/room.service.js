@@ -9,6 +9,11 @@ import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
 import { sendRoomInviteEmail } from './email.service.js'
 import { CAPABILITIES, ROLES, can, canAssignRole, roleFor } from '../permissions.js'
+import {
+  claimInvitesFor,
+  invitationLink,
+  issueInvitationToken,
+} from './invitation.service.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
@@ -159,17 +164,28 @@ const NOTIFY_TIMEOUT_MS = 10000
  * answer matters: reporting a slow send as a failure sends the owner chasing
  * their guest with a code that is already in their inbox.
  */
-async function notifyInvitee({ room, address, inviter, newcomer = false }) {
+async function notifyInvitee({ room, address, inviter, newcomer = false, token = null }) {
   const PENDING = Symbol('still sending')
 
   const sent = sendRoomInviteEmail(address, {
     inviter: inviter?.name,
     room: room.name,
     code: room.roomId,
-    url: env.CLIENT_URL + '/room/' + encodeURIComponent(room.roomId),
+    /**
+     * The accept link when there is a token, the room itself otherwise.
+     *
+     * Somebody who already has an account is already a member by the time
+     * this sends — the room link takes them straight there. Somebody without
+     * one has an invitation to redeem, and the token is what makes that
+     * redeemable exactly once, to exactly them.
+     */
+    url: token
+      ? invitationLink(token)
+      : env.CLIENT_URL + '/room/' + encodeURIComponent(room.roomId),
     // Somebody without an account cannot be let into a private room by the
     // link alone, so their copy leads with signing up instead.
     signUpUrl: newcomer ? env.CLIENT_URL + '/register' : null,
+    hours: env.INVITATION_EXPIRY_HOURS,
   }).catch((error) => {
     logger.warn({ err: error, room: room.roomId }, 'could not send the invite email')
     return { delivered: false }
@@ -251,12 +267,26 @@ export async function inviteMember({ roomId, actorId, userId, email, role = 'edi
 async function holdInviteFor({ room, address, role, inviter }) {
   const held = room.pendingInviteFor(address)
 
-  if (held) held.role = role
-  else room.pendingInvites.push({ email: address, role, invitedBy: inviter?._id ?? null })
+  const invite = held ?? { email: address, role, invitedBy: inviter?._id ?? null }
+  invite.role = role
+
+  /**
+   * A fresh token every time, superseding whatever came before.
+   *
+   * Two live invitations to one room for one person is two things to revoke
+   * and one to forget. Re-inviting is also how an owner extends an invitation
+   * that expired, which only works if the new one replaces the old.
+   */
+  const token = issueInvitationToken(invite)
+
+  if (!held) room.pendingInvites.push(invite)
   await room.save()
 
-  logger.info({ room: room.roomId }, 'invite held for an address with no account')
-  const notified = await notifyInvitee({ room, address, inviter, newcomer: true })
+  logger.info(
+    { room: room.roomId, expiresAt: invite.expiresAt },
+    'invite held for an address with no account'
+  )
+  const notified = await notifyInvitee({ room, address, inviter, newcomer: true, token })
 
   return {
     room,
@@ -267,31 +297,11 @@ async function holdInviteFor({ room, address, role, inviter }) {
 /**
  * Turns every invitation waiting on this address into a real membership.
  *
- * Called as an account is created, which is the moment the address stops being
- * just an address. Returns the rooms joined so the caller can say so.
+ * The logic moved to invitation.service.js, where the token lives; this name
+ * stays because registration and verification both call it and neither should
+ * have to care where it went.
  */
-export async function claimPendingInvites(user) {
-  const address = normaliseEmail(user.email)
-  const waiting = await Room.find({ 'pendingInvites.email': address })
-  const joined = []
-
-  for (const room of waiting) {
-    const invite = room.pendingInviteFor(address)
-    room.pendingInvites = room.pendingInvites.filter((entry) => entry.email !== address)
-
-    // A room they had already been let into by other means needs no second
-    // membership, but the held invite still goes.
-    if (!room.hasMember(user._id)) {
-      room.members.push({ user: user._id, role: invite?.role ?? 'editor' })
-    }
-
-    await room.save()
-    joined.push(room.roomId)
-  }
-
-  if (joined.length) logger.info({ user: String(user._id), rooms: joined }, 'pending invites claimed')
-  return joined
-}
+export const claimPendingInvites = claimInvitesFor
 
 /**
  * Withdraws an invitation that was never taken up. Owner only.

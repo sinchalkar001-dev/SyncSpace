@@ -1,14 +1,20 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
-import { requireAuth } from '../middleware/auth.js'
+import { optionalAuth, requireAuth } from '../middleware/auth.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
 import { changePassword, login, register } from '../services/auth.service.js'
-import { resendVerification, verifyEmail } from '../services/verification.service.js'
+import {
+  resendVerification,
+  verificationStatus,
+  verifyEmail,
+  verifyEmailCode,
+} from '../services/verification.service.js'
 import { requestPasswordReset, resetPassword } from '../services/password-reset.service.js'
 import { listSessions, revokeOtherSessions, revokeSession } from '../services/session.service.js'
 import { TOKEN_PATTERN } from '../utils/token.js'
 import { User } from '../models/User.js'
+import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { notFound } from '../errors.js'
 
@@ -25,9 +31,25 @@ const changePasswordSchema = z.object({
 
 // Tokens are 32 random bytes hex-encoded by issueVerificationToken; the shape
 // check rejects garbage before it can reach a database lookup.
-const verificationSchema = z.object({
-  token: z.string().regex(TOKEN_PATTERN, 'malformed verification token'),
-})
+/**
+ * Either proof of the address will do.
+ *
+ * One endpoint rather than two, because they answer the same question and a
+ * client that has just been handed a code should not have to know it is now
+ * talking to a different route. The refinement is what stops an empty body
+ * being read as "verified".
+ */
+const verificationSchema = z
+  .object({
+    token: z.string().regex(TOKEN_PATTERN, 'malformed verification token').optional(),
+    code: z.string().trim().regex(/^\d{4,8}$/, 'a verification code is 6 digits').optional(),
+    // Lets somebody verify from the "check your email" screen without being
+    // signed in — the code is only useful to whoever received it.
+    email: z.string().email().max(160).optional(),
+  })
+  .refine((value) => Boolean(value.token) || Boolean(value.code), {
+    message: 'provide either a verification token or a code',
+  })
 
 const forgotPasswordSchema = z.object({
   email: z.string().email().max(160),
@@ -88,11 +110,68 @@ export function createAuthRouter() {
     }
   })
 
-  // Public: the token itself proves control of the address.
-  authRouter.post('/verify-email', verifyLimiter, validate(verificationSchema), async (req, res, next) => {
+  /**
+   * Public: whichever proof arrived is the authorisation.
+   *
+   * The token is unguessable, so holding it is proof on its own. The code is
+   * six digits, so it is only accepted against a named account — by session
+   * when there is one, otherwise by the address it was sent to — and the
+   * service bounds how many times it may be tried.
+   */
+  authRouter.post(
+    '/verify-email',
+    optionalAuth,
+    verifyLimiter,
+    validate(verificationSchema),
+    async (req, res, next) => {
+      try {
+        const user = req.body.token
+          ? await verifyEmail(req.body.token)
+          : await verifyEmailCode({
+              userId: req.user?.id,
+              email: req.body.email,
+              code: req.body.code,
+            })
+
+        res.json({ user: user.toPublic() })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /**
+   * The link in the email lands here.
+   *
+   * A GET so that clicking it works from any mail client, and a redirect
+   * rather than JSON because a person following a link expects a page. The
+   * outcome travels in the query string so the client can render the right
+   * state without a second round trip — and the token never appears in the
+   * destination, which would put it in browser history.
+   */
+  authRouter.get('/verify-email', verifyLimiter, async (req, res) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : ''
+    const to = (status) => env.CLIENT_URL + '/verify-email?status=' + status
+
+    if (!TOKEN_PATTERN.test(token)) {
+      res.redirect(to('invalid'))
+      return
+    }
+
     try {
-      const user = await verifyEmail(req.body.token)
-      res.json({ user: user.toPublic() })
+      await verifyEmail(token)
+      res.redirect(to('verified'))
+    } catch {
+      // Every failure reads the same to the person: the link did not work.
+      // Which of expired, spent or unknown it was is in the log, not the URL.
+      res.redirect(to('invalid'))
+    }
+  })
+
+  /** What the "check your email" screen needs to render itself. */
+  authRouter.get('/verification-status', requireAuth, async (req, res, next) => {
+    try {
+      res.json(await verificationStatus(req.user.id))
     } catch (err) {
       next(err)
     }

@@ -159,7 +159,7 @@ describe('email failure isolation', () => {
       .post('/api/v1/auth/resend-verification')
       .set('Authorization', 'Bearer ' + registered.body.token)
     expect(resent.status).toBe(200)
-    expect(resent.body).toEqual({ sent: true })
+    expect(resent.body).toMatchObject({ sent: true })
 
     failing.mockRestore()
   })
@@ -193,8 +193,13 @@ describe('email failure isolation', () => {
     const [context] = warnSpy.mock.calls.find(
       ([, message]) => message === 'could not send the verification email'
     )
-    expect(context).toEqual({ code: 'EAUTH' })
+    // The error class and which account it was, and nothing from the relay:
+    // a failed send now says whose verification it was, which is what makes
+    // the log useful for support without making it useful to an attacker.
+    expect(context).toMatchObject({ code: 'EAUTH' })
+    expect(context.message).toBeUndefined()
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('535')
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('auth failed')
 
     process.off('unhandledRejection', escaped)
     throwing.mockRestore()

@@ -200,7 +200,13 @@ export const openapiDocument = {
       post: {
         tags: ['Auth'],
         summary: 'Confirm an email address',
-        description: 'Public: the token itself proves control of the address. Consumed on first use.',
+        description: [
+          'Public: whichever proof arrived is the authorisation. Send **either** the token from the link **or** the six-digit code from the same email.',
+          '',
+          'They are not equivalent secrets. The token is 256 bits, so holding it is proof on its own and it only needs an expiry. The code is a million combinations, so it is accepted only against a named account — by session when there is one, otherwise by `email` — expires sooner, and is bounded by an attempt count.',
+          '',
+          'Running out of attempts burns the code outright rather than merely refusing it: leaving it live would hand the guesses back to whoever triggers the next resend.',
+        ].join('\n'),
         security: [],
         requestBody: {
           required: true,
@@ -216,8 +222,108 @@ export const openapiDocument = {
             },
           },
           ...validationError(),
-          ...error(400, 'Token unknown, expired or already used', 'invalid_token', 'This verification link is invalid or has expired'),
-          ...rateLimited('Too many verification attempts, try again later'),
+          ...{
+            400: {
+              description:
+                'The proof did not work. `invalid_token` for a link, `invalid_code` for a wrong code (the message says how many attempts remain), `code_expired` once the code has aged out.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    invalid_token: {
+                      summary: 'Link unknown, expired or already used',
+                      value: { error: { code: 'invalid_token', message: 'This verification link is invalid or has expired' } },
+                    },
+                    invalid_code: {
+                      summary: 'Wrong code, with the budget left',
+                      value: { error: { code: 'invalid_code', message: 'That code is not right — 3 attempts left' } },
+                    },
+                    code_expired: {
+                      summary: 'Code aged out',
+                      value: { error: { code: 'code_expired', message: 'That verification code has expired — ask for a new one' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...error(409, 'Nothing left to verify', 'already_verified', 'This account is already verified'),
+          ...{
+            429: {
+              description:
+                'Either the per-IP verification budget (`rate_limited`) or this code’s attempt budget (`too_many_attempts`), which burns the code and requires a resend.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    too_many_attempts: {
+                      summary: 'Guessing budget spent',
+                      value: { error: { code: 'too_many_attempts', message: 'Too many incorrect codes. Ask for a new verification email.' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      get: {
+        tags: ['Auth'],
+        summary: 'Follow the link from the email',
+        description: [
+          'Where the button in the verification email points. A GET so it works from any mail client, and a redirect rather than JSON because a person following a link expects a page.',
+          '',
+          'The outcome travels in the query string (`?status=verified` or `?status=invalid`) so the client can render the right state without a second round trip. The token is deliberately **not** carried through to the destination, where it would land in browser history.',
+          '',
+          'Every failure redirects to the same `invalid` — which of expired, spent or unknown it was is in the server log, not the URL.',
+        ].join('\n'),
+        security: [],
+        parameters: [
+          {
+            name: 'token',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          302: {
+            description: 'Redirects to the client with the outcome in `status`.',
+            headers: {
+              Location: { schema: { type: 'string', example: 'http://localhost:5173/verify-email?status=verified' } },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/v1/auth/verification-status': {
+      get: {
+        tags: ['Auth'],
+        summary: 'What the check-your-email screen renders from',
+        description:
+          'The address is masked (`a***@example.com`): enough to recognise, not enough to publish on a shared screen. `retryAfter` is the resend cooldown still to run, and `attemptsLeft` the guessing budget on the current code.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Verification state',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    email: { type: 'string', example: 'a***@example.com' },
+                    emailVerified: { type: 'boolean' },
+                    emailVerifiedAt: { type: ['string', 'null'], format: 'date-time' },
+                    retryAfter: { type: 'integer', description: 'Seconds before another email may be requested' },
+                    codeExpiresAt: { type: ['string', 'null'], format: 'date-time' },
+                    attemptsLeft: { type: ['integer', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
         },
       },
     },
@@ -1189,6 +1295,95 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/invitations/{token}': {
+      parameters: [{ $ref: '#/components/parameters/invitationToken' }],
+      get: {
+        tags: ['Invitations'],
+        summary: 'What an invitation is for',
+        description: [
+          'Read before accepting, usually by somebody who has just followed a link from their email and has not signed in yet — telling them which room they have been invited to is what makes finishing the sign-up worth doing.',
+          '',
+          'Unknown, expired and already-spent tokens all answer the same 404. There is no branch here that could tell somebody probing which of the three they hit.',
+        ].join('\n'),
+        security: [],
+        responses: {
+          200: {
+            description: 'The invitation',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { invitation: { $ref: '#/components/schemas/Invitation' } },
+                },
+              },
+            },
+          },
+          ...error(400, 'Not even the right shape', 'invitation_invalid', 'This invitation is invalid or has expired'),
+          ...error(404, 'Unknown, expired or already used', 'invitation_invalid', 'This invitation is invalid or has expired'),
+        },
+      },
+    },
+
+    '/api/v1/invitations/{token}/accept': {
+      parameters: [{ $ref: '#/components/parameters/invitationToken' }],
+      post: {
+        tags: ['Invitations'],
+        summary: 'Spend an invitation',
+        description: [
+          'Turns the invitation into a membership. Four things must hold, and each closes something specific:',
+          '',
+          '- the token resolves — otherwise it is expired, spent or invented',
+          '- the account’s address matches the one invited — otherwise forwarding the email is a way into somebody else’s room',
+          '- that address has been verified — an invitation must not be a way around proving you can read the mailbox it was sent to',
+          '- the person has not been removed from the room — a removal outranks an older invitation',
+          '',
+          'Accepting removes the invitation, so a second attempt finds nothing: single-use here is an absence, not a flag some later query could forget to filter on.',
+          '',
+          'A mismatched address answers the same 404 as an unknown token — saying which address it was meant for is exactly what the binding protects.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Joined',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    room: { $ref: '#/components/schemas/Room' },
+                    role: { $ref: '#/components/schemas/AssignableRole' },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+          ...{
+            403: {
+              description:
+                'The account exists but may not accept: `email_not_verified` until the address is proven, `room_forbidden` for somebody the room removed.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Error' },
+                  examples: {
+                    email_not_verified: {
+                      summary: 'Address not yet proven',
+                      value: { error: { code: 'email_not_verified', message: 'Verify your email address before accepting this invitation' } },
+                    },
+                    room_forbidden: {
+                      summary: 'Removed from the room',
+                      value: { error: { code: 'room_forbidden', message: 'You do not have access to this room' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...error(404, 'Unknown, expired, spent, or sent to another address', 'invitation_invalid', 'This invitation is invalid or has expired'),
+        },
+      },
+    },
+
     '/api/v1/runners': {
       get: {
         tags: ['Code execution'],
@@ -1256,6 +1451,13 @@ export const openapiDocument = {
         required: true,
         description: 'Id of a generation from the room history.',
         schema: { type: 'string', pattern: '^[0-9a-f]{24}$' },
+      },
+      invitationToken: {
+        name: 'token',
+        in: 'path',
+        required: true,
+        description: 'The invitation token from the emailed link. Single-use and bound to one address.',
+        schema: { type: 'string', pattern: '^[A-Za-z0-9_-]{16,128}$' },
       },
       executionId: {
         name: 'executionId',
@@ -1345,9 +1547,35 @@ export const openapiDocument = {
 
       VerifyEmailInput: {
         type: 'object',
-        required: ['token'],
+        description:
+          'Either proof will do, and exactly one is needed. One endpoint rather than two, because a client that has just been handed a code should not have to know it is now talking to a different route.',
         properties: {
           token: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Hex token from the emailed link.' },
+          code: {
+            type: 'string',
+            pattern: '^[0-9]{6}$',
+            description: 'The six digits from the same email.',
+          },
+          email: {
+            type: 'string',
+            format: 'email',
+            description:
+              'Which account the code belongs to, when there is no session. Ignored for a signed-in caller, whose account comes from the token — six digits are not unique across users, so a code is never matched by value alone.',
+          },
+        },
+        anyOf: [{ required: ['token'] }, { required: ['code'] }],
+      },
+
+      Invitation: {
+        type: 'object',
+        description:
+          'What an invitation is for, shown before anybody commits to anything. Deliberately thin: the room and who invited you, and nothing about who else is in it — an invitation is a key to one room, not a directory.',
+        properties: {
+          roomId: { type: 'string' },
+          roomName: { type: 'string' },
+          role: { $ref: '#/components/schemas/AssignableRole' },
+          invitedBy: { type: ['string', 'null'], description: 'Display name of whoever sent it.' },
+          expiresAt: { type: 'string', format: 'date-time' },
         },
       },
 

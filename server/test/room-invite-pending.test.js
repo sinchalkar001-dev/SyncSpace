@@ -88,11 +88,21 @@ describe('inviting an address with no account', () => {
     expect(message.to).toBe(NEWCOMER.email)
     expect(message.subject).toBe('Priya invited you to Design review on SyncSpace')
 
-    // The room link alone would only turn them away, so signing up comes first
-    // — but the code and the room are both there for afterwards.
+    // The room link alone would only turn them away, so signing up comes
+    // first, and the code is there for afterwards.
     expect(message.text).toContain(env.CLIENT_URL + '/register')
-    expect(message.text).toContain(env.CLIENT_URL + '/room/' + room.roomId)
     expect(message.text).toContain('room code: ' + room.roomId)
+
+    /**
+     * The link is now the invitation rather than the room.
+     *
+     * It used to point at the room, which is a page that would refuse them:
+     * they have no account yet, and the invitation was a row nobody could
+     * present. The accept link is the one thing that actually works for
+     * somebody in their position — and it is single-use, expiring, and bound
+     * to this address.
+     */
+    expect(message.text).toContain(env.CLIENT_URL + '/accept-invitation?token=')
   })
 
   it('does not pretend they are a member yet', async () => {

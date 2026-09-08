@@ -170,7 +170,15 @@ describe('environment validation', () => {
     })
 
     it('takes the From from the account when none is given', () => {
-      expect(loadEnv(GMAIL).MAIL_FROM).toBe('someone@gmail.com')
+      // The From now carries a display name as well as the address. The
+      // address is still the account's, because a relay only accepts a From
+      // it recognises — that part has not changed.
+      expect(loadEnv(GMAIL).MAIL_FROM).toBe('SyncSpace <someone@gmail.com>')
+    })
+
+    it('prefers the configured sender identity over the login', () => {
+      const env = loadEnv({ ...GMAIL, MAIL_FROM_EMAIL: 'syncspace06@gmail.com' })
+      expect(env.MAIL_FROM).toBe('SyncSpace <syncspace06@gmail.com>')
     })
 
     it('still wants a From when the login is not an address', () => {

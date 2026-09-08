@@ -8,6 +8,7 @@ import { logger } from './config/logger.js'
 import { createAuthRouter } from './routes/auth.routes.js'
 import { createRoomsRouter } from './routes/rooms.routes.js'
 import { createRunnersRouter } from './routes/runners.routes.js'
+import { createInvitationsRouter } from './routes/invitations.routes.js'
 import { createAiRouter } from './routes/ai.routes.js'
 import { createFilesRouter } from './routes/files.routes.js'
 import { mountDocs } from './docs/docs.routes.js'
@@ -56,6 +57,9 @@ export function createApp() {
   api.use('/rooms', createRoomsRouter())
   api.use('/rooms/:roomId/files', createFilesRouter())
   api.use('/runners', createRunnersRouter())
+  // Outside /rooms: the holder of an invitation has no access to the room it
+  // is for, and may not have an account yet.
+  api.use('/invitations', createInvitationsRouter())
   api.use('/ai', createAiRouter())
 
   app.use('/api/v1', api)

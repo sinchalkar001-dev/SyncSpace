@@ -35,6 +35,28 @@ export default defineConfig({
        * check without one, and pretending otherwise is worse than saying so.
        */
       SANDBOX_BACKEND: 'process',
+
+      /**
+       * No wait between verification emails, for every test that is not about
+       * the wait.
+       *
+       * The cooldown is a production behaviour and a real one — it is what
+       * stops the resend button being a way to mail-bomb an address. But a
+       * suite that has to sit out sixty seconds to re-register is a suite
+       * nobody runs, and loosening the assertions to cope would be worse.
+       * The cooldown has its own tests, which set the value themselves.
+       */
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: '0',
+
+      /**
+       * Compose every message, send none of them.
+       *
+       * Without this the suite is one `.env` away from mailing real people:
+       * a developer with working credentials would have several hundred
+       * verification emails delivered to whatever addresses the fixtures
+       * invent. The outbox still records them, so a test can read the code.
+       */
+      EMAIL_PROVIDER: 'mock',
     },
   },
 })

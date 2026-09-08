@@ -209,6 +209,27 @@ export const api = {
   /** Spends the token from a confirmation email. Single-use, so never retried. */
   verifyEmail: (token) => apiFetch('/auth/verify-email', { method: 'POST', body: { token } }),
 
+  /**
+   * The other proof from the same email.
+   *
+   * `email` is sent only when there is no session — six digits are not unique
+   * across accounts, so the server never matches a code by value alone, and
+   * without one of the two it has no account to check it against.
+   */
+  verifyEmailCode: ({ code, email }) =>
+    apiFetch('/auth/verify-email', { method: 'POST', body: email ? { code, email } : { code } }),
+
+  /** What the check-your-email screen renders from: masked address, cooldown, attempts left. */
+  verificationStatus: (signal) => apiFetch('/auth/verification-status', { signal, retry: 2 }),
+
+  /** What an invitation is for, before anybody commits to anything. */
+  invitation: (token, signal) =>
+    apiFetch('/invitations/' + encodeURIComponent(token), { signal }),
+
+  /** Spends it. Single-use, and bound to the address it was sent to. */
+  acceptInvitation: (token) =>
+    apiFetch('/invitations/' + encodeURIComponent(token) + '/accept', { method: 'POST' }),
+
   /** Issues a fresh confirmation email for the signed-in account. */
   resendVerification: () => apiFetch('/auth/resend-verification', { method: 'POST' }),
 

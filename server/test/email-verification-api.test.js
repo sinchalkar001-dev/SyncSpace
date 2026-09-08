@@ -131,7 +131,9 @@ describe('POST /api/v1/auth/resend-verification', () => {
       .set('Authorization', 'Bearer ' + token)
 
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ sent: true })
+    // `retryAfter` rides along now, so the client can count the cooldown
+    // down rather than guessing at it.
+    expect(res.body).toMatchObject({ sent: true })
     expect(loggedTokens()).toHaveLength(2)
 
     const stale = await request(app).post('/api/v1/auth/verify-email').send({ token: first })

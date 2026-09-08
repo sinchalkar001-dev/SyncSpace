@@ -158,8 +158,62 @@ const schema = z
     // which is what every provider's instructions assume.
     SMTP_SECURE: booleanish.optional(),
 
-    MAIL_FROM: z.string().optional(),
+    /**
+     * Who the mail comes from.
+     *
+     * Split in two because the name and the address are different things and
+     * only one of them is an identity: SyncSpace sends as exactly one address,
+     * and a relay only accepts a From it recognises anyway. `MAIL_FROM` is
+     * still read when set, so existing deployments keep working — it simply
+     * takes precedence over the pair.
+     */
+    MAIL_FROM_NAME: z.string().trim().default('SyncSpace'),
+    MAIL_FROM_EMAIL: blankIsUnset(z.string().trim().email().optional()),
+    MAIL_FROM: blankIsUnset(z.string().optional()),
+
+    /**
+     * `mock` keeps every message in memory instead of sending it, and exposes
+     * the last one so a test can read the code out of it. Refused in
+     * production: a deployment that silently stopped sending mail would look
+     * healthy right up until somebody could not sign in.
+     */
+    EMAIL_PROVIDER: z.enum(['smtp', 'mock']).default('smtp'),
+
     CLIENT_URL: z.string().optional(),
+
+    /**
+     * How long proof of an address stays good for.
+     *
+     * Two numbers because they are two different risks. The link is a 256-bit
+     * secret nobody can guess, so it can afford half an hour; the code is six
+     * digits somebody could sit and try, so it expires sooner and is bounded
+     * by an attempt count as well.
+     */
+    EMAIL_VERIFICATION_TOKEN_EXPIRY_MINUTES: z.coerce.number().int().positive().max(1440).default(30),
+    EMAIL_VERIFICATION_CODE_EXPIRY_MINUTES: z.coerce.number().int().positive().max(120).default(10),
+
+    /**
+     * Guessing budget for the six-digit code, and the wait between emails.
+     *
+     * A million combinations sounds like plenty until somebody scripts it.
+     * Five attempts makes the code worthless as a guessing target, and the
+     * cooldown stops the resend button being a way to mail-bomb an address.
+     */
+    EMAIL_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
+    EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().max(3600).default(60),
+
+    /**
+     * Whether an unverified account may sign in.
+     *
+     * Off, because turning it on locks out every account that has not verified
+     * yet — including every account created before verification was enforced.
+     * Production turns it on deliberately, once the people who need to verify
+     * have had the chance.
+     */
+    REQUIRE_EMAIL_VERIFICATION: booleanish.default('false'),
+
+    /** How long a room invitation stays acceptable. A week, by default. */
+    INVITATION_EXPIRY_HOURS: z.coerce.number().int().positive().max(8760).default(168),
 
     CORS_ORIGIN: origins.optional(),
     LOG_LEVEL: z
@@ -348,6 +402,22 @@ const schema = z
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'production') return
 
+    /**
+     * A production deployment must never quietly stop sending mail.
+     *
+     * The mock transport is how the tests read a verification code without a
+     * relay. In production it would mean every verification email vanishing
+     * into memory while the API answered `{ sent: true }` — an outage that
+     * looks exactly like everything working, until nobody can sign in.
+     */
+    if (value.EMAIL_PROVIDER === 'mock') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMAIL_PROVIDER'],
+        message: 'EMAIL_PROVIDER=mock does not send email and is refused in production',
+      })
+    }
+
     if (!value.JWT_SECRET) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -459,12 +529,25 @@ export function loadEnv(source = process.env) {
     // Implicit TLS is port 465's whole distinction; everything else starts
     // plain and upgrades with STARTTLS.
     SMTP_SECURE: parsed.data.SMTP_SECURE ?? parsed.data.SMTP_PORT === 465,
-    // A relay will only accept a From it recognises, and for a personal
-    // account that is the account itself.
-    MAIL_FROM: parsed.data.MAIL_FROM || parsed.data.SMTP_USER,
     // Emailed links land on the client; the first allowed origin is the same
     // app in every deployment we run.
     CLIENT_URL: parsed.data.CLIENT_URL || corsOrigin[0],
+
+    /**
+     * The From header, assembled once here rather than at each send.
+     *
+     * An explicit MAIL_FROM still wins, so deployments that set it keep
+     * working unchanged. Otherwise it is built from the name and the address,
+     * and falls back to the SMTP login — which for Gmail is the address
+     * anyway, and is the only From that relay will accept.
+     */
+    MAIL_FROM:
+      parsed.data.MAIL_FROM ||
+      (parsed.data.MAIL_FROM_EMAIL
+        ? parsed.data.MAIL_FROM_NAME + ' <' + parsed.data.MAIL_FROM_EMAIL + '>'
+        : parsed.data.SMTP_USER
+          ? parsed.data.MAIL_FROM_NAME + ' <' + parsed.data.SMTP_USER + '>'
+          : undefined),
   }
 }
 

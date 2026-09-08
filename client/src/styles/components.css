@@ -2451,3 +2451,22 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/*
+  The verification code field.
+
+  Wide-tracked and monospaced so six digits read as six digits — a proportional
+  font makes 111111 and 888888 different widths, which is exactly the moment
+  somebody miscounts and retypes a code that was right.
+*/
+.verify__form {
+  margin-top: var(--space-4);
+  text-align: left;
+}
+
+.verify__code {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  letter-spacing: 0.4em;
+  text-align: center;
+}

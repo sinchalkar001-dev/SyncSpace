@@ -36,6 +36,18 @@ export default function Login() {
       toast.success('Welcome back, ' + user.name)
       navigate(redirectTo, { replace: true })
     } catch (cause) {
+      /**
+       * An unverified account is not a failed sign-in, it is an unfinished
+       * one, and the way forward is a page rather than a message. Leaving it
+       * as a red banner would tell somebody what is wrong and nothing about
+       * what to do — the code and the resend button are both on that screen.
+       */
+      if (cause.code === 'email_not_verified') {
+        toast.info('Verify your email address to finish signing in')
+        navigate('/check-email', { replace: true })
+        return
+      }
+
       setError(cause.message)
     } finally {
       setBusy(false)

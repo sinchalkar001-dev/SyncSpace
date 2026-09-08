@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { User } from '../models/User.js'
 import { env } from '../config/env.js'
-import { conflict, unauthorized } from '../errors.js'
+import { AppError, conflict, unauthorized } from '../errors.js'
 import { sendVerificationEmail } from './verification.service.js'
 import { claimPendingInvites } from './room.service.js'
 import { findSession, revokeAllSessions, startSession } from './session.service.js'
@@ -124,6 +124,29 @@ export async function login({ email, password }, context) {
   const ok = await verifyPassword(password, hash)
 
   if (!user || !ok) throw unauthorized('Incorrect email or password', 'bad_credentials')
+
+  /**
+   * An unverified account may or may not sign in, and that is a deployment
+   * decision rather than a product one.
+   *
+   * Off by default, because turning it on locks out every account that has
+   * not verified yet — including every account created before verification
+   * was enforced at all. A deployment turns it on once the people who need to
+   * verify have had the chance, which is the migration this feature needs and
+   * cannot perform for anybody.
+   *
+   * The refusal comes *after* the password check on purpose. Answering
+   * `email_not_verified` to a wrong password would confirm the address exists
+   * and has an account, which is exactly what `bad_credentials` is worded to
+   * avoid.
+   */
+  if (env.REQUIRE_EMAIL_VERIFICATION && !user.emailVerified) {
+    throw new AppError(
+      403,
+      'Verify your email address before signing in',
+      'email_not_verified'
+    )
+  }
 
   // A new sign-in is a new device in the list, not a replacement for whatever
   // is already there — that is the whole point of listing them.

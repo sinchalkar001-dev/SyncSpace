@@ -106,7 +106,7 @@ describe('VerifyEmail', () => {
     expect(await screen.findByText('That link did not work')).toBeInTheDocument()
     expect(screen.getByText(/invalid or has expired/)).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Send a new link' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Send a new email' }))
     await waitFor(() =>
       expect(calls.some((c) => c.path.endsWith('/auth/resend-verification'))).toBe(true)
     )
@@ -117,15 +117,48 @@ describe('VerifyEmail', () => {
     renderPage('?token=' + TOKEN, session({ isAuthenticated: false, user: null }))
 
     await screen.findByText('That link did not work')
-    expect(screen.queryByRole('button', { name: 'Send a new link' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send a new email' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument()
   })
 
-  it('asks for the emailed link when opened with no token', async () => {
+  /**
+   * Opening this page with no token used to be a dead end — "Nothing to
+   * confirm", and a link back to the dashboard. It is now the screen somebody
+   * lands on straight after signing up: the code from the same email goes in
+   * here, which is what you use when the mail is on your phone and SyncSpace
+   * is open on a laptop.
+   */
+  it('offers the code entry when opened with no token', async () => {
     renderPage('')
 
-    expect(await screen.findByText('Nothing to confirm')).toBeInTheDocument()
+    expect(await screen.findByText('Check your email')).toBeInTheDocument()
+    expect(screen.getByLabelText('Verification code')).toBeInTheDocument()
+
+    // Nothing is spent by arriving: no proof has been offered yet.
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0)
+  })
+
+  it('will not submit a code that is not six digits', async () => {
+    renderPage('')
+
+    const field = await screen.findByLabelText('Verification code')
+    await userEvent.type(field, '123')
+
+    expect(screen.getByRole('button', { name: 'Verify email' })).toBeDisabled()
+  })
+
+  it('sends the typed code and reports what the server says', async () => {
+    renderPage('')
+
+    const field = await screen.findByLabelText('Verification code')
+    await userEvent.type(field, '482931')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify email' }))
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.path.endsWith('/auth/verify-email') && c.method === 'POST')).toBe(
+        true
+      )
+    )
   })
 })
 

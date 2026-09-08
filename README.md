@@ -185,10 +185,88 @@ reason anyone opens this list — and both are deleted with the row when the ses
 `req.ip` follows Express's `trust proxy`; behind a load balancer without it set, every session
 records the balancer's address instead, which is useless rather than misleading.
 
-**Outgoing mail.** Three things are sent: the sign-up confirmation link, valid for 24 hours, the
-password reset link above, and a room invitation. With no relay configured all are written to the
-server log instead, which is all development needs — the invite toast says as much and hands you
-the room code to pass on yourself, and the reset link is in the log to follow.
+## Email verification
+
+A new account is created **unverified**, and the only thing that changes that is confirming the
+address. Not a valid-looking address, not a successful sign-up, and not the frontend saying so —
+the backend is the source of truth and nothing else writes `emailVerified`.
+
+The confirmation email carries **two proofs**, because they suit different situations. The link is
+one tap on whatever device holds the mailbox. The six-digit code is what you use when the email is
+on your phone and SyncSpace is open on a laptop — the alternative there is retyping a 64-character
+token, which nobody does.
+
+They are not the same secret and are not treated as one:
+
+| | Link | Code |
+| --- | --- | --- |
+| Size | 256 bits | six digits |
+| Expiry | 30 minutes | 10 minutes |
+| Attempts | unlimited — it cannot be guessed | 5, then it burns |
+| Compared | by hash lookup | in constant time |
+
+Running out of attempts **burns the code outright** rather than merely refusing it. Leaving it live
+would hand the guesses back to whoever triggers the next resend, and the limit would buy nothing.
+Only hashes are stored, so a database leak cannot be replayed against either.
+
+Resending replaces both, resets the attempt budget, and is held behind a cooldown — that cooldown
+is what stops the button being a way to mail-bomb an address, and it lives on the account rather
+than in memory so it survives a restart and holds across every server process.
+
+**Signing in with an unverified address** depends on `REQUIRE_EMAIL_VERIFICATION`, which is off by
+default. Turning it on locks out every account that has not verified yet, including every one
+created before verification was enforced, so it is a deliberate act once the people who need to
+verify have had the chance. The refusal comes *after* the password check: answering
+`email_not_verified` to a wrong password would confirm the address has an account, which is exactly
+what `bad_credentials` is worded to avoid.
+
+## Room invitations
+
+An invitation used to be a row saying "this address is expected". That is enough to let somebody in
+when they sign up and nothing else — it could not expire, could not be used once, and could not be
+told apart from a guess at an address. A room invited to in March was still standing in December.
+
+Invitations now carry a hashed, expiring, single-use token, and the property that makes it worth
+having is that it is **bound**: to the room, and to the address it was sent to. A forwarded
+invitation is not a way into somebody else's room.
+
+Four things must hold to accept one, and each closes something specific:
+
+- the token resolves — otherwise it is expired, spent or invented
+- the account's address matches the one invited
+- that address has been verified
+- the person has not been removed from the room since
+
+Accepting removes the invitation, so a second attempt finds nothing: single-use here is an absence,
+not a flag some later query could forget to filter on. A mismatched address answers the same 404 as
+an unknown token, because saying which address it was meant for is exactly what the binding
+protects.
+
+**Whether an invitation is claimed automatically** depends on the same setting. With verification
+not required, signing up from an invitation puts you in the room, as it always has — there is
+nothing to bypass, and removing the convenience would only add a step. With verification required,
+the invitation waits and is redeemed by presenting the token. That asymmetry is deliberate: an
+invitation can only bypass verification where verification means something, and auto-claiming a
+tokened invitation would consume it, leaving the person to follow the link in their email and be
+told it was invalid — spent by something they never did.
+
+Invitations sent before tokens existed have nothing to present, so they are still claimed on
+sign-up. Without that, everybody holding one would have been stranded by the upgrade.
+
+**Outgoing mail.** Four things are sent: the verification email, the password reset link, a room
+invitation, and the relay check. All come from one sender identity — `MAIL_FROM_NAME` and
+`MAIL_FROM_EMAIL` — because a relay only accepts a From it recognises. With no relay configured all
+are written to the server log instead, which is all development needs.
+
+Templates live in [email.templates.js](server/src/services/email.templates.js), separate from the
+sending, because copy and infrastructure change for different reasons and by different people. Each
+is HTML plus plain text: the text part is not a courtesy, a message without one is scored as spam by
+most filters, and the one thing these emails cannot afford is to be filed as junk.
+
+`EMAIL_PROVIDER=mock` composes every message and sends none, keeping the last few where a test can
+read the code out of one — which is how the suite checks verification without scraping log output.
+It is **refused in production**: a deployment that silently stopped sending mail would look
+perfectly healthy right up until nobody could sign in.
 
 Copy `server/.env.example` to `server/.env` and fill in the relay. For Gmail that means turning on
 [2-Step Verification](https://myaccount.google.com/signinoptions/twosv) first — app passwords do not
@@ -214,8 +292,17 @@ one thing the app itself will never tell you.
 | `SMTP_PASS` | *(unset)* | App password. Spaces are stripped, so paste it as shown |
 | `SMTP_SECURE` | port is `465` | Override TLS-from-the-first-byte if your relay is unusual |
 | `SMTP_URL` | *(unset)* | The whole relay as one URL instead of the parts above. Use one form or the other, never both; a password containing `@` or `:` must be percent-encoded here |
-| `MAIL_FROM` | `SMTP_USER` | From-header, e.g. `SyncSpace <no-reply@syncspace.example>`. Required when the login is not itself an address |
+| `MAIL_FROM_NAME` | `SyncSpace` | Display name on every message |
+| `MAIL_FROM_EMAIL` | `SMTP_USER` | The one address SyncSpace sends as |
+| `MAIL_FROM` | *(derived)* | The older single-field form. Still read, and still wins when set, so an existing deployment keeps working |
+| `EMAIL_PROVIDER` | `smtp` | `mock` composes and sends nothing. Refused in production |
 | `CLIENT_URL` | first `CORS_ORIGIN` | Absolute origin the emailed links point at |
+| `EMAIL_VERIFICATION_TOKEN_EXPIRY_MINUTES` | `30` | Life of the emailed link |
+| `EMAIL_VERIFICATION_CODE_EXPIRY_MINUTES` | `10` | Life of the six-digit code — shorter, because it is guessable |
+| `EMAIL_VERIFICATION_MAX_ATTEMPTS` | `5` | Wrong codes before the code is burned outright |
+| `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS` | `60` | Wait between verification emails |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | Whether an unverified account may sign in. Turning it on locks out everyone not yet verified |
+| `INVITATION_EXPIRY_HOURS` | `168` | How long a room invitation stays acceptable |
 
 **Keeping credentials out of the repository.** A gitignore only lists the mistakes somebody already
 thought of — `server/uploads/` was missing from it until a test run staged the files it had written
