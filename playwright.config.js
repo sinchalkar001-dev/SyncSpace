@@ -52,6 +52,20 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 120000,
       env: {
+        /**
+         * The whole-API budget, not just the credential ones.
+         *
+         * Every request in the suite arrives from one address, and the
+         * production default of 300 per fifteen minutes is spent somewhere
+         * around the fiftieth test — after which everything fails with "Too
+         * many requests", including tests that have nothing to do with rate
+         * limiting. It surfaces as sign-ups that hang rather than as anything
+         * naming a limit, which is what makes it worth pinning here.
+         */
+        RATE_LIMIT_MAX: '5000',
+        INVITE_RATE_LIMIT_MAX: '500',
+        RUN_RATE_LIMIT_MAX: '500',
+
         AUTH_RATE_LIMIT_REGISTER_MAX: '500',
         AUTH_RATE_LIMIT_LOGIN_MAX: '500',
         AUTH_RATE_LIMIT_FORGOT_MAX: '500',
@@ -79,6 +93,18 @@ export default defineConfig({
         // browser's Origin as it is, so the collab upgrade is refused without
         // this and every room test fails at "Connected".
         CORS_ORIGIN: CLIENT,
+
+        /**
+         * Compose every message, send none of them.
+         *
+         * This server runs in development mode, so it reads server/.env —
+         * which on a machine with working credentials means the suite would
+         * mail dozens of invented addresses through a real Gmail account, and
+         * collect the bounces. The unit suite is protected by NODE_ENV=test
+         * skipping dotenv entirely; this is the same protection for the one
+         * suite that cannot use it.
+         */
+        EMAIL_PROVIDER: 'mock',
 
         /**
          * Which sandbox runs the programs, pinned rather than discovered.
