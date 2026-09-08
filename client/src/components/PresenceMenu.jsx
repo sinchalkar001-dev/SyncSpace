@@ -4,7 +4,7 @@ import { useDismissable } from '../hooks/useDismissable.js'
 import { useRoomPeople } from '../hooks/useRoomPeople.js'
 import { useToast } from './ui/useToast.js'
 import { PresenceBar } from './PresenceBar.jsx'
-import { InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
+import { INVITE_HINT, InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../hooks/useRoomAccess.js'
 import { Button } from './ui/Button.jsx'
 import { Icon } from './ui/Icon.jsx'
@@ -234,7 +234,7 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, ac
             <InviteForm
               onInvite={invite}
               pending={pending === 'invite'}
-              hint="We email them the room code. No account yet? They will be asked to sign up with that address, and the room is waiting when they do."
+              hint={INVITE_HINT}
             />
           )}
 

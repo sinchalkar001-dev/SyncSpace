@@ -65,6 +65,18 @@ export function PersonRow({ name, detail, tag, color, muted, action }) {
 }
 
 /**
+ * What an invitation actually does, said once.
+ *
+ * The room popover and the dashboard dialog offer the same form and send the
+ * same email, and while this sentence lived in both of them it drifted: the
+ * two descriptions of one behaviour had stopped agreeing on what the recipient
+ * would be asked for. Copy that describes a rule belongs with the rule.
+ */
+export const INVITE_HINT =
+  'Invitees receive an email with the room code and a link to open it. ' +
+  'Anyone without a SyncSpace account will be asked to create one using the same address.'
+
+/**
  * Invite by email address, because that is what the owner of a room actually
  * knows about the person they are waiting for. The field keeps its value when
  * the address is refused — a typo is worth correcting, not retyping.

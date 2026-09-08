@@ -1,7 +1,7 @@
 import { useAuth } from '../auth/useAuth.js'
 import { useRoomPeople } from '../hooks/useRoomPeople.js'
 import { formatWhen, roomLabel } from '../lib/rooms.js'
-import { InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
+import { INVITE_HINT, InviteForm, PersonRow, RoleSelect } from './PeopleList.jsx'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../hooks/useRoomAccess.js'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
@@ -107,7 +107,7 @@ export function RoomPeopleDialog({ room, open, onClose, access }) {
               <InviteForm
                 onInvite={invite}
                 pending={pending === 'invite'}
-                hint="We email them the room code and a link straight to this room. If they have no account yet, they are asked to sign up with that address and the room is waiting when they do."
+                hint={INVITE_HINT}
               />
             </section>
           )}
