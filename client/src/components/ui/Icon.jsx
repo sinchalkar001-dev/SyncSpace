@@ -77,6 +77,15 @@ const ICONS = {
 
   info: { d: 'M12 3.5 A8.5 8.5 0 1 1 12 20.5 A8.5 8.5 0 1 1 12 3.5 Z M12 11 V16.4 M12 7.8 H12.01' },
   alert: { d: 'M12 3.5 A8.5 8.5 0 1 1 12 20.5 A8.5 8.5 0 1 1 12 3.5 Z M12 7.6 V13 M12 16.4 H12.01' },
+  // Added for the dashboard: pinning a room, filing one away, and the control
+  // that orders the grid. Drawn on the same 24x24 grid as everything above.
+  pin: {
+    d: 'M9 3.5 H15 L14.2 9.2 L17.8 12.4 V14.2 H12.9 V20.5 L12 21.8 L11.1 20.5 V14.2 H6.2 V12.4 L9.8 9.2 Z',
+    filled: true,
+  },
+  archive: { d: 'M3.4 4.5 H20.6 V8.4 H3.4 Z M4.9 8.4 H19.1 V19.5 H4.9 Z M9.6 12.2 H14.4' },
+  sort: { d: 'M4 6.5 H20 M6.6 12 H17.4 M9.6 17.5 H14.4' },
+
   checkCircle: { d: 'M12 3.5 A8.5 8.5 0 1 1 12 20.5 A8.5 8.5 0 1 1 12 3.5 Z M8 12.2 L11 15.2 L16.2 9.4' },
 }
 

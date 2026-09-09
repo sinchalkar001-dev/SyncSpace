@@ -5,6 +5,7 @@ import path from 'node:path'
 import mongoose from 'mongoose'
 import { AppError, badRequest, forbidden, notFound } from '../errors.js'
 import { env } from '../config/env.js'
+import { ACTIVITY, recordActivity } from './activity.service.js'
 import { logger } from '../config/logger.js'
 import { Execution } from '../models/Execution.js'
 import { getIo } from '../realtime/registry.js'
@@ -168,12 +169,37 @@ async function persist(job) {
   })
 }
 
+/**
+ * Tells the room's feed that a run finished.
+ *
+ * Only the last transition, and never collapsed: two runs a second apart are
+ * two answers, and folding them together would hide whichever one failed -
+ * which is invariably the one somebody wanted to know about.
+ */
+function noteFinished(job) {
+  if (!isTerminal(job.state)) return
+
+  const outcome =
+    job.state === 'completed'
+      ? job.language + ' ran cleanly'
+      : job.language + ' run ' + String(job.state).replace('_', ' ')
+
+  recordActivity({
+    roomId: job.roomId,
+    kind: ACTIVITY.EXECUTION_COMPLETED,
+    actor: job.user?.id ?? null,
+    actorName: job.user?.name ?? null,
+    detail: outcome,
+  })
+}
+
 const queue = createExecutionQueue({
   run: runJob,
   caps,
   onState: (job) => {
     announce(job)
     persist(job)
+    noteFinished(job)
   },
 })
 

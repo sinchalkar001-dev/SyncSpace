@@ -306,6 +306,27 @@ export const api = {
     }),
   updateRoom: (roomId, patch) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'PATCH', body: patch }),
+
+  /**
+   * Pins or archives a room for the signed-in account only.
+   *
+   * Either field may be omitted, and omitting one leaves it alone - which is
+   * what lets the pin control and the archive control on the same card write
+   * without either clobbering the other's state.
+   */
+  setRoomPreference: (roomId, preference) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/preferences', {
+      method: 'PUT',
+      body: preference,
+    }),
+
+  /** What has happened lately across every room this account belongs to. */
+  activity: (limit, signal) =>
+    apiFetch('/activity' + (limit ? '?limit=' + encodeURIComponent(limit) : ''), { signal }),
+
+  /** One room's feed. Same access rule as reading the room. */
+  roomActivity: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/activity', { signal }),
   deleteRoom: (roomId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId), { method: 'DELETE' }),
 

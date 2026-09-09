@@ -61,10 +61,32 @@ const pendingInviteSchema = new mongoose.Schema(
   { _id: false }
 )
 
+/**
+ * What a room is for.
+ *
+ * Four values rather than free-form tags, because this exists to answer one
+ * question on a dashboard - "which of these forty is the system design one" -
+ * and a tag cloud answers it worse than a fixed set. `general` is the default
+ * and the honest label for a room nobody has classified, rather than guessing
+ * from the name.
+ */
+export const ROOM_KINDS = Object.freeze(['general', 'coding', 'interview', 'system-design'])
+
 const roomSchema = new mongoose.Schema(
   {
     roomId: { type: String, required: true, unique: true },
     name: { type: String, trim: true, maxlength: 80, default: 'Untitled room' },
+
+    /**
+     * A sentence about what this room is, shown on its card.
+     *
+     * Short on purpose. Anything longer than a line stops being a label and
+     * starts being a document, and a room already has somewhere to put a
+     * document - the room.
+     */
+    description: { type: String, trim: true, maxlength: 280, default: '' },
+
+    kind: { type: String, enum: ROOM_KINDS, default: 'general' },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     members: { type: [memberSchema], default: [] },
     blocked: { type: [blockedSchema], default: [] },
@@ -125,10 +147,15 @@ roomSchema.methods.toPublic = function toPublic() {
   return {
     roomId: this.roomId,
     name: this.name,
+    description: this.description || '',
+    kind: this.kind || 'general',
     isPublic: this.isPublic,
     owner: this.owner ? String(this.owner) : null,
     memberCount: this.members.length,
     lastActivityAt: this.lastActivityAt,
+    // Distinct from lastActivityAt: one is "somebody was in here", the other
+    // is "somebody changed what this room is". A card shows both.
+    updatedAt: this.updatedAt,
   }
 }
 

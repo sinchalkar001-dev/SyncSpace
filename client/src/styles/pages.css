@@ -496,13 +496,24 @@
 
 /* ---------- dashboard ---------- */
 
-.dash__hero {
+/*
+  The header is a greeting, a line of figures, and the two things somebody
+  might have come here to do. The figures are a sentence rather than a grid of
+  tiles on purpose: they are context for the rooms below, not the subject of
+  the page, and four boxes of numbers is exactly the house style this is meant
+  not to look like.
+*/
+.dash__head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-5);
   flex-wrap: wrap;
   margin-bottom: var(--space-6);
+}
+
+.dash__intro {
+  min-width: 0;
 }
 
 .dash__greeting {
@@ -520,17 +531,50 @@
   font-size: var(--text-md);
 }
 
-.dash__overview {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1.35fr);
-  gap: var(--space-3);
-  margin-bottom: var(--space-8);
+.dash__live {
+  color: var(--ok);
 }
 
-/* Fixed 2x2 rather than auto-fit: at this column width auto-fit lands on three
-   across and drops the fourth card onto a lonely second row. */
-.dash__overview .statgrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.dash__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dash__join {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dash__join .input {
+  width: 11rem;
+}
+
+/*
+  Rooms, and the feed beside them.
+
+  A fixed rail rather than a fraction, because the feed is a column of short
+  lines: given a share of the width it grows into a paragraph column and reads
+  worse the wider the screen gets. The rooms take everything left over.
+*/
+.dash__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.dash__main {
+  min-width: 0;
+}
+
+.dash__aside {
+  display: grid;
+  gap: var(--space-3);
+  position: sticky;
+  top: var(--space-4);
 }
 
 .dash__activity {
@@ -559,7 +603,187 @@
   letter-spacing: var(--tracking-wide);
 }
 
-/* Room list toolbar: search, filters, sort. */
+/* ---------- continue where you left off ---------- */
+
+/*
+  One room, given the width of the page.
+
+  Deliberately not a card in the grid below. It is a different proposition -
+  "go here now" rather than "here is another room" - and giving it the same
+  shape as the twelve cards under it would make it one of them.
+*/
+.continue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  /* The room's own identity colour, at the strength of a wash. The stripe on
+     its card uses the same value, so the two read as the same room. */
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--identity, var(--accent)) 12%, var(--surface)),
+    var(--surface) 62%
+  );
+  box-shadow: var(--shadow-1), var(--sheen);
+}
+
+.continue__body {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.continue__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.continue__name {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.continue__desc {
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+
+.continue__meta,
+.continue__stat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+.continue__side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.continue__people {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* ---------- recent activity ---------- */
+
+.feed {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--sheen);
+}
+
+.feed__head {
+  margin-bottom: var(--space-3);
+}
+
+.feed__list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feed__item {
+  min-width: 0;
+}
+
+.feed__empty {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/*
+  Each row is a link back to its room, so reading the feed and acting on it are
+  the same gesture. A button rather than an anchor because the destination is a
+  client route the page already owns.
+*/
+.feed__link {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.feed__link:hover {
+  background: var(--surface-2);
+}
+
+.feed__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.feed__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.feed__what {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed__where,
+.feed__detail {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- room list toolbar ---------- */
+
 .roomtools {
   display: flex;
   align-items: center;
@@ -570,15 +794,16 @@
 
 .roomtools__search {
   position: relative;
-  flex: 1;
-  min-width: 200px;
+  flex: 1 1 14rem;
+  min-width: 12rem;
 }
 
 .roomtools__search .input {
   padding-left: 36px;
+  padding-right: 30px;
 }
 
-.roomtools__search svg {
+.roomtools__search > svg {
   position: absolute;
   left: var(--space-3);
   top: 50%;
@@ -587,9 +812,43 @@
   pointer-events: none;
 }
 
+/* The shortcut, shown where the shortcut lands. Hidden the moment the field
+   is in use, where it would sit on top of what somebody is typing. */
+.roomtools__key {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  pointer-events: none;
+}
+
+.roomtools__search .input:focus ~ .roomtools__key,
+.roomtools__search .input:not(:placeholder-shown) ~ .roomtools__key {
+  display: none;
+}
+
+.roomtools__sort {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.roomtools__sort > svg {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
 .roomtools__sort select {
   min-height: 40px;
-  padding: 0 30px 0 var(--space-3);
+  padding: 0 30px 0 34px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-2);
@@ -609,6 +868,50 @@
 .roomtools__sort select:hover {
   border-color: var(--border-strong);
   color: var(--text);
+}
+
+.roomtools__archived {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.roomtools__archived:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.roomtools__archived--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* A subheading inside a section, for Pinned and Everything else. */
+.section__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.section__sub:first-of-type {
+  margin-top: 0;
 }
 
 /* ---------- room cards ---------- */
@@ -778,6 +1081,198 @@
   cursor: default;
 }
 
+
+/* ---------- room card, the parts a workspace needs ---------- */
+
+/*
+  A responsive grid rather than a stack of full-width rows.
+
+  With forty rooms the single column was a mile of scrolling in which every
+  entry looked the same. Two across at this column width halves that, and
+  auto-fill means the main column decides how many fit rather than a
+  breakpoint guessing.
+*/
+.roomlist {
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--space-3);
+}
+
+.roomcard__main {
+  justify-content: flex-start;
+  gap: var(--space-2);
+  min-height: 132px;
+  padding: var(--space-4);
+}
+
+/* The kind, whether anything is happening, and how this room reaches you. */
+.roomcard__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-height: 20px;
+  /* The pin and the menu float over this corner, so the first row keeps clear
+     of them - otherwise a room that is live and shared runs its badges
+     underneath the controls. */
+  padding-right: 64px;
+}
+
+.roomcard__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.roomcard__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ok);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+/*
+  Two lines, then it stops.
+
+  A fixed two-line box rather than one that grows: cards sit side by side in a
+  grid, and a description free to be five lines tall would set the height of
+  every card in its row.
+*/
+.roomcard__desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.7em;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.roomcard__desc--empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.roomcard__meta {
+  margin-top: auto;
+  gap: var(--space-2) var(--space-3);
+}
+
+.roomcard__stat--quiet {
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+/* Overlapping initials, the way a room's people are shown everywhere else. */
+.roomcard__faces {
+  display: inline-flex;
+  align-items: center;
+}
+
+.roomcard__face {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: -6px;
+  border: 1px solid var(--surface);
+  border-radius: 50%;
+  background: var(--identity, var(--surface-3));
+  color: var(--accent-ink);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.roomcard__face--more {
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+/* Pin and menu, stacked at the card's top-right corner. */
+.roomcard__tools {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.roomcard__menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: 0;
+}
+
+.roomcard__pin {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  /* Out of the way until wanted. A pin on every card at full strength turns
+     the grid into a field of icons; hover, focus and being pinned each bring
+     it back. */
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.roomcard:hover .roomcard__pin,
+.roomcard__pin:focus-visible,
+.roomcard__pin--on {
+  opacity: 1;
+}
+
+.roomcard__pin:hover {
+  background: var(--surface-4);
+  color: var(--text);
+}
+
+.roomcard__pin--on {
+  color: var(--accent);
+}
+
+.roomcard--pinned .roomcard__stripe {
+  opacity: 1;
+}
+
+/* Filed away, not deleted: still legible, visibly set aside. */
+.roomcard--archived {
+  opacity: 0.62;
+}
+
+.roomcard--archived:hover {
+  opacity: 1;
+}
+
+/* A quiet badge for a state rather than a property: archived, shared. */
+.pill--quiet {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.pill--kind {
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
 /* Attribution label: who drew the shape under the pointer. Follows the
    pointer only on enter, so it never chases the cursor across a stroke. */
 .authortip {
@@ -888,9 +1383,17 @@
   }
 }
 
-@media (max-width: 1023px) {
-  .dash__overview {
-    grid-template-columns: 1fr;
+@media (max-width: 1180px) {
+  /* The activity rail stops being a rail and becomes a block under the rooms,
+     rather than squeezing the grid it sits beside down to one card wide. */
+  .dash__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash__aside {
+    position: static;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    align-items: start;
   }
 }
 
@@ -1013,8 +1516,19 @@
     opacity: 1;
   }
 
-  .dash__hero {
+  .dash__head,
+  .continue {
     align-items: flex-start;
+  }
+
+  .dash__actions,
+  .dash__join {
+    width: 100%;
+  }
+
+  .dash__join .input {
+    flex: 1;
+    width: auto;
   }
 
   .statgrid {

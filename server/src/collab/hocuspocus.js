@@ -1,5 +1,6 @@
 import { Hocuspocus } from '@hocuspocus/server'
 import { MongoPersistence } from './persistence.js'
+import { watchDocument } from './document-activity.js'
 import { authenticate } from '../services/auth.service.js'
 import { ensureRoom } from '../services/room.service.js'
 import { CAPABILITIES, can, roleFor } from '../permissions.js'
@@ -105,6 +106,16 @@ export function createHocuspocus() {
         role: roleFor(room, user.id),
         sessionId: user.sessionId,
       }
+    },
+
+    /**
+     * Runs once the snapshot and the update log have been applied, which is
+     * the only safe moment to start listening: a document loading replays its
+     * whole history into itself, and a listener attached any earlier would
+     * report all of it as work somebody had just done.
+     */
+    async afterLoadDocument({ documentName, document }) {
+      watchDocument(documentName, document)
     },
 
     async onConnect({ documentName }) {

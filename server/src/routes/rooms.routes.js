@@ -10,14 +10,16 @@ import {
   getRoom,
   inviteMember,
   listPeople,
-  listRoomsForUser,
+  listDashboardRooms,
   removeMember,
   setMemberRole,
+  setRoomPreference,
   transferOwnership,
   unblockMember,
   updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
+import { listRoomActivity } from '../services/activity.service.js'
 import {
   applyGeneration,
   getGeneration,
@@ -38,11 +40,14 @@ import { env } from '../config/env.js'
 import { createRateLimiters } from '../middleware/rateLimit.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
 import { CAPABILITIES, ROLE_NAMES, ROLES, can, describeAccess } from '../permissions.js'
+import { ROOM_KINDS } from '../models/Room.js'
 import { refusalFor } from '../middleware/permissions.js'
 
 const createSchema = z.object({
   name: z.string().trim().max(80).optional(),
   isPublic: z.boolean().optional(),
+  description: z.string().trim().max(280).optional(),
+  kind: z.enum(ROOM_KINDS).optional(),
 })
 
 const generateSchema = z.object({
@@ -60,13 +65,36 @@ const applySchema = z.object({
   accept: z.array(z.string().regex(/^[0-9a-f]{24}$/i)).max(100),
 })
 
+const UPDATABLE = ['name', 'isPublic', 'description', 'kind']
+
 const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
     isPublic: z.boolean().optional(),
+    // Emptying it is a real edit, so this one allows the empty string where
+    // `name` does not - a room with no description is an ordinary room, a
+    // room with no name is a bug.
+    description: z.string().trim().max(280).optional(),
+    kind: z.enum(ROOM_KINDS).optional(),
   })
-  .refine((value) => value.name !== undefined || value.isPublic !== undefined, {
-    message: 'provide a name or isPublic',
+  .refine((value) => UPDATABLE.some((field) => value[field] !== undefined), {
+    message: 'provide a name, description, kind or isPublic',
+  })
+
+/**
+ * What one person has decided about one room.
+ *
+ * Both optional and at least one required, so "pin this" does not have to
+ * restate the archive state it is not touching - which is the shape that lets
+ * two controls on a card write independently without clobbering each other.
+ */
+const preferenceSchema = z
+  .object({
+    pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((value) => value.pinned !== undefined || value.archived !== undefined, {
+    message: 'provide pinned or archived',
   })
 
 /**
@@ -153,6 +181,8 @@ export function createRoomsRouter() {
         name: req.body.name,
         ownerId: req.user.id,
         isPublic: req.body.isPublic ?? false,
+        description: req.body.description,
+        kind: req.body.kind,
       })
       res.status(201).json({ room: room.toPublic() })
     } catch (err) {
@@ -160,10 +190,17 @@ export function createRoomsRouter() {
     }
   })
 
+  /**
+   * Everything the dashboard draws, in one request.
+   *
+   * Rooms carry their collaborators and this person's pins and archives rather
+   * than leaving the client to fetch either: a card per request is forty
+   * requests on a busy account, and a dashboard that arrives in pieces is a
+   * dashboard that reflows under the cursor.
+   */
   roomsRouter.get('/', requireAuth, async (req, res, next) => {
     try {
-      const rooms = await listRoomsForUser(req.user.id)
-      res.json({ rooms: rooms.map((room) => room.toPublic()) })
+      res.json({ rooms: await listDashboardRooms(req.user.id) })
     } catch (err) {
       next(err)
     }
@@ -711,6 +748,42 @@ export function createRoomsRouter() {
       }
     }
   )
+
+  /**
+   * Pins or archives a room, for the person asking and nobody else.
+   *
+   * PUT rather than PATCH on a sub-resource: the preference is a small whole
+   * thing this call replaces, and it is idempotent - pinning an already
+   * pinned room is not an error, which matters when a click is retried.
+   */
+  roomsRouter.put(
+    '/:roomId/preferences',
+    requireAuth,
+    validate(preferenceSchema),
+    async (req, res, next) => {
+      try {
+        const preference = await setRoomPreference({
+          roomId: req.params.roomId,
+          userId: req.user.id,
+          pinned: req.body.pinned,
+          archived: req.body.archived,
+        })
+        res.json({ preference })
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /** What has happened in this room lately. Same access rule as the room. */
+  roomsRouter.get('/:roomId/activity', optionalAuth, async (req, res, next) => {
+    try {
+      await loadAccessibleRoom(req)
+      res.json({ activity: await listRoomActivity(req.params.roomId, { limit: req.query.limit }) })
+    } catch (err) {
+      next(err)
+    }
+  })
 
   return roomsRouter
 }

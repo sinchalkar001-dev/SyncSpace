@@ -5,6 +5,7 @@ import { Snapshot } from '../models/Snapshot.js'
 import { Checkpoint } from '../models/Checkpoint.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
+import { RoomPreference } from '../models/RoomPreference.js'
 import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
 import { sendRoomInviteEmail } from './email.service.js'
@@ -15,6 +16,7 @@ import {
   issueInvitationToken,
 } from './invitation.service.js'
 import { env } from '../config/env.js'
+import { ACTIVITY, recordActivity } from './activity.service.js'
 import { logger } from '../config/logger.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
 
@@ -42,11 +44,15 @@ export async function ensureRoom(roomId) {
   )
 }
 
-export async function createRoom({ name, ownerId, isPublic = false }) {
+export async function createRoom({ name, ownerId, isPublic = false, description, kind }) {
   const roomId = nanoid(8)
   return Room.create({
     roomId,
     name: name || 'Untitled room',
+    // Undefined rather than a default, so the schema's own defaults apply and
+    // this function stays the one place that does not restate them.
+    description: description || undefined,
+    kind: kind || undefined,
     owner: ownerId,
     isPublic,
     members: ownerId ? [{ user: ownerId, role: 'owner' }] : [],
@@ -478,6 +484,93 @@ export async function listRoomsForUser(userId) {
     .limit(50)
 }
 
+/** How many faces a card shows before it starts counting instead. */
+const FACES = 4
+
+/**
+ * Every room this person can see, with the two things a dashboard needs that
+ * a room alone cannot answer.
+ *
+ * The first is who is in it. `memberCount` was enough for a list that only had
+ * room to say "3 members", and is not enough to show whose rooms these are, so
+ * the member ids are resolved to names here - one populate across at most
+ * fifty rooms, rather than a request per card.
+ *
+ * The second is what this person thinks of it. Pins and archives live per
+ * user, so they arrive as a separate indexed read and are folded in by room
+ * id. A room with no row is neither pinned nor archived, which is the common
+ * case and costs nothing to represent.
+ */
+export async function listDashboardRooms(userId) {
+  const rooms = await Room.find({ $or: [{ owner: userId }, { 'members.user': userId }] })
+    .sort({ lastActivityAt: -1 })
+    .limit(50)
+    .populate({ path: 'members.user', select: 'name' })
+
+  const preferences = await RoomPreference.find({
+    user: userId,
+    roomId: { $in: rooms.map((room) => room.roomId) },
+  })
+
+  const byRoom = new Map(preferences.map((row) => [row.roomId, row]))
+
+  return rooms.map((room) => {
+    const preference = byRoom.get(room.roomId)
+
+    return {
+      ...room.toPublic(),
+      pinned: Boolean(preference?.pinnedAt),
+      archived: Boolean(preference?.archivedAt),
+      pinnedAt: preference?.pinnedAt ?? null,
+
+      /**
+       * A membership whose user no longer exists populates to null - the
+       * account was deleted and the row outlived it. Filtered rather than
+       * rendered as a blank face.
+       */
+      collaborators: room.members
+        .filter((member) => member.user)
+        .slice(0, FACES)
+        .map((member) => ({
+          id: String(member.user._id ?? member.user),
+          name: member.user.name ?? null,
+          role: member.role,
+        })),
+    }
+  })
+}
+
+/**
+ * Records what one person has decided about one room.
+ *
+ * Gated on being able to see the room, which is not about protecting the
+ * preference - it is about not letting an unauthenticated guess at a room code
+ * write a row that confirms the room exists.
+ *
+ * Un-pinning and un-archiving are the same call with `false`, and the row is
+ * kept rather than deleted: it is one small document per room somebody has
+ * ever had an opinion about, and keeping it means `pinnedAt` survives an
+ * accidental un-pin and re-pin.
+ */
+export async function setRoomPreference({ roomId, userId, pinned, archived }) {
+  const room = await getRoom(roomId)
+  if (!can(room, userId, CAPABILITIES.ROOM_VIEW)) {
+    throw forbidden('You do not have access to this room', 'room_forbidden')
+  }
+
+  const patch = {}
+  if (pinned !== undefined) patch.pinnedAt = pinned ? new Date() : null
+  if (archived !== undefined) patch.archivedAt = archived ? new Date() : null
+
+  const preference = await RoomPreference.findOneAndUpdate(
+    { user: userId, roomId },
+    { $set: patch, $setOnInsert: { user: userId, roomId } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  )
+
+  return preference.toPublic()
+}
+
 /**
  * Notes that someone opened a room. Idempotent per visitor, so a person who
  * rejoins updates their row rather than adding another.
@@ -494,7 +587,7 @@ export async function recordParticipant({ roomId, user }) {
   const userKey = isGuest ? 'guest:' + (user.id || name) : 'user:' + user.id
   const now = new Date()
 
-  return Participant.findOneAndUpdate(
+  const participant = await Participant.findOneAndUpdate(
     { roomId, userKey },
     {
       $set: { name, guest: isGuest, user: isGuest ? null : user.id, lastSeenAt: now },
@@ -503,6 +596,26 @@ export async function recordParticipant({ roomId, user }) {
     },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   )
+
+  /**
+   * Only the first time, which is what makes this news.
+   *
+   * The row is upserted on every join, so without the check a feed would say
+   * somebody joined each time they reloaded the page. `visits` is incremented
+   * in the same operation and starts at one, so a value of one is precisely
+   * "this row did not exist a moment ago".
+   */
+  if (participant?.visits === 1) {
+    recordActivity({
+      roomId,
+      kind: ACTIVITY.COLLABORATOR_JOINED,
+      actor: isGuest ? null : user.id,
+      actorName: name,
+      detail: isGuest ? 'joined by link' : null,
+    })
+  }
+
+  return participant
 }
 
 /** Owner, invited members, anyone removed, and everyone who has opened the room. */
@@ -560,6 +673,8 @@ export async function updateRoom({ roomId, actorId, patch }) {
 
   if (patch.name !== undefined) room.name = patch.name
   if (patch.isPublic !== undefined) room.isPublic = patch.isPublic
+  if (patch.description !== undefined) room.description = patch.description
+  if (patch.kind !== undefined) room.kind = patch.kind
   await room.save()
 
   if (closing) {

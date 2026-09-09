@@ -19,8 +19,12 @@ async function signUp(page) {
 }
 
 async function createRoom(page, name) {
-  await page.getByLabel('New room name').fill(name)
-  await page.getByRole('button', { name: 'Create' }).click()
+  // Creation moved into a dialog so the room can be given a type at the moment
+  // somebody knows what it is for, rather than only after the fact.
+  await page.locator('.dash__actions').getByRole('button', { name: 'New room' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Room name').fill(name)
+  await dialog.getByRole('button', { name: 'Create room' }).click()
   await page.waitForURL('**/room/**')
   await page.goto('/dashboard')
   await expect(page.locator('.roomcard').getByText(name)).toBeVisible()
@@ -132,7 +136,7 @@ test('renaming a room from the menu updates the card', async ({ page }) => {
   const dialog = page.getByRole('dialog')
   const input = dialog.getByLabel('Room name')
   await input.fill('After rename')
-  await dialog.getByRole('button', { name: 'Save name' }).click()
+  await dialog.getByRole('button', { name: 'Save changes' }).click()
 
   // Scope to the card: the success toast also carries the new name.
   await expect(page.locator('.roomcard').getByText('After rename')).toBeVisible()

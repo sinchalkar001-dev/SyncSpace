@@ -587,6 +587,113 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/preferences': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      put: {
+        tags: ['Rooms'],
+        summary: 'Pin or archive a room, for yourself',
+        description: [
+          'A preference, not a property. Two people sharing a room will not agree on which of their rooms belongs at the top, and a room one of them has finished with is still live work for the other - so neither pin nor archive is stored on the room, and neither is visible to anybody else.',
+          '',
+          'Idempotent: pinning an already pinned room succeeds. Requires only that you can see the room.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RoomPreferenceInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'The preference as it now stands',
+            content: {
+              'application/json': {
+                example: { preference: { roomId: 'aB3xYk9Q', pinned: true, archived: false } },
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(403, 'Not a room you can see', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/activity': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['Rooms'],
+        summary: 'What has happened in this room',
+        description: [
+          'Newest first. Recorded where each thing happens rather than derived afterwards, and deliberately lossy: rows expire after 30 days, and continuous editing is collapsed to at most one row per person per minute.',
+          '',
+          'Chat is broadcast and never stored, so a comment event records that a conversation happened and never what was said.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'How many to return, newest first (1-100).',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Newest first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    activity: { type: 'array', items: { $ref: '#/components/schemas/Activity' } },
+                  },
+                },
+              },
+            },
+          },
+          ...error(403, 'Private room and you are not a member', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
+        },
+      },
+    },
+
+    '/api/v1/activity': {
+      get: {
+        tags: ['Rooms'],
+        summary: 'Recent activity across your rooms',
+        description:
+          'The dashboard feed. Your room list is resolved first and the events are read from those ids, so this can never report on a room you are no longer in.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'How many to return, newest first (1-100).',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Newest first, across every room you belong to',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    activity: { type: 'array', items: { $ref: '#/components/schemas/Activity' } },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/people': {
       parameters: [{ $ref: '#/components/parameters/roomId' }],
       get: {
@@ -1821,8 +1928,48 @@ export const openapiDocument = {
           name: { type: 'string', maxLength: 80 },
           isPublic: { type: 'boolean', description: 'Public rooms admit any signed-in visitor' },
           owner: { type: ['string', 'null'], description: 'Owner id, or null for ad-hoc rooms' },
+          description: { type: 'string', maxLength: 280, description: 'A line about what the room is for; empty when nobody has set one' },
+          kind: {
+            type: 'string',
+            enum: ['general', 'coding', 'interview', 'system-design'],
+            description: 'What the room is for. "general" is the default and means unclassified, not miscellaneous.',
+          },
           memberCount: { type: 'integer' },
-          lastActivityAt: { type: 'string', format: 'date-time' },
+          lastActivityAt: { type: 'string', format: 'date-time', description: 'Somebody was in the room' },
+          updatedAt: { type: 'string', format: 'date-time', description: 'The room itself was changed' },
+        },
+      },
+
+      RoomPreferenceInput: {
+        type: 'object',
+        minProperties: 1,
+        description: 'At least one of `pinned` or `archived`. Omitting one leaves it as it was, so two controls on a card can write independently.',
+        properties: {
+          pinned: { type: 'boolean' },
+          archived: { type: 'boolean' },
+        },
+      },
+
+      Activity: {
+        type: 'object',
+        required: ['id', 'roomId', 'kind', 'at'],
+        properties: {
+          id: { type: 'string' },
+          roomId: { type: 'string' },
+          kind: {
+            type: 'string',
+            enum: [
+              'code.edited',
+              'whiteboard.updated',
+              'execution.completed',
+              'comment.added',
+              'collaborator.joined',
+            ],
+          },
+          actorId: { type: ['string', 'null'], description: 'Null for a guest, who has no account' },
+          actorName: { type: ['string', 'null'] },
+          detail: { type: ['string', 'null'], description: 'A few words specific to the kind, such as the language a run used' },
+          at: { type: 'string', format: 'date-time' },
         },
       },
 
@@ -1837,16 +1984,28 @@ export const openapiDocument = {
         properties: {
           name: { type: 'string', maxLength: 80, description: 'Defaults to "Untitled room".' },
           isPublic: { type: 'boolean', default: false },
+          description: { type: 'string', maxLength: 280 },
+          kind: {
+            type: 'string',
+            enum: ['general', 'coding', 'interview', 'system-design'],
+            default: 'general',
+          },
         },
       },
 
       RoomUpdateInput: {
         type: 'object',
         minProperties: 1,
-        description: 'At least one of `name` or `isPublic` must be present.',
+        description: 'At least one of `name`, `description`, `kind` or `isPublic` must be present.',
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 80 },
           isPublic: { type: 'boolean' },
+          description: {
+            type: 'string',
+            maxLength: 280,
+            description: 'Empty string clears it, which is why this one allows an empty value where `name` does not.',
+          },
+          kind: { type: 'string', enum: ['general', 'coding', 'interview', 'system-design'] },
         },
       },
 

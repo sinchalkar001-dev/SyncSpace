@@ -698,10 +698,13 @@ model at all.
 | `POST` | `/api/auth/resend-verification` | Requires bearer token; re-issues the email unless already verified |
 | `POST` | `/api/auth/forgot-password` | Emails a reset link. Always answers `{ sent: true }`, registered or not — and answers before looking the address up, so the timing says nothing either |
 | `POST` | `/api/auth/reset-password` | Spends the emailed token and sets a new password; returns `{ user, token }` |
-| `POST` | `/api/rooms` | Creates a private room |
+| `POST` | `/api/rooms` | Creates a private room; optional `description` and `kind` |
 | `GET` | `/api/rooms` | Rooms you own or belong to |
 | `GET` | `/api/rooms/:roomId` | Room metadata |
-| `PATCH` | `/api/rooms/:roomId` | Owner only; rename or flip public/private |
+| `PATCH` | `/api/rooms/:roomId` | Owner or admin; `name`, `description`, `kind` and `isPublic`, any subset. `kind` is one of `general`, `coding`, `interview`, `system-design` |
+| `PUT` | `/api/rooms/:roomId/preferences` | Pins or archives the room **for the caller only**; `{ pinned?, archived? }`, either alone. Requires only that you can see the room |
+| `GET` | `/api/rooms/:roomId/activity` | What has happened in this room, newest first; same access rule as reading it |
+| `GET` | `/api/activity` | The dashboard feed: the same events across every room you belong to |
 | `POST` | `/api/rooms/:roomId/invite` | Owner only; by `email` or `userId`. Emails the invitee the room code; answers `{ room, invited }`, where `invited.notified` says whether the relay took it and `invited.pending` says the address has no account yet |
 | `DELETE` | `/api/rooms/:roomId/invites/:email` | Owner only; withdraws an invitation to an address that never signed up |
 | `DELETE` | `/api/rooms/:roomId/members/:userId` | Owner only; removes someone and keeps them out |
@@ -718,6 +721,48 @@ model at all.
 | `GET` | `/api/rooms/:roomId/generations` | The room's AI timeline, newest first, failures included |
 | `GET` | `/api/rooms/:roomId/generations/:id` | One change set in full, with every proposed file |
 | `POST` | `/api/rooms/:roomId/generations/:id/apply` | Accepts the named files and records the rest as rejected |
+
+### The dashboard, and what it is built on
+
+Three things had to exist on the server before a room list could be a workspace rather
+than a wall of names.
+
+**A room can say what it is.** `description` and `kind` are room fields, so everyone who
+opens the room agrees about them. `kind` is a fixed set of four rather than free tags,
+because it exists to answer one question — which of these forty is the system design one
+— and a tag cloud answers that worse than a short list. `general` means unclassified, not
+miscellaneous, and every room that predates the field is one.
+
+**Pinning and archiving are opinions, not properties.** They live in their own collection
+keyed by `(user, roomId)` and are never visible to anybody else. Two people sharing an
+interview room will not agree on which of their rooms belongs at the top, and a room one
+of them has finished with is still live work for the other — so neither can be a field on
+the room without one collaborator silently rearranging everybody else's dashboard. A
+missing row is the default and the common case, so nothing is written until somebody
+actually pins or archives something.
+
+**Activity is recorded where it happens.** `Activity` rows are written from the execution
+service when a run finishes, from `recordParticipant` on somebody's first visit, from the
+chat handler, and from a Yjs `afterTransaction` listener for edits. It is deliberately
+lossy: rows expire after 30 days, and continuous editing is collapsed in memory to at
+most one row per person per room per minute, so a hot typing path costs nothing.
+
+Three details in there are load-bearing and invisible from the outside:
+
+- The whiteboard and the code buffer are two shared types on **one** Yjs document, so an
+  update alone does not say which was touched. The transaction does: every changed type
+  is either `code`/`shapes` or nested inside one, and walking up to the root names the
+  half of the room that moved.
+- Attribution is not guesswork. Hocuspocus applies a client's update with the connection
+  as the Yjs origin, and a connection carries the context `onAuthenticate` returned, so
+  `transaction.origin.context.user` is the person who typed.
+- The listener is attached in `afterLoadDocument`, **after** the snapshot and update log
+  have been replayed. Attached any earlier, opening a room would announce that everybody
+  in it had just edited everything.
+
+Chat is broadcast and never stored, so a `comment.added` event records that a
+conversation happened and deliberately not what was said. Losing the whole collection
+costs the dashboard a panel and costs the rooms nothing.
 
 The whole surface is also browsable as OpenAPI: Swagger UI at `/docs/`, machine-readable
 spec at `/docs/openapi.json`. Both move with `SWAGGER_PATH` and disappear entirely with

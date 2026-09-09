@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { ACTIVITY, recordActivity } from '../services/activity.service.js'
 import { Server as SocketServer } from 'socket.io'
 import { z } from 'zod'
 import { authenticate } from '../services/auth.service.js'
@@ -192,6 +193,23 @@ export function createSocketServer(httpServer) {
         text: parsed.data.text,
         at: new Date().toISOString(),
       })
+
+      /**
+       * The one durable trace a message leaves.
+       *
+       * Chat itself is broadcast and forgotten - whoever is connected sees it
+       * and nobody else ever will - so this records that a conversation
+       * happened, deliberately without recording what was said. Collapsed,
+       * because a back-and-forth is one conversation rather than nine events.
+       */
+      recordActivity({
+        roomId: parsed.data.roomId,
+        kind: ACTIVITY.COMMENT_ADDED,
+        actor: socket.data.user?.id ?? null,
+        actorName: socket.data.user?.name ?? null,
+        collapse: true,
+      })
+
       ack?.({ ok: true })
     })
 
