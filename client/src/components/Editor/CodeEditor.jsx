@@ -60,6 +60,7 @@ export function CodeEditor({
   yText,
   provider,
   peers,
+  presence,
   status = 'connecting',
   synced = false,
   runner,
@@ -69,6 +70,14 @@ export function CodeEditor({
 }) {
   const bindingRef = useRef(null)
   const editorRef = useRef(null)
+  const monacoRef = useRef(null)
+
+  // Read through a ref so Monaco's listeners, registered once at mount, always
+  // report to the current presence rather than the one that existed then.
+  const presenceRef = useRef(presence)
+  useEffect(() => {
+    presenceRef.current = presence
+  }, [presence])
 
   const language = useUIStore((s) => s.language)
   const editorPrefs = useUIStore((s) => s.editor)
@@ -127,6 +136,7 @@ export function CodeEditor({
     (editor, monaco) => {
       monaco.editor.setTheme('syncspace-dark')
       editorRef.current = editor
+      monacoRef.current = monaco
 
       const model = editor.getModel()
       if (!model || !yText || !provider) return
@@ -145,8 +155,30 @@ export function CodeEditor({
       readPosition()
       setEmpty(model.getValue().trim() === '')
 
-      editor.onDidChangeCursorPosition(readPosition)
+      /**
+       * Only a caret this person is driving counts as them being in the code.
+       * y-monaco moves the local caret too when somebody else's edit lands
+       * above it, and reporting that would put a person reading the board
+       * "in Main.java" every time a colleague typed.
+       */
+      const lineNow = () => editor.getPosition()?.lineNumber
+
+      editor.onDidChangeCursorPosition(() => {
+        readPosition()
+        if (editor.hasTextFocus()) presenceRef.current?.reportCode({ line: lineNow() })
+      })
       editor.onDidChangeCursorSelection(readPosition)
+      editor.onDidFocusEditorText(() => presenceRef.current?.reportCode({ line: lineNow() }))
+
+      // Typing is taking the editor back from whoever this person follows;
+      // a leader's scrolling would otherwise drag the line out from under them.
+      const typed = () => {
+        presenceRef.current?.unfollow()
+        presenceRef.current?.reportCode({ line: lineNow(), typed: true })
+      }
+      editor.onDidType(typed)
+      editor.onDidPaste(typed)
+      editor.onMouseDown(() => presenceRef.current?.unfollow())
       model.onDidChangeContent(() => {
         setEmpty(model.getValue().trim() === '')
         if (!editedRef.current) {
@@ -165,6 +197,43 @@ export function CodeEditor({
     },
     []
   )
+
+  /**
+   * Somebody else's line, arriving because this person follows or focused them.
+   *
+   * Scrolled to only if it is off screen: a follower whose editor re-centred on
+   * every line the leader moved to would watch the whole file lurch about. The
+   * line itself flashes briefly either way, so the eye has somewhere to land.
+   */
+  const flash = useRef(null)
+  useEffect(() => {
+    const navigator = presence?.navigator
+    if (!navigator) return undefined
+
+    const off = navigator.on('code', ({ line } = {}) => {
+      const editor = editorRef.current
+      const monaco = monacoRef.current
+      if (!editor || !Number.isInteger(line)) return
+
+      editor.revealLineInCenterIfOutsideViewport(line, 0)
+
+      if (!monaco || typeof editor.createDecorationsCollection !== 'function') return
+      flash.current?.clear()
+      flash.current = editor.createDecorationsCollection([
+        {
+          range: new monaco.Range(line, 1, line, 1),
+          options: { isWholeLine: true, className: 'follow-line' },
+        },
+      ])
+      const shown = flash.current
+      setTimeout(() => shown.clear(), 1200)
+    })
+
+    return () => {
+      off()
+      flash.current?.clear()
+    }
+  }, [presence?.navigator])
 
   const format = useCallback(() => {
     editorRef.current?.getAction('editor.action.formatDocument')?.run()

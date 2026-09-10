@@ -2531,3 +2531,191 @@
   letter-spacing: 0.4em;
   text-align: center;
 }
+
+/* ---------- live presence ---------- */
+
+/*
+  A pip on every avatar in the header: active, idle, away.
+
+  The avatars are the one piece of presence that is always on screen, so they
+  carry the coarsest signal - is anybody actually here - and the people panel
+  carries the rest. Dimming as well as recolouring, so the difference survives
+  a colour-blind reader and a bad projector.
+*/
+.presence__dot {
+  position: relative;
+}
+
+.presence__dot::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.presence__dot--idle {
+  opacity: 0.72;
+}
+
+.presence__dot--idle::after {
+  background: var(--warn, #f2b441);
+}
+
+.presence__dot--away {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+}
+
+.presence__dot--away::after {
+  background: var(--text-faint);
+}
+
+/* The status line under a name in the people panel. */
+.presence-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.presence-status__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.presence-status--idle .presence-status__dot {
+  background: var(--warn, #f2b441);
+  box-shadow: none;
+}
+
+.presence-status--away .presence-status__dot,
+.presence-status--offline .presence-status__dot {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+
+/* Where somebody is: "Line 42", "Whiteboard", "Offline". */
+.people__extra {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Follow, go-to, and your own privacy switch. */
+.people__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.people__tool {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.people__tool:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.people__tool.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.people__tool:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.people__tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+  Following somebody.
+
+  The frame is in the leader's colour, the same colour as their cursor and
+  their name tag, so it is obvious at a glance whose view this is - and
+  impossible to forget that the view is not your own.
+*/
+[data-following] #main {
+  box-shadow: inset 0 0 0 2px var(--follow-color, var(--accent));
+}
+
+.follow-banner {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px 6px 5px 14px;
+  border-radius: var(--radius-full);
+  background: var(--follow-color, var(--accent));
+  color: #0d1211;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-3);
+  transform: translateX(-50%);
+}
+
+.follow-banner__stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: rgba(13, 18, 17, 0.16);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.follow-banner__stop:hover {
+  background: rgba(13, 18, 17, 0.28);
+}
+
+.follow-banner__stop:focus-visible {
+  outline: 2px solid #0d1211;
+  outline-offset: 1px;
+}
+
+.follow-banner kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  opacity: 0.75;
+}
+
+/* A line somebody was just taken to, flashed so the eye has a place to land. */
+.follow-line {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presence__dot {
+    transition: none;
+  }
+}

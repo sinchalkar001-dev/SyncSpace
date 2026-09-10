@@ -56,6 +56,7 @@ function saveWorkspace(state) {
         language: state.language,
         recentLanguages: state.recentLanguages,
         editor: state.editor,
+        sharePresence: state.sharePresence,
       })
     )
   } catch {
@@ -83,6 +84,14 @@ export const useUIStore = create((set) => ({
   },
   viewport: { scale: 1, x: 0, y: 0 },
 
+  /**
+   * Whether this person's activity leaves their machine: the line they are on,
+   * what they have selected, their pointer on the board, and their viewport for
+   * anybody following. On by default, because a shared room is a shared room;
+   * remembered, because somebody who turns it off meant it.
+   */
+  sharePresence: saved.sharePresence ?? true,
+
   setTool: (tool) => set({ tool }),
   setStrokeColor: (strokeColor) => set({ strokeColor }),
   setStrokeWidth: (strokeWidth) => set({ strokeWidth }),
@@ -106,6 +115,12 @@ export const useUIStore = create((set) => ({
     set((state) => {
       saveWorkspace({ ...state, paneMode })
       return { paneMode }
+    }),
+
+  setSharePresence: (sharePresence) =>
+    set((state) => {
+      saveWorkspace({ ...state, sharePresence })
+      return { sharePresence }
     }),
 
   toggleEditorOption: (key) =>

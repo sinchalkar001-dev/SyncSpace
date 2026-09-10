@@ -302,3 +302,153 @@ describe('PresenceMenu', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })
+
+/**
+ * Presence in the people panel: what everybody is doing, and the controls for
+ * following them, finding them, and keeping your own activity to yourself.
+ */
+describe('what everybody in the room is doing', () => {
+  const presenceApi = (over = {}) => ({
+    following: null,
+    followers: [],
+    follow: vi.fn(() => true),
+    unfollow: vi.fn(),
+    focus: vi.fn(() => true),
+    ...over,
+  })
+
+  const state = (over) => ({
+    v: 1,
+    activity: 'present',
+    surface: null,
+    file: null,
+    line: null,
+    selected: null,
+    share: true,
+    following: null,
+    ...over,
+  })
+
+  const EDITING = state({ activity: 'editing', surface: 'code', file: 'Main.java', line: 42 })
+  const DRAWING = state({ activity: 'drawing', surface: 'board' })
+  const READING = state({ activity: 'reading', surface: 'code', file: 'main.py', line: 3 })
+  const PRIVATE = state({ share: false })
+
+  function renderLive({ peers, presence = presenceApi(), sharing = true, onSharingChange = vi.fn() }) {
+    render(
+      <ToastProvider>
+        <PresenceMenu
+          room={ROOM}
+          roomId={ROOM.roomId}
+          self={{ clientId: 1, user: OWNER, presence: READING }}
+          peers={peers}
+          user={{ id: 'u1' }}
+          presence={presence}
+          sharing={sharing}
+          onSharingChange={onSharingChange}
+        />
+      </ToastProvider>
+    )
+    return { presence, onSharingChange }
+  }
+
+  const rowOf = (panel, name) => within(panel).getByText(name).closest('li')
+
+  it('says what each person is doing, and where', async () => {
+    renderLive({
+      peers: [
+        { clientId: 2, user: CANDIDATE, presence: EDITING },
+        { clientId: 3, user: VISITOR, presence: DRAWING },
+      ],
+    })
+    const panel = await openPanel()
+
+    const candidate = rowOf(panel, 'Candidate')
+    expect(within(candidate).getByText('Editing Main.java')).toBeInTheDocument()
+    expect(within(candidate).getByText('Line 42')).toBeInTheDocument()
+
+    const visitor = rowOf(panel, 'Guest-9f2a')
+    expect(within(visitor).getByText('Drawing')).toBeInTheDocument()
+    expect(within(visitor).getByText('Whiteboard')).toBeInTheDocument()
+
+    // Your own row still says it is you.
+    expect(within(rowOf(panel, 'Owner')).getByText('You')).toBeInTheDocument()
+  })
+
+  it('follows somebody, and gets out of the way so their view can be seen', async () => {
+    const { presence } = renderLive({ peers: [{ clientId: 2, user: CANDIDATE, presence: EDITING }] })
+    const panel = await openPanel()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Follow Candidate' }))
+
+    expect(presence.follow).toHaveBeenCalledWith(2)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('offers to stop following the person already being followed', async () => {
+    const presence = presenceApi({ following: 2 })
+    renderLive({ peers: [{ clientId: 2, user: CANDIDATE, presence: EDITING }], presence })
+    const panel = await openPanel()
+
+    const stop = within(panel).getByRole('button', { name: 'Stop following Candidate' })
+    expect(stop).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(stop)
+    expect(presence.unfollow).toHaveBeenCalled()
+  })
+
+  it('goes to where somebody is without following them there', async () => {
+    const { presence } = renderLive({ peers: [{ clientId: 2, user: CANDIDATE, presence: EDITING }] })
+    const panel = await openPanel()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Go to Candidate' }))
+
+    expect(presence.focus).toHaveBeenCalledWith(2)
+    expect(presence.follow).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Disabled rather than hidden: a control missing from one row and present on
+   * the next reads as a bug, and one visibly unavailable reads as their choice.
+   */
+  it('will neither follow nor find somebody who is not sharing, and says so', async () => {
+    renderLive({ peers: [{ clientId: 2, user: CANDIDATE, presence: PRIVATE }] })
+    const panel = await openPanel()
+
+    const candidate = rowOf(panel, 'Candidate')
+    expect(within(candidate).getByText('Online')).toBeInTheDocument()
+    expect(within(candidate).getByText('Not sharing activity')).toBeInTheDocument()
+
+    expect(within(panel).getByRole('button', { name: 'Follow Candidate' })).toBeDisabled()
+    expect(within(panel).getByRole('button', { name: 'Go to Candidate' })).toBeDisabled()
+  })
+
+  it('lets you stop sharing your own activity', async () => {
+    const { onSharingChange } = renderLive({ peers: [] })
+    const panel = await openPanel()
+
+    const toggle = within(panel).getByRole('button', { name: 'Share your activity' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(toggle)
+    expect(onSharingChange).toHaveBeenCalledWith(false)
+  })
+
+  it('tells you who is following you', async () => {
+    renderLive({
+      peers: [{ clientId: 2, user: CANDIDATE, presence: state({ following: 1 }) }],
+      presence: presenceApi({ followers: [{ clientId: 2, name: 'Candidate' }] }),
+    })
+    const panel = await openPanel()
+
+    expect(within(rowOf(panel, 'Owner')).getByText('Candidate is following you')).toBeInTheDocument()
+  })
+
+  it('shows an invited member who is not connected as offline', async () => {
+    renderLive({ peers: [{ clientId: 2, user: CANDIDATE, presence: EDITING }] })
+    const panel = await openPanel()
+
+    const reviewer = await within(panel).findByText('Reviewer')
+    expect(within(reviewer.closest('li')).getByText('Offline')).toBeInTheDocument()
+  })
+})

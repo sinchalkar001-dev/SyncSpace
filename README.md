@@ -592,6 +592,80 @@ kernel exploit is a way out — `SANDBOX_RUNTIME=runsc` puts gVisor underneath i
 | `RUN_RATE_LIMIT_MAX` | `60` | Runs per IP per window |
 | `SANDBOX_CANCEL_RATE_LIMIT_MAX` | `120` | Cancellations per IP per window, budgeted separately |
 
+## Presence
+
+Everyone in a room is shown with what they are doing and where they are doing it:
+
+```
+Sinchal     ● Editing Main.java     Line 42
+Manideep    ● Drawing               Whiteboard
+Ayush       ● Idle
+Reviewer    ○ Offline
+```
+
+The dot is active, idle (a minute without input) or away (the tab is hidden); invited
+members who are not connected read as offline. The file is the name the buffer runs
+under — `Main.java`, `main.py` — because there is one shared buffer rather than a tree of
+files, and inventing a file browser to populate this line would be decoration. On the
+board, the shapes somebody has selected are outlined in their colour with their name,
+so two people do not reshape the same box without knowing it.
+
+**Follow** moves your board and your editor with somebody else's, and switches to split
+view if they move to the half you have hidden. It ends when you press Esc, touch the
+board, zoom, type, or click in the editor — the way grabbing a wheel ends cruise control —
+and ends itself, with a message, if they leave or stop sharing. **Go to** is a single
+jump to wherever somebody is: the line their caret is on, else the shapes they have
+selected, else their pointer.
+
+### What it costs
+
+Presence rides on Yjs awareness, which re-sends a client's *whole* state every time any
+field changes. So the frequent field is kept apart from the rare one, and nothing is sent
+that has not changed:
+
+| Field | Sent when | At most |
+| --- | --- | --- |
+| `cursor` | the pointer moves on the board | ~15/s (66ms), rounded to whole units, repeats dropped |
+| `presence` | what you are doing, or where, actually changes | 4/s (250ms) |
+| `view` | **only while somebody is following you** | ~8/s (120ms) |
+
+The pointer used to go out every 40ms. It now goes out every 66ms and the receiving side
+eases each cursor toward its latest sample on every animation frame, which looks smoother
+than 25 raw positions did — a cursor that jumps to each sample is jerky at any rate. The
+frame loop runs only while a cursor is still moving, so a quiet room costs no frames.
+
+Typing a hundred characters on one line sends the presence field once. A follower
+announces who it follows, and a client sends its viewport only while somebody says they
+are following it, so a room where nobody follows anybody sends no viewports at all. The
+people list re-renders when somebody's status changes, not when their pointer moves.
+These numbers are asserted in `useAwareness.test.jsx` and `usePresence.test.jsx` against
+real awareness instances, not mocks.
+
+### Privacy and permissions
+
+- Presence reaches only connections the server admitted to the room. Somebody refused a
+  private room sees nobody's name, caret or selection — `presence-isolation.test.js`
+  holds the transport to that.
+- **Share my activity** (the eye beside your own name) keeps your line, selection,
+  pointer and viewport on your machine — they are never sent, rather than sent and
+  hidden. You read as simply online, cannot be followed, and anybody following you is
+  let go with a message. The choice is remembered per browser.
+- What is sent is coarse on purpose: the line, never the column or the selected text;
+  shape ids, never their contents.
+- Presence is self-reported. A client clamps its own report by its capabilities, so a
+  viewer is never announced as editing — but a modified client could claim anything, and
+  that is acceptable only because a claim is just a label. What somebody can actually
+  change is enforced by the read-only Yjs connection, and a test proves a viewer claiming
+  to edit writes nothing.
+
+### Presence is not history
+
+Hocuspocus applies awareness to `document.awareness` and never to the document, so none
+of this can reach the update log, a snapshot, replay or the activity feed. That is
+structural rather than a convention, and `presence-isolation.test.js` holds it there: a
+burst of every presence field writes nothing, while one character typed on the same
+connections is recorded — which is what makes the silence mean something.
+
 ## Interface
 
 Plain CSS, no framework. [client/src/styles](client/src/styles) is layered in dependency order —

@@ -20,6 +20,8 @@ import { formatWhen } from '../../lib/rooms.js'
 import { SelectionActions } from './SelectionActions.jsx'
 import { ShapeNode } from './ShapeNode.jsx'
 import { RemoteCursors } from './RemoteCursors.jsx'
+import { RemoteSelections } from './RemoteSelections.jsx'
+import { centerOn, viewCenter } from '../../lib/presence.js'
 import { ToolRail } from './ToolRail.jsx'
 import { CanvasControls } from './CanvasControls.jsx'
 import { TextComposer } from './TextComposer.jsx'
@@ -70,7 +72,16 @@ function worldPointer(stage) {
   return stage.getAbsoluteTransform().copy().invert().point(pointer)
 }
 
-export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnly = false }) {
+export function Whiteboard({
+  shapes,
+  provider,
+  undoManager,
+  peers,
+  user,
+  readOnly = false,
+  presence,
+  sharing = true,
+}) {
   const [containerRef, size] = useElementSize()
   const [draft, setDraftState] = useState(null)
   const [textDraft, setTextDraftState] = useState(null)
@@ -114,8 +125,77 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const setViewport = useUIStore((s) => s.setViewport)
 
   const list = useShapes(shapes)
-  const { publish: publishCursor, clear: clearCursor } = useCursorBroadcast(provider)
+  const { publish: publishCursor, clear: clearCursor } = useCursorBroadcast(provider, {
+    enabled: sharing,
+  })
   const { canUndo, canRedo, undo, redo } = useUndo(undoManager)
+
+  /**
+   * Presence, reported from the board.
+   *
+   * Read through refs so the pointer handlers can report without depending on
+   * presence - they would otherwise be rebuilt whenever anybody's status
+   * changed, which on a busy board is several times a second.
+   */
+  const presenceRef = useRef(presence)
+  const sizeRef = useRef(size)
+  const listRef = useRef(list)
+  useEffect(() => {
+    presenceRef.current = presence
+    sizeRef.current = size
+    listRef.current = list
+  })
+
+  // What this person has selected, for everybody else's outline. Skipped on
+  // mount: an empty selection at load is not somebody choosing nothing.
+  const reportedSelection = useRef(false)
+  useEffect(() => {
+    if (!reportedSelection.current) {
+      reportedSelection.current = true
+      return
+    }
+    presenceRef.current?.reportBoard({ selected: selectedIds })
+  }, [selectedIds])
+
+  // Where this person is looking, held ready for the moment somebody follows
+  // them. Nothing leaves the machine from here unless somebody does.
+  useEffect(() => {
+    if (!size.width || !size.height) return
+    presenceRef.current?.reportView(viewCenter(viewport, size))
+  }, [viewport, size])
+
+  /**
+   * Somebody else's view, arriving because this person follows or focused
+   * them. A followed view is matched outright, scale included; a focus keeps
+   * this person's own zoom and only brings the other person's work into the
+   * middle - their selection if they have one, their pointer if not.
+   */
+  useEffect(() => {
+    const navigator = presence?.navigator
+    if (!navigator) return undefined
+
+    return navigator.on('board', ({ view, point, selected } = {}) => {
+      const frame = sizeRef.current
+      if (!frame?.width) return
+
+      if (view) {
+        setViewport(centerOn(view, frame))
+        return
+      }
+
+      const chosen = selected?.length
+        ? unionBounds(listRef.current.filter((shape) => selected.includes(shape.id)))
+        : null
+
+      const target = chosen
+        ? { cx: chosen.x + chosen.width / 2, cy: chosen.y + chosen.height / 2 }
+        : point
+          ? { cx: point.x, cy: point.y }
+          : null
+
+      if (target) setViewport((current) => centerOn({ ...target, scale: current.scale }, frame))
+    })
+  }, [presence?.navigator, setViewport])
 
   const isDrawingTool = tool !== 'select' && tool !== 'eraser' && tool !== 'hand'
 
@@ -322,6 +402,7 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
 
       const shiftKey = Boolean(event.evt?.shiftKey)
       publishCursor({ x: point.x, y: point.y })
+      presenceRef.current?.touch()
 
       if (erasingRef.current) {
         eraseAtPointer(stage)
@@ -494,6 +575,9 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
   const handleWheel = useCallback(
     (event) => {
       event.evt.preventDefault()
+      // Zooming is taking the view back; following somebody else ends here.
+      presenceRef.current?.unfollow()
+      presenceRef.current?.reportBoard({ engaged: true })
       const stage = event.target.getStage()
       const pointer = stage.getPointerPosition()
       if (!pointer) return
@@ -652,13 +736,25 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
             y={viewport.y}
             draggable={tool === 'hand'}
             onContextMenu={(event) => event.evt.preventDefault()}
-            onPointerDown={handlePointerDown}
+            onPointerDown={(event) => {
+              // Reaching for the board takes it back from whoever this person
+              // was following - drawing while the view is steered by somebody
+              // else puts every stroke in the wrong place.
+              presenceRef.current?.unfollow()
+              presenceRef.current?.reportBoard({ engaged: true })
+              handlePointerDown(event)
+            }}
             onPointerMove={handlePointerMove}
             onPointerUp={(event) => {
+              const drew = Boolean(draftRef.current) || erasingRef.current
               commitMarquee(event.target.getStage())
               commitDraft()
+              if (drew && !readOnly) presenceRef.current?.reportBoard({ drew: true })
             }}
             onPointerLeave={clearCursor}
+            onDragStart={(event) => {
+              if (event.target === event.target.getStage()) presenceRef.current?.unfollow()
+            }}
             onDragEnd={handleStageDragEnd}
             onWheel={handleWheel}
           >
@@ -687,8 +783,13 @@ export function Whiteboard({ shapes, provider, undoManager, peers, user, readOnl
                 />
               )}
             </Layer>
+            {/* Other people's selections sit under their pointers, so a
+                name tag never hides the cursor it belongs to. */}
             <Layer listening={false}>
-              <RemoteCursors peers={peers} scale={viewport.scale} />
+              <RemoteSelections peers={peers} shapes={list} scale={viewport.scale} />
+            </Layer>
+            <Layer listening={false}>
+              <RemoteCursors peers={peers} scale={viewport.scale} provider={provider} />
             </Layer>
           </Stage>
         )}

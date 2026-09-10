@@ -8,6 +8,7 @@ import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useCodeRunner } from '../hooks/useCodeRunner.js'
 import { CAP, useRoomAccess } from '../hooks/useRoomAccess.js'
 import { useAwareness } from '../hooks/useAwareness.js'
+import { usePresence } from '../hooks/usePresence.js'
 import { useRoomSocket } from '../hooks/useRoomSocket.js'
 import { useToast } from '../components/ui/useToast.js'
 import { TopBar, Brand } from '../components/TopBar.jsx'
@@ -89,6 +90,65 @@ export default function Room() {
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
   const { peers, self } = useAwareness(session?.provider)
+
+  /**
+   * What this person tells the room about themselves, and following somebody
+   * else. Sharing is remembered per browser. The capabilities come from the
+   * server, so somebody who may only look is never announced as editing.
+   */
+  const sharing = useUIStore((state) => state.sharePresence)
+  const setSharing = useUIStore((state) => state.setSharePresence)
+
+  const onFollowEnded = useCallback(
+    (reason, name) => {
+      const who = name || 'They'
+      toast.info(
+        reason === 'private'
+          ? who + ' stopped sharing their activity, so you are no longer following them'
+          : who + ' left the room'
+      )
+    },
+    [toast]
+  )
+
+  const presence = usePresence({
+    provider: session?.provider,
+    canEditCode: access.can(CAP.CODE_EDIT),
+    canEditBoard: access.can(CAP.WHITEBOARD_EDIT),
+    language,
+    sharing,
+    onFollowEnded,
+  })
+
+  const leader =
+    presence.following == null
+      ? null
+      : (peers.find((peer) => peer.clientId === presence.following) ?? null)
+
+  // The person being followed moved to the other half of the room. That half
+  // has to be on screen before it can be scrolled to where they are.
+  useEffect(
+    () =>
+      presence.navigator.on('surface', (surface) => {
+        const mode = useUIStore.getState().paneMode
+        if ((surface === 'code' && mode === 'board') || (surface === 'board' && mode === 'code')) {
+          useUIStore.getState().setPaneMode('split')
+        }
+      }),
+    [presence.navigator]
+  )
+
+  // Esc lets go. Bubbling rather than capture, so a dialog that handles its own
+  // Escape closes without also ending a follow the person meant to keep.
+  const { following: followingId, unfollow } = presence
+  useEffect(() => {
+    if (followingId == null) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) unfollow()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [followingId, unfollow])
   const runner = useCodeRunner(roomId, identity?.name)
 
   /**
@@ -468,7 +528,22 @@ export default function Room() {
   }
 
   return (
-    <div className="room">
+    <div
+      className="room"
+      data-following={leader ? '' : undefined}
+      style={leader ? { '--follow-color': leader.user?.color } : undefined}
+    >
+      {/* Following is a mode, so it is shown as one: a frame in the leader's
+          colour around the whole workspace, and a way out that is always in
+          the same place. */}
+      {leader && (
+        <div className="follow-banner" role="status">
+          <span>Following {leader.user?.name || 'someone'}</span>
+          <button type="button" className="follow-banner__stop" onClick={presence.unfollow}>
+            Stop <kbd>Esc</kbd>
+          </button>
+        </div>
+      )}
       <TopBar flush>
         <Brand
           onClick={() => navigate(isAuthenticated ? '/dashboard' : '/')}
@@ -504,6 +579,9 @@ export default function Room() {
             user={user}
             onRoomChange={setRoom}
             access={access}
+            presence={presence}
+            sharing={sharing}
+            onSharingChange={setSharing}
           />
           <ChatPanel
             messages={chat.messages}
@@ -574,6 +652,8 @@ export default function Room() {
               peers={peers}
               user={identity}
               readOnly={!access.can(CAP.WHITEBOARD_EDIT)}
+              presence={presence}
+              sharing={sharing}
             />
           }
           right={
@@ -581,6 +661,7 @@ export default function Room() {
               yText={session.code}
               provider={session.provider}
               peers={peers}
+              presence={presence}
               status={status}
               synced={synced}
               runner={runner}

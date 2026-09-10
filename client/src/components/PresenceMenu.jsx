@@ -9,6 +9,92 @@ import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../hooks/useRoomAccess.js'
 import { Button } from './ui/Button.jsx'
 import { Icon } from './ui/Icon.jsx'
 import { Skeleton } from './ui/Skeleton.jsx'
+import { canFocus, canFollow, describePresence } from '../lib/presence.js'
+
+/**
+ * The line under somebody's name: a coloured dot and what they are doing.
+ *
+ * The dot carries the tone - active, idle, away - and the words carry the
+ * meaning, so nothing depends on telling green from amber.
+ */
+function LiveStatus({ presence, you = false }) {
+  const { tone, status } = describePresence(presence)
+
+  return (
+    <span className={'presence-status presence-status--' + tone}>
+      {you && (
+        <>
+          <span>You</span>
+          <span aria-hidden="true">·</span>
+        </>
+      )}
+      <span className="presence-status__dot" aria-hidden="true" />
+      {status}
+    </span>
+  )
+}
+
+/**
+ * Follow and go-to, for one person.
+ *
+ * Disabled rather than hidden for somebody who is not sharing, with the reason
+ * in the tooltip: a control that vanishes for one row and not the next reads
+ * as a bug, and one that is visibly unavailable reads as their choice.
+ */
+function PeerTools({ entry, presence, onDone }) {
+  const name = entry.user?.name || 'Someone'
+  const followed = presence.following === entry.clientId
+  const followable = canFollow(entry)
+  const findable = canFocus(entry)
+  const unshared = name + ' is not sharing their activity'
+
+  return (
+    <span className="people__tools">
+      <button
+        type="button"
+        className={'people__tool' + (followed ? ' is-on' : '')}
+        aria-pressed={followed}
+        aria-label={(followed ? 'Stop following ' : 'Follow ') + name}
+        title={
+          followed
+            ? 'Stop following (Esc)'
+            : followable
+              ? 'Follow - your view moves with theirs'
+              : unshared
+        }
+        disabled={!followed && !followable}
+        onClick={() => {
+          if (followed) {
+            presence.unfollow()
+            return
+          }
+          if (presence.follow(entry.clientId)) onDone()
+        }}
+      >
+        <Icon name="eye" size={14} />
+      </button>
+      <button
+        type="button"
+        className="people__tool"
+        aria-label={'Go to ' + name}
+        title={findable ? 'Jump to where ' + name + ' is' : unshared}
+        disabled={!findable}
+        onClick={() => {
+          if (presence.focus(entry.clientId)) onDone()
+        }}
+      >
+        <Icon name="cursor" size={14} />
+      </button>
+    </span>
+  )
+}
+
+/** "Ayush is following you", or a count once it stops fitting on a line. */
+function followedBy(followers) {
+  if (!followers?.length) return null
+  if (followers.length === 1) return followers[0].name + ' is following you'
+  return followers.length + ' people are following you'
+}
 
 /**
  * The avatar stack in the room header, and what is behind it.
@@ -23,7 +109,18 @@ import { Skeleton } from './ui/Skeleton.jsx'
  * count on the trigger exactly. The invited half needs the roster endpoint,
  * which is members-only — hence `useRoomPeople` being switched off for guests.
  */
-export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, access }) {
+export function PresenceMenu({
+  room,
+  roomId,
+  self,
+  peers,
+  user,
+  onRoomChange,
+  access,
+  presence,
+  sharing = true,
+  onSharingChange,
+}) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -44,11 +141,6 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, ac
     () => new Set(live.map((entry) => entry.user?.id).filter(Boolean)),
     [live]
   )
-  const emails = useMemo(() => {
-    const byId = new Map()
-    for (const member of people?.members ?? []) byId.set(member.id, member.email)
-    return byId
-  }, [people])
 
   // Anyone invited who is not currently connected. The ones who are appear in
   // the live list already, and listing them twice reads like two people.
@@ -95,15 +187,38 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, ac
           <section aria-label="In the room now">
             <h3 className="people__heading">In the room now</h3>
             <ul className="people__list">
-              {live.map((entry) => (
+              {live.map((entry) => {
+                const you = entry.clientId === self?.clientId
+                const { place } = describePresence(entry.presence)
+
+                return (
                 <PersonRow
                   key={entry.clientId}
                   name={entry.user?.name || 'Someone'}
                   color={entry.user?.color}
-                  detail={
-                    entry.user?.id === user?.id
-                      ? 'You'
-                      : emails.get(entry.user?.id) || (entry.user?.guest ? 'Joined by link' : null)
+                  detail={<LiveStatus presence={entry.presence} you={you} />}
+                  extra={you ? followedBy(presence?.followers) || place : place}
+                  tools={
+                    !presence ? null : you ? (
+                      <span className="people__tools">
+                        <button
+                          type="button"
+                          className={'people__tool' + (sharing ? ' is-on' : '')}
+                          aria-pressed={sharing}
+                          aria-label="Share your activity"
+                          title={
+                            sharing
+                              ? 'Others can see your line and selection, and follow you'
+                              : 'Your line, selection and pointer stay on this machine'
+                          }
+                          onClick={() => onSharingChange?.(!sharing)}
+                        >
+                          <Icon name={sharing ? 'eye' : 'eyeOff'} size={14} />
+                        </button>
+                      </span>
+                    ) : (
+                      <PeerTools entry={entry} presence={presence} onDone={close} />
+                    )
                   }
                   tag={
                     entry.user?.id && entry.user.id === room?.owner
@@ -125,7 +240,8 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, ac
                       : null
                   }
                 />
-              ))}
+                )
+              })}
             </ul>
           </section>
 
@@ -151,6 +267,12 @@ export function PresenceMenu({ room, roomId, self, peers, user, onRoomChange, ac
                     key={member.id}
                     name={member.name}
                     detail={member.email}
+                    extra={
+                      <span className="presence-status presence-status--offline">
+                        <span className="presence-status__dot" aria-hidden="true" />
+                        Offline
+                      </span>
+                    }
                     tag={
                       member.id === room?.owner ? (
                         ROLE_LABELS.owner

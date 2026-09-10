@@ -24,7 +24,7 @@ export function Avatar({ name, color, muted }) {
  * do about them. `action` is left off entirely for anyone looking at a room
  * they do not own, which is what keeps the list readable for everybody else.
  */
-export function PersonRow({ name, detail, tag, color, muted, action }) {
+export function PersonRow({ name, detail, extra, tag, tools, color, muted, action }) {
   return (
     <li className="people__person">
       <Avatar name={name} color={color} muted={muted} />
@@ -36,10 +36,14 @@ export function PersonRow({ name, detail, tag, color, muted, action }) {
             {detail}
           </span>
         )}
+        {/* A third line for where somebody is - "Line 42", "Whiteboard" - so
+            the status above it stays short enough to read at a glance. */}
+        {extra && <span className="people__extra">{extra}</span>}
       </span>
 
-      {(tag || action) && (
+      {(tag || action || tools) && (
         <span className="people__controls">
+          {tools}
           {/* A word gets the pill. A control does not: a select inside one
               inherits its padding and its lowercasing, and ends up wearing two
               borders while pushing the name it belongs to off the row. */}
