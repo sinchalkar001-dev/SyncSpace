@@ -666,6 +666,72 @@ structural rather than a convention, and `presence-isolation.test.js` holds it t
 burst of every presence field writes nothing, while one character typed on the same
 connections is recorded — which is what makes the silence mean something.
 
+## Session summaries
+
+The replay can say what happened, not only show it. **Summarize session** in the replay
+opens a panel with three things in it:
+
+```
+Timeline                      Summary
+00:00  API added              Architecture changes
+04:00  Auth Service added       An API was added first.            [00:00]
+10:00  Database added         Failed approaches
+11:00  API connected to DB      The first run failed with a        [22:00]
+18:00  Code: added login        TypeError.
+22:00  Run failed             What worked
+31:00  Run succeeded            A later run succeeded.             [31:00]
+```
+
+**Explain this moment** appears whenever the replay is paused, and explains the point it is
+paused on.
+
+### The timeline is the only evidence
+
+The timeline is built with no model involved, from what the room actually recorded:
+
+| Events | Derived from |
+| --- | --- |
+| `architecture.added` / `removed` / `connected` | the whiteboard, read with the same parser code generation uses, diffed between points in the log |
+| `code.added` / `removed` / `edited` | functions and classes declared in the buffer, and lines added or removed |
+| `execution.failed` / `succeeded` | the run records, with the first line a failing run printed |
+| `people.joined` / `chatted` | the activity feed — that a conversation happened, never what was said |
+| `ai.proposed` / `applied` | AI change sets generated from the board, and what was applied |
+| `state.warning` | problems in the final board still standing at the end |
+
+One streaming pass over the update log splits it into pieces of work — at a pause of 45
+seconds or a change of author — and diffs the room between them. Every event carries an id,
+a clock from the start of the session, and the log position the replay seeks to when it is
+clicked.
+
+### Holding the model to it
+
+The model is shown that list and nothing else — not the code, not the board, not chat — and
+made to answer through a forced tool call in which every statement cites event ids. The server
+then checks every citation. A statement citing no event that exists is dropped before anybody
+sees it, and the number dropped is shown under the summary rather than hidden. Every citation
+in the panel is a time stamp that seeks the replay to the event, so each sentence is one click
+from its evidence.
+
+That makes invention hard rather than impossible: a model could still cite a real event and
+misdescribe it. That is why the evidence is always one click away. Each answer also stores a
+copy of the events it cites, so a summary written yesterday still shows what it was built on,
+even after old run records expire and the timeline shifts.
+
+### Keeping replay fast
+
+- The timeline and summaries are separate endpoints under `/history`. Nothing on the path
+  that serves replay frames changed, and the panel requests nothing until it is first opened.
+- The log walk gives the event loop back every 500 entries, so a long history cannot stall
+  anybody else's replay, and it stops at 20,000 entries and says so.
+- Timelines are cached against a signature of everything they are built from. Summaries and
+  explanations are stored against the same signature, so asking again about a history that
+  has not changed is a database read, not a model call; concurrent identical requests share
+  one call.
+- An explanation still being written is abandoned the moment playback resumes.
+
+Reading a summary needs replay access. Writing one spends a model call, so it needs an account
+and the same `ai:generate` capability as code generation, behind the same rate limit.
+
 ## Interface
 
 Plain CSS, no framework. [client/src/styles](client/src/styles) is layered in dependency order —
@@ -787,6 +853,10 @@ model at all.
 | `DELETE` | `/api/rooms/:roomId` | Owner only; purges the room, snapshot and update log |
 | `GET` | `/api/rooms/:roomId/replay` | Timeline metadata; `limit` (≤ 500) and `from` (exclusive seq bound) page through the log |
 | `GET` | `/api/rooms/:roomId/replay/:seq` | Binary Yjs state at that point; `X-Updates-Applied` counts the entries folded and `X-Checkpoint-Seq` says which checkpoint the fold started from (0 = the whole log) |
+| `GET` | `/api/rooms/:roomId/history/timeline` | The session as events, with no model involved; needs replay access |
+| `GET` | `/api/rooms/:roomId/history/summary` | The newest session summary, and whether the history has moved on since |
+| `POST` | `/api/rooms/:roomId/history/summary` | Summarises the session; cached per history; needs `ai:generate` |
+| `POST` | `/api/rooms/:roomId/history/explain` | Explains the position `{ seq }` a replay is paused on; needs `ai:generate` |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
 | `GET` | `/api/ai` | Whether this server can generate code, why not if it cannot, and what it can be asked for |

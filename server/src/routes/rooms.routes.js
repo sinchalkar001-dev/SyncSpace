@@ -19,6 +19,12 @@ import {
   updateRoom,
 } from '../services/room.service.js'
 import { listTimeline, stateAt } from '../services/replay.service.js'
+import { buildSessionTimeline } from '../services/session-timeline.service.js'
+import {
+  explainMoment,
+  latestSummary,
+  summarizeSession,
+} from '../services/session-insight.service.js'
 import { listRoomActivity } from '../services/activity.service.js'
 import {
   applyGeneration,
@@ -96,6 +102,11 @@ const preferenceSchema = z
   .refine((value) => value.pinned !== undefined || value.archived !== undefined, {
     message: 'provide pinned or archived',
   })
+
+/** Which point in the history to explain: a position in the update log. */
+const explainSchema = z.object({
+  seq: z.number().int().min(1),
+})
 
 /**
  * A program and its input. The code cap is well under the body limit, and
@@ -420,6 +431,95 @@ export function createRoomsRouter() {
       next(err)
     }
   })
+
+  /** Replay access is its own capability; the room being readable is not enough. */
+  const requireReplay = (room, userId) => {
+    if (!can(room, userId, CAPABILITIES.REPLAY_VIEW)) {
+      throw refusalFor(room, userId, CAPABILITIES.REPLAY_VIEW)
+    }
+  }
+
+  /**
+   * The session as a list of events: what was built, what ran, who came.
+   *
+   * Derived entirely from what the room recorded - no model involved - so it
+   * costs a read, answers the same way every time, and is the list every
+   * summary is checked against. Under /history rather than /replay because a
+   * literal segment beside /replay/:seq would be read as a sequence number.
+   */
+  roomsRouter.get('/:roomId/history/timeline', optionalAuth, async (req, res, next) => {
+    try {
+      const room = await loadAccessibleRoom(req)
+      requireReplay(room, req.user?.id)
+
+      // Segments are how the server finds a moment; nobody else needs them.
+      const { segments: _segments, ...timeline } = await buildSessionTimeline(req.params.roomId)
+      res.json({ timeline })
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /** The newest summary, and whether the history has moved on since it. */
+  roomsRouter.get('/:roomId/history/summary', optionalAuth, async (req, res, next) => {
+    try {
+      const room = await loadAccessibleRoom(req)
+      requireReplay(room, req.user?.id)
+      res.json(await latestSummary(req.params.roomId))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  /**
+   * Summarises the session with a model, or returns the summary already
+   * written for exactly this history.
+   *
+   * Reading a summary needs only replay access. Writing one spends a model
+   * call on somebody's key, so it needs the same capability as generating
+   * code from the board - and an account, so the spend is attributable.
+   */
+  roomsRouter.post(
+    '/:roomId/history/summary',
+    requireAuth,
+    generateLimiter,
+    async (req, res, next) => {
+      try {
+        const room = await loadAccessibleRoom(req)
+        requireReplay(room, req.user.id)
+        if (!can(room, req.user.id, CAPABILITIES.AI_GENERATE)) {
+          throw refusalFor(room, req.user.id, CAPABILITIES.AI_GENERATE)
+        }
+
+        res.json(await summarizeSession({ roomId: req.params.roomId, user: req.user }))
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
+
+  /** Explains the point a replay is paused on. Same rules as summarising. */
+  roomsRouter.post(
+    '/:roomId/history/explain',
+    requireAuth,
+    generateLimiter,
+    validate(explainSchema),
+    async (req, res, next) => {
+      try {
+        const room = await loadAccessibleRoom(req)
+        requireReplay(room, req.user.id)
+        if (!can(room, req.user.id, CAPABILITIES.AI_GENERATE)) {
+          throw refusalFor(room, req.user.id, CAPABILITIES.AI_GENERATE)
+        }
+
+        res.json(
+          await explainMoment({ roomId: req.params.roomId, user: req.user, seq: req.body.seq })
+        )
+      } catch (err) {
+        next(err)
+      }
+    }
+  )
 
   /**
    * Runs the code a client sends and answers with what it printed.

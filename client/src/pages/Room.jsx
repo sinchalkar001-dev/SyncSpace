@@ -685,7 +685,19 @@ export default function Room() {
       {/* Mounted only while open: closing should forget the position, the
           cached frames and the playback state, and unmounting says so more
           plainly than resetting six pieces of state would. */}
-      {replayOpen && <ReplayViewer roomId={roomId} onClose={() => setReplayOpen(false)} />}
+      {replayOpen && (
+        <ReplayViewer
+          roomId={roomId}
+          onClose={() => setReplayOpen(false)}
+          summarizeBlocker={
+            !isAuthenticated
+              ? 'Sign in to use AI summaries of this session'
+              : !access.can(CAP.AI_GENERATE)
+                ? 'Your role in this room does not include AI features'
+                : null
+          }
+        />
+      )}
 
       <GeneratePanel
         open={generateOpen}

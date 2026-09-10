@@ -370,3 +370,193 @@ describe('replay helpers', () => {
     expect(describeStep(1, TIMELINE, names).detail).toContain('24 B')
   })
 })
+
+/**
+ * The session panel: a timeline, a summary of it, and an explanation of the
+ * point the replay is paused on.
+ *
+ * The replay's own server mock stays in place underneath; these tests add the
+ * `/history` answers on top of it, so the frames above are served exactly as
+ * in every test before, and the panel is tested beside a replay that works.
+ */
+describe('the session panel', () => {
+  const EVENT_CODE = {
+    id: 'e1',
+    clock: '00:00',
+    seq: 1,
+    kind: 'code.edited',
+    actor: 'Ada',
+    text: 'Code edited',
+    detail: '+1 / -0 lines',
+  }
+  const EVENT_API = {
+    id: 'e2',
+    clock: '00:05',
+    seq: 2,
+    kind: 'architecture.added',
+    actor: 'Bo',
+    text: 'API added',
+    detail: 'api',
+  }
+
+  const HISTORY = {
+    roomId: ROOM,
+    throughSeq: 3,
+    signature: '3:0:0:0',
+    truncated: false,
+    events: [EVENT_CODE, EVENT_API],
+  }
+
+  const SUMMARY = {
+    id: 's1',
+    kind: 'session',
+    throughSeq: 3,
+    discarded: 1,
+    sections: {
+      overview: { text: 'Bo drew an API after Ada started the code.', events: ['e1', 'e2'] },
+      decisions: [],
+      architecture: [{ text: 'An API was added.', events: ['e2'] }],
+      code: [],
+      failed: [],
+      succeeded: [],
+      unresolved: [],
+      collaboration: [],
+    },
+    cited: { e1: EVENT_CODE, e2: EVENT_API },
+  }
+
+  const MOMENT = {
+    id: 'm1',
+    kind: 'moment',
+    atSeq: 2,
+    clock: '00:05',
+    discarded: 0,
+    explanation: { text: 'Bo was drawing the API box.', events: ['now', 'e2'] },
+    context: [],
+    next: [],
+    cited: {
+      now: { clock: '00:05', seq: 2, kind: 'moment.change', text: 'What changed at this point' },
+      e2: EVENT_API,
+    },
+  }
+
+  let posted
+
+  function withHistory({ summary = null, explainPending = false } = {}) {
+    posted = []
+    const replay = vi.mocked(globalThis.fetch).getMockImplementation()
+
+    vi.mocked(globalThis.fetch).mockImplementation((url, init = {}) => {
+      const path = String(url)
+      const method = init.method || 'GET'
+
+      if (path.includes('/history/timeline')) return Promise.resolve(ok({ timeline: HISTORY }))
+
+      if (path.includes('/history/summary') && method === 'GET') {
+        return Promise.resolve(ok({ summary, current: Boolean(summary) }))
+      }
+
+      if (path.includes('/history/')) {
+        posted.push({ path, body: JSON.parse(init.body || '{}') })
+        if (path.includes('/history/explain')) {
+          return explainPending ? new Promise(() => {}) : Promise.resolve(ok({ moment: MOMENT, cached: false }))
+        }
+        return Promise.resolve(ok({ summary: SUMMARY, cached: false }))
+      }
+
+      if (path.endsWith('/ai')) return Promise.resolve(ok({ enabled: true, reason: null }))
+
+      return replay(url, init)
+    })
+  }
+
+  const summaryRequests = () => posted.filter((entry) => entry.path.includes('/history/summary'))
+  const panel = () => screen.findByRole('complementary', { name: 'Session' })
+
+  it('summarises the session, and every citation opens the moment it names', async () => {
+    withHistory()
+    open()
+    await settled(3, 3)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Summarize session' }))
+
+    const aside = await panel()
+    expect(await within(aside).findByText('An API was added.')).toBeInTheDocument()
+    expect(within(aside).getByText(/One statement was left out/)).toBeInTheDocument()
+    expect(summaryRequests()).toHaveLength(1)
+
+    // The evidence is a click away: the citation seeks the replay to it.
+    await userEvent.click(within(aside).getAllByRole('button', { name: 'Go to 00:05: API added' })[0])
+    await settled(2, 3)
+  })
+
+  it('does not ask again for a summary that is already current', async () => {
+    withHistory()
+    open()
+    await settled(3, 3)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Summarize session' }))
+    const aside = await panel()
+    await within(aside).findByText('An API was added.')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Summarize session' }))
+    expect(summaryRequests()).toHaveLength(1)
+  })
+
+  it('explains the exact point the replay is paused on', async () => {
+    withHistory()
+    open()
+    await settled(3, 3)
+
+    dragTo(2)
+    await settled(2, 3)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Explain this moment' }))
+
+    expect(await screen.findByText('Bo was drawing the API box.')).toBeInTheDocument()
+    expect(posted.find((entry) => entry.path.includes('/history/explain')).body).toEqual({ seq: 2 })
+  })
+
+  /** A moment is somewhere you stop; mid-playback it would already have gone. */
+  it('offers an explanation only while paused', async () => {
+    withHistory()
+    open()
+    await settled(3, 3)
+
+    expect(screen.getByRole('button', { name: 'Explain this moment' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Play from the beginning' }))
+    expect(screen.queryByRole('button', { name: 'Explain this moment' })).not.toBeInTheDocument()
+  })
+
+  it('abandons an explanation still being written when playback resumes', async () => {
+    withHistory({ explainPending: true })
+    open()
+    await settled(3, 3)
+
+    dragTo(2)
+    await settled(2, 3)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Explain this moment' }))
+    expect(await screen.findByText(/Reading what happened here/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Play' }))
+    await waitFor(() => expect(screen.queryByText(/Reading what happened here/)).not.toBeInTheDocument())
+  })
+
+  /** The timeline costs nothing, so being unable to use the model does not cost it either. */
+  it('shows the timeline to somebody who cannot use AI, says why, and asks nothing of the model', async () => {
+    withHistory()
+    open({ summarizeBlocker: 'Sign in to use AI summaries of this session' })
+    await settled(3, 3)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Session timeline' }))
+
+    const aside = await panel()
+    expect(await within(aside).findByText('API added')).toBeInTheDocument()
+    expect(within(aside).getByText('Sign in to use AI summaries of this session')).toBeInTheDocument()
+    expect(within(aside).getByRole('button', { name: 'Summarize session' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Explain this moment' })).toBeDisabled()
+    expect(posted).toHaveLength(0)
+  })
+})

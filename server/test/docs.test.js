@@ -49,6 +49,9 @@ const documentedPaths = [
   '/api/v1/rooms/{roomId}/executions/{executionId}',
   '/api/v1/rooms/{roomId}/preferences',
   '/api/v1/rooms/{roomId}/activity',
+  '/api/v1/rooms/{roomId}/history/timeline',
+  '/api/v1/rooms/{roomId}/history/summary',
+  '/api/v1/rooms/{roomId}/history/explain',
   '/api/v1/activity',
   '/api/v1/runners',
 ]

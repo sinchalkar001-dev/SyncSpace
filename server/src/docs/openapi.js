@@ -1044,6 +1044,121 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/history/timeline': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['Replay'],
+        summary: 'The session as a list of events',
+        description:
+          'Derived from what the room recorded, with no model involved: whiteboard components added, removed and connected; functions declared in the code; runs that failed or succeeded; people joining and talking; AI proposals and what was applied. Each event carries an id, a clock offset from the start of the session, and the log position to seek the replay to. Needs replay access.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Oldest first',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SessionTimelineEnvelope' } } },
+          },
+          ...error(403, 'No replay access to this room', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/history/summary': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['Replay'],
+        summary: 'The newest session summary',
+        description:
+          'Needs only replay access. `current` is false once the history has moved on since the summary was written.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The latest summary, or null',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    summary: { oneOf: [{ $ref: '#/components/schemas/SessionSummary' }, { type: 'null' }] },
+                    current: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          ...error(403, 'No replay access to this room', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
+        },
+      },
+      post: {
+        tags: ['Replay'],
+        summary: 'Summarise the session with a model',
+        description:
+          'Every statement must cite timeline events; statements citing none that exist are dropped and counted in `discarded`. Answered from a cache when the history has not changed since the last summary, so asking twice costs one model call. Needs replay access and the ai:generate capability.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The summary, and whether it came from the cache',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    summary: { $ref: '#/components/schemas/SessionSummary' },
+                    cached: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          ...authRequired(),
+          ...error(400, 'Nothing recorded yet', 'nothing_to_summarize', 'Nothing has happened in this room yet, so there is nothing to summarise.'),
+          ...error(403, 'Your role cannot spend model calls', 'role_forbidden', 'Your role in this room does not allow that'),
+          ...error(503, 'No model is configured', 'ai_disabled', 'Code generation is switched off on this server.'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/history/explain': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      post: {
+        tags: ['Replay'],
+        summary: 'Explain the moment a replay is paused on',
+        description:
+          'Given the events leading up to the position and just after it, plus exactly what changed there, cited as "now". Same grounding, caching and capabilities as the session summary.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['seq'], properties: { seq: { type: 'integer', minimum: 1 } } },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The explanation, and whether it came from the cache',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    moment: { $ref: '#/components/schemas/MomentExplanation' },
+                    cached: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(400, 'Not a position in this history', 'bad_seq', 'That point is not in this history.'),
+          ...error(403, 'Your role cannot spend model calls', 'role_forbidden', 'Your role in this room does not allow that'),
+          ...error(503, 'No model is configured', 'ai_disabled', 'Code generation is switched off on this server.'),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/architecture': {
       get: {
         tags: ['AI'],
@@ -1937,6 +2052,91 @@ export const openapiDocument = {
           memberCount: { type: 'integer' },
           lastActivityAt: { type: 'string', format: 'date-time', description: 'Somebody was in the room' },
           updatedAt: { type: 'string', format: 'date-time', description: 'The room itself was changed' },
+        },
+      },
+
+      SessionEvent: {
+        type: 'object',
+        required: ['id', 'at', 'clock', 'seq', 'kind', 'text'],
+        properties: {
+          id: { type: 'string', example: 'e4' },
+          at: { type: 'string', format: 'date-time' },
+          offsetMs: { type: 'integer' },
+          clock: { type: 'string', example: '00:04' },
+          seq: { type: 'integer', description: 'Log position to seek the replay to' },
+          kind: { type: 'string', example: 'architecture.added' },
+          actor: { type: ['string', 'null'] },
+          text: { type: 'string', example: 'Database added' },
+          detail: { type: ['string', 'null'] },
+        },
+      },
+
+      SessionTimelineEnvelope: {
+        type: 'object',
+        properties: {
+          timeline: {
+            type: 'object',
+            properties: {
+              roomId: { type: 'string' },
+              throughSeq: { type: 'integer' },
+              signature: { type: 'string' },
+              startedAt: { type: ['string', 'null'], format: 'date-time' },
+              endedAt: { type: ['string', 'null'], format: 'date-time' },
+              truncated: { type: 'boolean' },
+              events: { type: 'array', items: { $ref: '#/components/schemas/SessionEvent' } },
+            },
+          },
+        },
+      },
+
+      GroundedStatement: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+          events: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Ids of the events it rests on; never empty',
+          },
+        },
+      },
+
+      SessionSummary: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          throughSeq: { type: 'integer' },
+          sections: {
+            type: 'object',
+            properties: {
+              overview: { oneOf: [{ $ref: '#/components/schemas/GroundedStatement' }, { type: 'null' }] },
+              decisions: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              architecture: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              code: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              failed: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              succeeded: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              unresolved: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+              collaboration: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+            },
+          },
+          cited: { type: 'object', description: 'A copy of every event the summary cites, keyed by id' },
+          discarded: { type: 'integer', description: 'Statements dropped for citing no real event' },
+          model: { type: ['string', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      MomentExplanation: {
+        type: 'object',
+        properties: {
+          atSeq: { type: 'integer' },
+          clock: { type: 'string' },
+          explanation: { oneOf: [{ $ref: '#/components/schemas/GroundedStatement' }, { type: 'null' }] },
+          context: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+          next: { type: 'array', items: { $ref: '#/components/schemas/GroundedStatement' } },
+          changes: { type: 'array', items: { type: 'string' } },
+          cited: { type: 'object' },
+          discarded: { type: 'integer' },
         },
       },
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useReplay } from '../../hooks/useReplay.js'
 import { describeStep, SPEEDS } from '../../lib/replay.js'
 import { Button } from '../ui/Button.jsx'
@@ -7,6 +7,9 @@ import { Modal } from '../ui/Modal.jsx'
 import { Segmented } from '../ui/Segmented.jsx'
 import { Spinner } from '../ui/Spinner.jsx'
 import { ReplayBoard } from './ReplayBoard.jsx'
+import { SessionPanel } from './SessionPanel.jsx'
+import { useSessionInsights } from '../../hooks/useSessionInsights.js'
+import { indexForSeq } from '../../lib/sessionInsights.js'
 
 /**
  * Watching a room being built.
@@ -19,7 +22,7 @@ import { ReplayBoard } from './ReplayBoard.jsx'
  * and nothing here is connected to the live document — the room carries on
  * behind it, and closing returns to it exactly as it was.
  */
-export function ReplayViewer({ roomId, onClose }) {
+export function ReplayViewer({ roomId, onClose, summarizeBlocker = null }) {
   const {
     state,
     error,
@@ -40,6 +43,42 @@ export function ReplayViewer({ roomId, onClose }) {
   } = useReplay(roomId)
 
   const position = useMemo(() => describeStep(index, entries, names), [index, entries, names])
+
+  /**
+   * The session panel: a timeline of what happened, a summary of it, and an
+   * explanation of the point the replay is paused on.
+   *
+   * Nothing in it is fetched until it is first opened, and none of it shares
+   * a request with the frames above - a slow model call can hold up its own
+   * panel and nothing else.
+   */
+  const [panelOpen, setPanelOpen] = useState(false)
+  const insights = useSessionInsights(roomId, { enabled: panelOpen })
+  const { summary, moment, summarize, explain, dismissMoment } = insights
+
+  const currentSeq = index > 0 ? (entries[index - 1]?.seq ?? 0) : 0
+
+  const seekToSeq = useCallback((seq) => seek(indexForSeq(entries, seq)), [entries, seek])
+
+  // A summary already written for exactly this history is shown, not asked for again.
+  const summaryIsFresh = Boolean(summary.data && summary.current)
+
+  const summarizeHere = useCallback(() => {
+    setPanelOpen(true)
+    if (summarizeBlocker || summaryIsFresh) return
+    summarize()
+  }, [summarizeBlocker, summaryIsFresh, summarize])
+
+  const explainHere = useCallback(() => {
+    setPanelOpen(true)
+    explain(currentSeq)
+  }, [explain, currentSeq])
+
+  // Pressing play again means the question about this point is no longer the
+  // one being asked, so an answer still being written is abandoned.
+  useEffect(() => {
+    if (playing && moment.state === 'loading') dismissMoment()
+  }, [playing, moment.state, dismissMoment])
 
   /**
    * Space plays, the arrows step. Skipped whenever a control would act on the
@@ -118,26 +157,38 @@ export function ReplayViewer({ roomId, onClose }) {
 
         {state === 'ready' && entries.length > 0 && (
           <>
-            <div className="replay__panes">
-              <ReplayBoard shapes={frame?.shapes ?? []} />
+            <div className={'replay__body' + (panelOpen ? ' replay__body--panel' : '')}>
+              <div className="replay__panes">
+                <ReplayBoard shapes={frame?.shapes ?? []} />
 
-              <div className="replay__code">
-                <header className="replay__code-head">
-                  <Icon name="code" size={14} />
-                  <span>Code</span>
-                  <span className="muted nums">
-                    {frame?.code ? lines + (lines === 1 ? ' line' : ' lines') : 'empty'}
-                  </span>
-                </header>
+                <div className="replay__code">
+                  <header className="replay__code-head">
+                    <Icon name="code" size={14} />
+                    <span>Code</span>
+                    <span className="muted nums">
+                      {frame?.code ? lines + (lines === 1 ? ' line' : ' lines') : 'empty'}
+                    </span>
+                  </header>
 
-                {frame?.code ? (
-                  <pre className="replay__code-body">
-                    <code>{frame.code}</code>
-                  </pre>
-                ) : (
-                  <p className="replay__blank muted">Nothing had been typed yet.</p>
-                )}
+                  {frame?.code ? (
+                    <pre className="replay__code-body">
+                      <code>{frame.code}</code>
+                    </pre>
+                  ) : (
+                    <p className="replay__blank muted">Nothing had been typed yet.</p>
+                  )}
+                </div>
               </div>
+
+              {panelOpen && (
+                <SessionPanel
+                  insights={insights}
+                  blocker={summarizeBlocker}
+                  currentSeq={currentSeq}
+                  onSeek={seekToSeq}
+                  onClose={() => setPanelOpen(false)}
+                />
+              )}
             </div>
 
             {frameError && (
@@ -205,6 +256,34 @@ export function ReplayViewer({ roomId, onClose }) {
                 label="Playback speed"
                 size="sm"
               />
+
+              {/* Offered only while paused: a moment is somewhere you stop, and
+                  asking about one mid-playback would explain a frame that has
+                  already gone by the time the answer arrives. */}
+              {!playing && index > 0 && (
+                <Button
+                  size="sm"
+                  icon="info"
+                  onClick={explainHere}
+                  disabled={Boolean(summarizeBlocker)}
+                  title={summarizeBlocker || 'Explain what was happening at this point'}
+                >
+                  Explain this moment
+                </Button>
+              )}
+
+              {/* Somebody who cannot spend a model call still gets the
+                  timeline, which costs nothing - the button just says so. */}
+              <Button
+                size="sm"
+                variant={panelOpen ? 'primary' : 'default'}
+                icon={summarizeBlocker ? 'activity' : 'zap'}
+                onClick={summarizeHere}
+                aria-pressed={panelOpen}
+                title={summarizeBlocker || undefined}
+              >
+                {summarizeBlocker ? 'Session timeline' : 'Summarize session'}
+              </Button>
             </div>
 
             {capped && (

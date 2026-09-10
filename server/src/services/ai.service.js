@@ -311,14 +311,21 @@ export function sanitiseProposal(raw) {
 }
 
 /**
- * Calls the model and returns a sanitised proposal.
+ * One forced tool call to whichever model this deployment is configured for.
  *
- * The timeout is enforced here rather than left to the platform: a generation
- * holds an HTTP request open, and a request that never settles is worse than
- * one that fails, because the person is left watching a spinner with nothing
- * to press.
+ * Shared by everything here that asks a model a question - the change set drawn
+ * from a diagram, and the summaries of a session's history - so the timeout,
+ * the wording of every failure, and the rule that nothing of a provider's error
+ * reaches the client all live in one place rather than drifting between copies.
+ *
+ * The timeout is enforced here rather than left to the platform: a request
+ * that never settles is worse than one that fails, because somebody is left
+ * watching a spinner with nothing to press.
+ *
+ * `hints` is what to suggest when the answer times out or is cut short, because
+ * "try a smaller diagram" is advice that only makes sense for one feature.
  */
-export async function askForImplementation({ architecture, targets, intent, model }) {
+export async function callModelTool({ system, prompt, tool, maxTokens, model, hints = {} }) {
   const status = aiStatus()
   if (!status.enabled) throw unavailable(status.reason, 'ai_disabled')
 
@@ -329,10 +336,10 @@ export async function askForImplementation({ architecture, targets, intent, mode
     baseUrl: env.AI_BASE_URL ?? vendor.defaultBaseUrl,
     key,
     model: model || status.model,
-    system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt({ architecture, targets, intent }),
-    tool: PROPOSAL_TOOL,
-    maxTokens: env.AI_MAX_OUTPUT_TOKENS,
+    system,
+    prompt,
+    tool,
+    maxTokens: maxTokens ?? env.AI_MAX_OUTPUT_TOKENS,
   })
 
   const controller = new AbortController()
@@ -348,7 +355,7 @@ export async function askForImplementation({ architecture, targets, intent, mode
     })
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw upstream('The model did not answer in time. Try a smaller diagram.', 'ai_timeout')
+      throw upstream(hints.timeout ?? 'The model did not answer in time.', 'ai_timeout')
     }
     // The message can carry the host and, on some failures, the request
     // headers; only the class is logged and nothing of it reaches the client.
@@ -369,9 +376,9 @@ export async function askForImplementation({ architecture, targets, intent, mode
     )
     /**
      * "Refused" is the wrong word for most of these, and the wrong word sends
-     * somebody looking for a fault in their diagram.
+     * somebody looking for a fault in their own input.
      *
-     * 429 and 503 are both temporary and both mean try again — 503 especially,
+     * 429 and 503 are both temporary and both mean try again - 503 especially,
      * which is the provider being busy and has nothing to do with the request.
      * 401 and 403 mean the key, which is a different job entirely. Only what
      * is left is genuinely a refusal.
@@ -385,32 +392,53 @@ export async function askForImplementation({ architecture, targets, intent, mode
           ? 'The model is rate limiting this server. Try again shortly.'
           : 'The model is busy right now. Try again in a moment.'
         : credential
-          ? 'The model rejected this server\'s API key (HTTP ' + response.status + ').'
+          ? "The model rejected this server's API key (HTTP " + response.status + ').'
           : 'The model refused the request (HTTP ' + response.status + ').',
       temporary ? 'ai_unavailable' : credential ? 'ai_bad_key' : 'ai_failed'
     )
   }
 
   const payload = await response.json().catch(() => null)
-  const answer = vendor.parse(payload, PROPOSAL_TOOL.name)
+  const answer = vendor.parse(payload, tool.name)
 
   if (!answer.input) {
     logger.error(
-      { provider: vendor.name, stop: answer.stopReason },
-      'AI answered without using the proposal tool'
+      { provider: vendor.name, stop: answer.stopReason, tool: tool.name },
+      'AI answered without using the required tool'
     )
     throw upstream(
       answer.stopReason === 'max_tokens'
-        ? 'The answer was cut off before it was complete. Try fewer targets at once.'
+        ? (hints.cutoff ?? 'The answer was cut off before it was complete.')
         : 'The model did not answer in the expected shape.',
       'ai_malformed'
     )
   }
 
   return {
-    proposal: sanitiseProposal(answer.input),
+    input: answer.input,
     model: answer.model ?? model ?? status.model,
     provider: vendor.name,
+    usage: answer.usage,
+  }
+}
+
+/** Calls the model and returns a sanitised proposal. */
+export async function askForImplementation({ architecture, targets, intent, model }) {
+  const answer = await callModelTool({
+    system: SYSTEM_PROMPT,
+    prompt: buildUserPrompt({ architecture, targets, intent }),
+    tool: PROPOSAL_TOOL,
+    model,
+    hints: {
+      timeout: 'The model did not answer in time. Try a smaller diagram.',
+      cutoff: 'The answer was cut off before it was complete. Try fewer targets at once.',
+    },
+  })
+
+  return {
+    proposal: sanitiseProposal(answer.input),
+    model: answer.model,
+    provider: answer.provider,
     usage: answer.usage,
   }
 }

@@ -456,4 +456,31 @@ export const api = {
     apiBytes('/rooms/' + encodeURIComponent(roomId) + '/replay/' + encodeURIComponent(seq), {
       signal,
     }),
+
+  /** The session as events: what was built, what ran, who came. No model involved. */
+  historyTimeline: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/history/timeline', { signal, retry: 2 }),
+
+  /** The newest summary of the session, if one has been written. */
+  historySummary: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/history/summary', { signal, retry: 2 }),
+
+  /**
+   * Summarises the session with a model. Never retried: a retry of a request
+   * that may well have reached the model pays for the same answer twice.
+   */
+  summarizeHistory: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/history/summary', {
+      method: 'POST',
+      body: {},
+      signal,
+    }),
+
+  /** Explains the point a replay is paused on. Not retried, for the same reason. */
+  explainMoment: (roomId, seq, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/history/explain', {
+      method: 'POST',
+      body: { seq },
+      signal,
+    }),
 }
