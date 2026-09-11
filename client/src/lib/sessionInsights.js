@@ -28,6 +28,7 @@ const ICONS = [
   ['people.', 'users'],
   ['ai.', 'zap'],
   ['board.', 'pen'],
+  ['comment.', 'comment'],
   ['state.warning', 'alert'],
   ['moment.', 'clock'],
 ]
@@ -40,13 +41,16 @@ export function iconForKind(kind) {
 /**
  * How an event reads in a list.
  *
- * People events are verbs that need their subject — "joined the room" alone
- * says nothing — so the actor leads. Everything else is already a sentence
- * about the work, with the actor as a quiet attribution.
+ * People and comment events are verbs that need their subject — "joined the
+ * room" or "commented on line 12" alone says nothing — so the actor leads.
+ * Everything else is already a sentence about the work, with the actor as a
+ * quiet attribution.
  */
+const LED_BY_ACTOR = ['people.', 'comment.']
+
 export function describeEvent(event) {
   if (!event) return { text: '', by: null }
-  if (String(event.kind).startsWith('people.')) {
+  if (LED_BY_ACTOR.some((prefix) => String(event.kind).startsWith(prefix))) {
     return { text: (event.actor || 'Somebody') + ' ' + event.text, by: null }
   }
   return { text: event.text, by: event.actor || null }

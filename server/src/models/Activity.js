@@ -28,6 +28,9 @@ export const ACTIVITY = Object.freeze({
   EXECUTION_COMPLETED: 'execution.completed',
   COMMENT_ADDED: 'comment.added',
   COLLABORATOR_JOINED: 'collaborator.joined',
+  // A comment on the work itself. Chat keeps `comment.added`, which it has
+  // always had; relabelling rows already written would change their meaning.
+  COMMENT_POSTED: 'comment.posted',
 })
 
 export const ACTIVITY_KINDS = Object.freeze(Object.values(ACTIVITY))

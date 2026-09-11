@@ -11,6 +11,72 @@ import { SessionPanel } from './SessionPanel.jsx'
 import { useSessionInsights } from '../../hooks/useSessionInsights.js'
 import { indexForSeq } from '../../lib/sessionInsights.js'
 
+const NO_THREADS = []
+
+/**
+ * The code as it stood, with the lines that had comments on them marked.
+ *
+ * Each marked line carries what was said on it, as a tooltip: the replay is
+ * for reading, and a mark that cannot say what it marks is only half useful.
+ * Without any comments the code is one string, as it always was.
+ */
+function ReplayCode({ code, threads, anchors }) {
+  const marks = useMemo(() => {
+    const byLine = new Map()
+    for (const thread of threads) {
+      const at = anchors.get(thread.id)
+      if (!at || at.orphaned) continue
+      for (let line = at.line; line <= at.endLine; line += 1) {
+        byLine.set(line, [...(byLine.get(line) ?? []), thread])
+      }
+    }
+    return byLine
+  }, [threads, anchors])
+
+  if (marks.size === 0) {
+    return (
+      <pre className="replay__code-body">
+        <code>{code}</code>
+      </pre>
+    )
+  }
+
+  return (
+    <pre className="replay__code-body">
+      <code>
+        {code.split('\n').map((text, index) => {
+          const here = marks.get(index + 1)
+          const said = here
+            ?.map((thread) => {
+              const first = thread.messages[0]
+              return (
+                (first?.authorName || 'Someone') +
+                ': ' +
+                (first?.deleted ? '(deleted)' : first?.body) +
+                (thread.status === 'resolved' ? ' (resolved)' : '')
+              )
+            })
+            .join('\n')
+
+          return (
+            <span
+              key={index}
+              className={
+                'replay__line' +
+                (here ? ' has-comment' : '') +
+                (here?.every((thread) => thread.status === 'resolved') ? ' is-resolved' : '')
+              }
+              title={said}
+            >
+              {text || ' '}
+            </span>
+          )
+        })}
+      </code>
+    </pre>
+  )
+}
+
 /**
  * Watching a room being built.
  *
@@ -22,7 +88,7 @@ import { indexForSeq } from '../../lib/sessionInsights.js'
  * and nothing here is connected to the live document — the room carries on
  * behind it, and closing returns to it exactly as it was.
  */
-export function ReplayViewer({ roomId, onClose, summarizeBlocker = null }) {
+export function ReplayViewer({ roomId, onClose, summarizeBlocker = null, comments = NO_THREADS }) {
   const {
     state,
     error,
@@ -40,9 +106,17 @@ export function ReplayViewer({ roomId, onClose, summarizeBlocker = null }) {
     seek,
     step,
     toggle,
-  } = useReplay(roomId)
+  } = useReplay(roomId, { threads: comments })
 
   const position = useMemo(() => describeStep(index, entries, names), [index, entries, names])
+
+  const boardThreads = useMemo(
+    () =>
+      (frame?.threads ?? NO_THREADS).filter(
+        (thread) => thread.anchor?.kind === 'shape' || thread.anchor?.kind === 'region'
+      ),
+    [frame?.threads]
+  )
 
   /**
    * The session panel: a timeline of what happened, a summary of it, and an
@@ -159,7 +233,7 @@ export function ReplayViewer({ roomId, onClose, summarizeBlocker = null }) {
           <>
             <div className={'replay__body' + (panelOpen ? ' replay__body--panel' : '')}>
               <div className="replay__panes">
-                <ReplayBoard shapes={frame?.shapes ?? []} />
+                <ReplayBoard shapes={frame?.shapes ?? []} threads={boardThreads} />
 
                 <div className="replay__code">
                   <header className="replay__code-head">
@@ -171,9 +245,11 @@ export function ReplayViewer({ roomId, onClose, summarizeBlocker = null }) {
                   </header>
 
                   {frame?.code ? (
-                    <pre className="replay__code-body">
-                      <code>{frame.code}</code>
-                    </pre>
+                    <ReplayCode
+                      code={frame.code}
+                      threads={frame.threads ?? NO_THREADS}
+                      anchors={frame.codeAnchors ?? new Map()}
+                    />
                   ) : (
                     <p className="replay__blank muted">Nothing had been typed yet.</p>
                   )}

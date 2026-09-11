@@ -52,6 +52,11 @@ const documentedPaths = [
   '/api/v1/rooms/{roomId}/history/timeline',
   '/api/v1/rooms/{roomId}/history/summary',
   '/api/v1/rooms/{roomId}/history/explain',
+  '/api/v1/rooms/{roomId}/comments',
+  '/api/v1/rooms/{roomId}/comments/seen',
+  '/api/v1/rooms/{roomId}/comments/{threadId}',
+  '/api/v1/rooms/{roomId}/comments/{threadId}/replies',
+  '/api/v1/rooms/{roomId}/comments/{threadId}/messages/{messageId}',
   '/api/v1/activity',
   '/api/v1/runners',
 ]

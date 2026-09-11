@@ -27,6 +27,8 @@ const ICONS = {
   ellipse: { d: 'M12 5 A9 7 0 1 1 12 19 A9 7 0 1 1 12 5 Z' },
   text: { d: 'M4 4 H20 V8 H18 V6 H13 V18 H15.5 V20 H8.5 V18 H11 V6 H6 V8 H4 Z', filled: true },
   eraser: { d: 'M8 20 L3 15 A2 2 0 0 1 3 12 L12 3 A2 2 0 0 1 15 3 L21 9 A2 2 0 0 1 21 12 L13 20 Z', filled: true },
+  // A speech bubble: the comment tool, and everywhere a comment is marked.
+  comment: { d: 'M4 4.5 H20 V16 H11.5 L6.5 20.5 V16 H4 Z M8 9 H16 M8 12 H13' },
 
   undo: { d: 'M4 9 H14 A5 5 0 0 1 14 19 H9 M4 9 L8 5 M4 9 L8 13' },
   redo: { d: 'M20 9 H10 A5 5 0 0 0 10 19 H15 M20 9 L16 5 M20 9 L16 13' },

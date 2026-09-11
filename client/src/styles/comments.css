@@ -1,0 +1,392 @@
+/**
+ * Anchored comments: the panel, its threads, the composer, and the badges
+ * that mark commented things on the board, in the editor and in files.
+ */
+
+/* ---------- the header button ---------- */
+
+.presence-menu__trigger {
+  position: relative;
+}
+
+.comments__badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 2px solid var(--surface);
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* A mention is the one thing worth interrupting somebody for. */
+.comments__badge--mention {
+  background: var(--danger, #ef6b6b);
+  color: #fff;
+}
+
+/* ---------- the panel ---------- */
+
+.presence-menu__panel.comments {
+  width: min(28rem, calc(100vw - var(--space-5) * 2));
+  max-height: min(40rem, calc(100vh - 5rem));
+}
+
+.comments__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.comments__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.comments__list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.comments__note {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.comments__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+}
+
+.comments__draft {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.comments__draft-on {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+}
+
+/* ---------- a thread ---------- */
+
+.thread {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.thread.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.thread--resolved {
+  opacity: 0.78;
+}
+
+.thread__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.thread__anchor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.thread__anchor span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread__anchor:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.thread__anchor:focus-visible,
+.thread__tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.thread__note {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-xs);
+}
+
+.thread__snippet {
+  display: block;
+  overflow: hidden;
+  padding: 4px 8px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--ink-1);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread__messages {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread__message {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.thread__message.is-pending {
+  opacity: 0.6;
+}
+
+.thread__avatar,
+.composer__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--identity, var(--surface-3));
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.thread__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thread__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.thread__author {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.thread__body {
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thread__body--deleted {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.thread__mention {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.thread__tools {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.thread__tool {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.thread__tool:hover {
+  color: var(--text);
+}
+
+.thread__tool--danger:hover {
+  color: var(--danger, #ef6b6b);
+}
+
+/* ---------- the composer ---------- */
+
+.composer {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.composer__field {
+  position: relative;
+}
+
+.composer__input {
+  min-height: 56px;
+  resize: vertical;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.composer__mentions {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  display: grid;
+  min-width: 12rem;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  list-style: none;
+}
+
+.composer__person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.composer__person.is-active,
+.composer__person:hover {
+  background: var(--surface-3);
+}
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.composer__hint {
+  margin-right: auto;
+  font-size: var(--text-2xs);
+}
+
+/* ---------- badges on commented things ---------- */
+
+/* The editor's gutter: one mark per commented line. */
+.comment-glyph {
+  cursor: pointer;
+}
+
+.comment-glyph::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 11px;
+  height: 11px;
+  margin-top: -6px;
+  border-radius: 3px 3px 3px 0;
+  background: var(--accent);
+}
+
+.comment-glyph.is-resolved::before {
+  background: var(--text-faint);
+}
+
+/* The commented range itself, quietly, so the code stays readable. */
+.comment-range {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+/* A file row with comments on it. */
+.files__comments {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.files__comments:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.files__list li.is-focused {
+  background: var(--accent-soft);
+}
+
+/* Lines with comments in the replay's code pane. */
+.replay__line {
+  display: block;
+}
+
+.replay__line.has-comment {
+  margin: 0 calc(var(--space-3) * -1);
+  padding: 0 var(--space-3);
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.replay__line.has-comment.is-resolved {
+  border-left-color: var(--text-faint);
+  background: transparent;
+}

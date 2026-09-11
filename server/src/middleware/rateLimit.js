@@ -94,6 +94,12 @@ export function createRateLimiters() {
     }),
 
     /** File uploads are expensive (disk I/O, bandwidth); cap them separately. */
+    commentLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.COMMENT_RATE_LIMIT_MAX,
+      message: 'Too many comments, try again shortly',
+    }),
+
     uploadLimiter: build({
       windowMs: env.RATE_LIMIT_WINDOW_MS,
       max: env.UPLOAD_RATE_LIMIT_MAX,

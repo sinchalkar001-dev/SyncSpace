@@ -17,8 +17,40 @@ import { LanguagePicker } from './LanguagePicker.jsx'
 import { EditorStatusBar } from './EditorStatusBar.jsx'
 import { RunPanel } from './RunPanel.jsx'
 import { hintFor } from '../../lib/runHints.js'
+import { codeAnchor } from '../../lib/comments.js'
+import { typedElsewhere } from '../../lib/shortcuts.js'
+import { useCodeAnchors } from '../../hooks/useCodeAnchors.js'
 
 const TAB_SIZE = 2
+
+const NO_THREADS = []
+
+// Monaco's enum value for the glyph margin, for when the enum itself is absent.
+const GLYPH_MARGIN = 2
+
+/**
+ * A comment's words, safe to hand to Monaco's hover, which renders markdown:
+ * somebody's comment is shown as they typed it, never as links or formatting.
+ */
+const plainMarkdown = (text) => String(text ?? '').replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, '\\$&')
+
+function hoverFor(threads) {
+  return threads
+    .map((thread) => {
+      const first = thread.messages.find((message) => !message.deleted) ?? thread.messages[0]
+      const replies = thread.messages.filter((message) => !message.deleted).length - 1
+      return (
+        '**' +
+        plainMarkdown(first?.authorName || 'Someone') +
+        '**: ' +
+        plainMarkdown((first?.body ?? '').slice(0, 160)) +
+        (replies > 0 ? ' _(' + replies + (replies === 1 ? ' reply' : ' replies') + ')_' : '') +
+        (thread.status === 'resolved' ? ' _(resolved)_' : '')
+      )
+    })
+    .concat('Click to open')
+    .join('\n\n')
+}
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace('#', '')
@@ -67,10 +99,17 @@ export function CodeEditor({
   canEdit = true,
   canExecute = true,
   accessLoaded = true,
+  commentThreads = NO_THREADS,
+  canComment = false,
+  onComment,
+  onOpenThread,
+  activeThreadId = null,
 }) {
   const bindingRef = useRef(null)
   const editorRef = useRef(null)
   const monacoRef = useRef(null)
+  const paneRef = useRef(null)
+  const [editorReady, setEditorReady] = useState(false)
 
   // Read through a ref so Monaco's listeners, registered once at mount, always
   // report to the current presence rather than the one that existed then.
@@ -78,6 +117,31 @@ export function CodeEditor({
   useEffect(() => {
     presenceRef.current = presence
   }, [presence])
+
+  // The same, for the comment callbacks and which lines carry comments.
+  const commentRef = useRef({ canComment, onComment, onOpenThread, byLine: new Map() })
+  useEffect(() => {
+    commentRef.current.canComment = canComment
+    commentRef.current.onComment = onComment
+    commentRef.current.onOpenThread = onOpenThread
+  }, [canComment, onComment, onOpenThread])
+
+  /**
+   * Starts a comment on a range. The anchor is computed from the shared text
+   * every client already holds; nothing is written to it.
+   */
+  const commentOn = useCallback(
+    (range) => {
+      const { canComment: allowed, onComment: start } = commentRef.current
+      if (!allowed || !start || !yText || !range) return
+      start(codeAnchor(yText, range))
+    },
+    [yText]
+  )
+
+  const commentOnSelection = useCallback(() => {
+    commentOn(editorRef.current?.getSelection?.())
+  }, [commentOn])
 
   const language = useUIStore((s) => s.language)
   const editorPrefs = useUIStore((s) => s.editor)
@@ -116,6 +180,9 @@ export function CodeEditor({
       matchBrackets: 'always',
       renderWhitespace: 'selection',
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+      // Where comment marks sit. Always on, so the code does not shift
+      // sideways the moment the first comment arrives.
+      glyphMargin: true,
 
       /**
        * Read-only until the server says otherwise, and again while the answer
@@ -137,6 +204,7 @@ export function CodeEditor({
       monaco.editor.setTheme('syncspace-dark')
       editorRef.current = editor
       monacoRef.current = monaco
+      setEditorReady(true)
 
       const model = editor.getModel()
       if (!model || !yText || !provider) return
@@ -179,6 +247,19 @@ export function CodeEditor({
       editor.onDidType(typed)
       editor.onDidPaste(typed)
       editor.onMouseDown(() => presenceRef.current?.unfollow())
+
+      // The gutter. A mark opens the conversation on its line; a line without
+      // one starts a conversation there, for anybody who may comment.
+      const glyph = monaco.editor?.MouseTargetType?.GUTTER_GLYPH_MARGIN ?? GLYPH_MARGIN
+      editor.onMouseDown((event) => {
+        if (event?.target?.type !== glyph) return
+        const line = event.target.position?.lineNumber
+        if (!line) return
+        const here = commentRef.current.byLine.get(line)
+        if (here?.length) commentRef.current.onOpenThread?.(here[0])
+        else commentOn({ startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 })
+      })
+
       model.onDidChangeContent(() => {
         setEmpty(model.getValue().trim() === '')
         if (!editedRef.current) {
@@ -187,7 +268,7 @@ export function CodeEditor({
         }
       })
     },
-    [yText, provider]
+    [yText, provider, commentOn]
   )
 
   useEffect(
@@ -235,6 +316,97 @@ export function CodeEditor({
     }
   }, [presence?.navigator])
 
+  /**
+   * "Comment" in the editor's context menu, and Ctrl+Alt+M, for anybody who
+   * may comment. Offered in a read-only buffer too: a commenter cannot change
+   * the code, and talking about it is exactly what the role is for.
+   */
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    if (!editorReady || !canComment || !onComment || typeof editor?.addAction !== 'function') {
+      return undefined
+    }
+
+    const action = editor.addAction({
+      id: 'syncspace.comment',
+      label: 'Comment on this code',
+      keybindings:
+        monaco?.KeyMod && monaco?.KeyCode
+          ? [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM]
+          : [],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0,
+      run: commentOnSelection,
+    })
+    return () => action?.dispose?.()
+  }, [editorReady, canComment, onComment, commentOnSelection])
+
+  /**
+   * Comment marks: one in the gutter per commented line, and a quiet wash over
+   * the code an open comment is about.
+   *
+   * Resolved threads are left out, as they are on the board, except the one
+   * open in the panel. Positions come from the anchors, so a mark follows its
+   * code through everybody's edits.
+   */
+  const codeThreads = useMemo(
+    () =>
+      commentThreads.filter(
+        (thread) =>
+          thread.anchor?.kind === 'code' &&
+          (thread.status !== 'resolved' || thread.id === activeThreadId)
+      ),
+    [commentThreads, activeThreadId]
+  )
+  const located = useCodeAnchors(codeThreads, yText)
+
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel?.()
+    if (!editorReady || !monaco?.Range || !model || typeof editor.createDecorationsCollection !== 'function') {
+      return undefined
+    }
+
+    const byLine = new Map()
+    const decorations = []
+
+    for (const thread of codeThreads) {
+      const at = located.get(thread.id)
+      if (!at || at.orphaned) continue
+
+      byLine.set(at.line, [...(byLine.get(at.line) ?? []), thread])
+
+      if (thread.status !== 'resolved' && at.to > at.from && typeof model.getPositionAt === 'function') {
+        const from = model.getPositionAt(at.from)
+        const to = model.getPositionAt(at.to)
+        decorations.push({
+          range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+          options: { className: 'comment-range' },
+        })
+      }
+    }
+
+    for (const [line, threads] of byLine) {
+      decorations.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName:
+            'comment-glyph' + (threads.every((thread) => thread.status === 'resolved') ? ' is-resolved' : ''),
+          glyphMarginHoverMessage: { value: hoverFor(threads) },
+        },
+      })
+    }
+
+    commentRef.current.byLine = new Map(
+      [...byLine].map(([line, threads]) => [line, threads.map((thread) => thread.id)])
+    )
+
+    const marks = editor.createDecorationsCollection(decorations)
+    return () => marks.clear()
+  }, [editorReady, codeThreads, located])
+
   const format = useCallback(() => {
     editorRef.current?.getAction('editor.action.formatDocument')?.run()
   }, [])
@@ -276,6 +448,9 @@ export function CodeEditor({
   useEffect(() => {
     const onKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return
+      // Ctrl+Enter in the comment box, or any field outside this pane, is that
+      // field's to handle: sending a comment must not also run the program.
+      if (typedElsewhere(event.target, paneRef.current)) return
       event.preventDefault()
       run()
     }
@@ -322,7 +497,7 @@ export function CodeEditor({
   const expanded = paneMode === 'code'
 
   return (
-    <section className="pane pane--editor" aria-label="Code editor">
+    <section className="pane pane--editor" aria-label="Code editor" ref={paneRef}>
       <header className="pane__bar">
         <span className="pane__title">Code</span>
         <LanguagePicker />
@@ -358,6 +533,25 @@ export function CodeEditor({
           </>
         )}
 
+        {onComment && (
+          <button
+            type="button"
+            className="panebtn"
+            onClick={commentOnSelection}
+            disabled={!canComment}
+            title={
+              canComment
+                ? 'Comment on the selected code, or the line the cursor is on (Ctrl+Alt+M)'
+                : 'Your role in this room cannot comment'
+            }
+            // Not "…the selected code": names match as substrings in tests and
+            // in assistive tech's search alike, and "selected" answered to
+            // every lookup of the Select tool.
+            aria-label="Comment on this code"
+          >
+            <Icon name="comment" size={14} />
+          </button>
+        )}
         <button type="button" className="panebtn" onClick={find} title="Find (Ctrl+F)" aria-label="Find">
           <Icon name="search" size={14} />
         </button>

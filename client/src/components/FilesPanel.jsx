@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismissable } from '../hooks/useDismissable.js'
 import { useRoomFiles } from '../hooks/useRoomFiles.js'
 import { formatWhen } from '../lib/rooms.js'
@@ -17,16 +17,43 @@ import { ACCEPTS, formatSize, iconFor, MAX_BYTES, rejectionFor } from '../lib/fi
  *
  * Every route here needs an account, so a guest sees the button explain that
  * rather than a panel that can only fail.
+ *
+ * A file can be commented on like anything else in the room. Each row shows
+ * how many open conversations it has, and `focus` — set when somebody goes to
+ * a comment's file from the comments panel — opens the list on that row.
  */
-export function FilesPanel({ roomId, user, canUse = true, canUpload = true, canDelete = true }) {
+const NO_COUNTS = new Map()
+
+export function FilesPanel({
+  roomId,
+  user,
+  canUse = true,
+  canUpload = true,
+  canDelete = true,
+  commentCounts = NO_COUNTS,
+  canComment = false,
+  onComment,
+  onOpenComments,
+  focus = null,
+}) {
   const [open, setOpen] = useState(false)
   const [rejected, setRejected] = useState(null)
+  const [focusedId, setFocusedId] = useState(null)
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
   const inputRef = useRef(null)
 
-  const close = useCallback(() => setOpen(false), [])
+  const close = useCallback(() => {
+    setOpen(false)
+    setFocusedId(null)
+  }, [])
   useDismissable(open, close, { containerRef, triggerRef, captureEscape: true })
+
+  useEffect(() => {
+    if (!focus) return
+    setOpen(true)
+    setFocusedId(focus.fileId)
+  }, [focus])
 
   const { state, files, total, error, pending, upload, download, remove } = useRoomFiles(roomId, {
     enabled: open && canUse,
@@ -44,6 +71,14 @@ export function FilesPanel({ roomId, user, canUse = true, canUpload = true, canD
 
     await upload(file)
   }
+
+  // The focused row is brought into view once the list has arrived.
+  useEffect(() => {
+    if (!focusedId || state !== 'ready') return
+    containerRef.current
+      ?.querySelector('[data-file="' + focusedId + '"]')
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [focusedId, state, files])
 
   const label = 'Files' + (total > 0 ? ' (' + total + ')' : '')
 
@@ -109,9 +144,14 @@ export function FilesPanel({ roomId, user, canUse = true, canUpload = true, canD
                     // everything here and remove nothing.
                     const mine = canDelete && user?.id && String(file.userId) === String(user.id)
                     const busy = pending === file.id
+                    const talk = commentCounts.get(file.id) ?? 0
 
                     return (
-                      <li key={file.id}>
+                      <li
+                        key={file.id}
+                        data-file={file.id}
+                        className={focusedId === file.id ? 'is-focused' : undefined}
+                      >
                         <span className="files__icon" aria-hidden="true">
                           <Icon name={iconFor(file.mimeType)} size={15} />
                         </span>
@@ -124,6 +164,38 @@ export function FilesPanel({ roomId, user, canUse = true, canUpload = true, canD
                             {formatSize(file.size)} · {formatWhen(file.createdAt)}
                           </span>
                         </span>
+
+                        {talk > 0 && (
+                          <button
+                            type="button"
+                            className="files__comments"
+                            title="Open the comments on this file"
+                            aria-label={
+                              talk + (talk === 1 ? ' open comment on ' : ' open comments on ') + file.originalName
+                            }
+                            onClick={() => {
+                              close()
+                              onOpenComments?.(file)
+                            }}
+                          >
+                            <Icon name="comment" size={11} />
+                            {talk}
+                          </button>
+                        )}
+
+                        {canComment && onComment && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon="comment"
+                            title={'Comment on ' + file.originalName}
+                            aria-label={'Comment on ' + file.originalName}
+                            onClick={() => {
+                              close()
+                              onComment(file)
+                            }}
+                          />
+                        )}
 
                         <Button
                           size="sm"

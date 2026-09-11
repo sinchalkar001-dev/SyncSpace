@@ -65,6 +65,8 @@ export const CAP = Object.freeze({
   FILES_UPLOAD: 'files:upload',
   FILES_DELETE: 'files:delete',
   CHAT_SEND: 'chat:send',
+  COMMENT_WRITE: 'comments:write',
+  COMMENT_MODERATE: 'comments:moderate',
   CODE_EXECUTE: 'code:execute',
   AI_GENERATE: 'ai:generate',
   REPLAY_VIEW: 'replay:view',
@@ -84,8 +86,8 @@ export const ROLE_LABELS = Object.freeze({
 export const ROLE_DESCRIPTIONS = Object.freeze({
   owner: 'Everything, including deleting the room and handing it on',
   admin: 'Manage people, roles and settings — but not delete or transfer',
-  editor: 'Draw, edit code, run it, and manage files',
+  editor: 'Draw, edit code, run it, manage files and tidy up comments',
   runner: 'Watch and run the code, without changing it',
-  commenter: 'Watch and join the chat',
+  commenter: 'Watch, comment and join the chat',
   viewer: 'Read-only',
 })

@@ -354,6 +354,9 @@ const schema = z
     AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(180000),
     // Far tighter than the general budget: each call is a real cost.
     AI_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    // Comments, replies, resolves and edits per window. A conversation is
+    // bursty; this stops a script, not a person.
+    COMMENT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
 
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),

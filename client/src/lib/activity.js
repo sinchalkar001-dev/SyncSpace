@@ -16,6 +16,7 @@ const KINDS = {
   'whiteboard.updated': { icon: 'pen', verb: 'updated the whiteboard' },
   'execution.completed': { icon: 'play', verb: 'ran the code' },
   'comment.added': { icon: 'inbox', verb: 'said something in chat' },
+  'comment.posted': { icon: 'comment', verb: 'commented' },
   'collaborator.joined': { icon: 'users', verb: 'joined the room' },
 }
 

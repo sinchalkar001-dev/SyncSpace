@@ -823,6 +823,47 @@ model does not exist.
 Without a key the panel says so and the architecture reading still works, because that needs no
 model at all.
 
+## Comments
+
+Conversations attached to the thing they are about: a shape, a spot or area on the board, a
+line or selection of code, or a shared file.
+
+- **On the board**, pick the comment tool (`C`) and click a shape, click empty board, or drag out
+  an area. **In the editor**, select code and press the comment button, choose *Comment on this
+  code* from the context menu, press `Ctrl+Alt+M`, or click the gutter beside a line. **On a file**,
+  use the comment button on its row in the files panel.
+- The **comments button** in the room's header lists every thread, open or resolved. Its badge
+  counts messages from other people since you last opened it, and turns into an **@** when one of
+  them mentions you. Clicking a thread's anchor takes you there — the editor scrolls to the line,
+  the board centres on the shape, the files panel opens on the file.
+- Threads have replies, `@mentions` (of people in the room; anybody else's name stays plain text),
+  and can be resolved and reopened. Authors can edit and delete their own messages; editors and
+  above can delete anybody's. Every change appears at once and is undone if the server refuses it.
+
+**Anchors that survive editing.** A code comment is stored as a pair of Yjs *relative positions*,
+which are attached to the characters themselves rather than to line numbers — so it stays with its
+code as lines are added above it, and when the code is deleted outright the thread says so and
+shows the snippet it was about, instead of silently moving to whatever line is left. A shape comment
+is stored as a fraction of the shape's bounds, so the pin rides along when the shape is moved or
+resized; if the shape is deleted the pin stays where it last was.
+
+**Not in the Yjs document.** Comments are MongoDB documents behind REST, announced to the room as
+`comment:thread` socket events carrying the whole, versioned thread. Somebody who may only comment
+has a read-only collab connection and could not write to the document anyway; optimistic UI needs
+a server that can say no; and comment traffic would otherwise sit in the room's update log and
+replay forever. Anchoring reads the shared text every client already has, so it adds no Yjs
+traffic either.
+
+**Replay.** Each thread keeps an append-only list of events — opened, replied, resolved, reopened,
+edited, deleted — stamped with the update-log position at the time. Scrubbing the history shows
+exactly the threads that existed at that point, resolved or open as they were then, with code
+comments placed against the code *as it stood then*. Deletions are soft for the same reason. The
+session timeline lists comments being opened and resolved.
+
+**Permissions.** Reading follows the room. Writing needs an account and `comments:write` (commenter
+and up); deleting other people's messages needs `comments:moderate` (editor and up). Writes are
+rate-limited by `COMMENT_RATE_LIMIT_MAX` (default 120 per `RATE_LIMIT_WINDOW_MS`).
+
 ## API
 
 | Method | Path | Notes |
@@ -857,6 +898,13 @@ model at all.
 | `GET` | `/api/rooms/:roomId/history/summary` | The newest session summary, and whether the history has moved on since |
 | `POST` | `/api/rooms/:roomId/history/summary` | Summarises the session; cached per history; needs `ai:generate` |
 | `POST` | `/api/rooms/:roomId/history/explain` | Explains the position `{ seq }` a replay is paused on; needs `ai:generate` |
+| `GET` | `/api/rooms/:roomId/comments` | Every comment thread, and `seenAt` — when the caller last read them. Same access rule as the room |
+| `POST` | `/api/rooms/:roomId/comments` | Opens a thread: `{ anchor, text, mentions? }`; needs `comments:write` |
+| `POST` | `/api/rooms/:roomId/comments/seen` | Moves the caller's read marker to now |
+| `POST` | `/api/rooms/:roomId/comments/:threadId/replies` | `{ text, mentions? }`; needs `comments:write` |
+| `PATCH` | `/api/rooms/:roomId/comments/:threadId` | `{ resolved }` — resolve or reopen; repeating it changes nothing |
+| `PATCH` | `/api/rooms/:roomId/comments/:threadId/messages/:messageId` | Edits a message; the author only |
+| `DELETE` | `/api/rooms/:roomId/comments/:threadId/messages/:messageId` | Soft-deletes a message; the author, or `comments:moderate` |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
 | `GET` | `/api/ai` | Whether this server can generate code, why not if it cannot, and what it can be asked for |

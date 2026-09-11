@@ -476,6 +476,58 @@ export const api = {
       signal,
     }),
 
+  /** Every comment thread in the room, and when this person last read them. */
+  comments: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/comments', { signal, retry: 2 }),
+
+  /**
+   * Opens a thread on an anchor. Answers `{ thread }`.
+   *
+   * None of the writes below are retried: each one adds a message or an event
+   * to the thread's history, and a retry of one that did arrive would add it twice.
+   */
+  createComment: (roomId, body) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/comments', { method: 'POST', body }),
+
+  replyToComment: (roomId, threadId, body) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/comments/' + encodeURIComponent(threadId) + '/replies',
+      { method: 'POST', body }
+    ),
+
+  resolveComment: (roomId, threadId, resolved) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/comments/' + encodeURIComponent(threadId), {
+      method: 'PATCH',
+      body: { resolved },
+    }),
+
+  editComment: (roomId, threadId, messageId, body) =>
+    apiFetch(
+      '/rooms/' +
+        encodeURIComponent(roomId) +
+        '/comments/' +
+        encodeURIComponent(threadId) +
+        '/messages/' +
+        encodeURIComponent(messageId),
+      { method: 'PATCH', body }
+    ),
+
+  /** Soft: the message is blanked and the thread keeps a record that it was there. */
+  deleteComment: (roomId, threadId, messageId) =>
+    apiFetch(
+      '/rooms/' +
+        encodeURIComponent(roomId) +
+        '/comments/' +
+        encodeURIComponent(threadId) +
+        '/messages/' +
+        encodeURIComponent(messageId),
+      { method: 'DELETE' }
+    ),
+
+  /** Moves this person's read marker to now. Safe to repeat. */
+  commentsSeen: (roomId) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/comments/seen', { method: 'POST', body: {} }),
+
   /** Explains the point a replay is paused on. Not retried, for the same reason. */
   explainMoment: (roomId, seq, signal) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/history/explain', {

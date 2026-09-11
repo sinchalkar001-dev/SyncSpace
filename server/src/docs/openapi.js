@@ -1159,6 +1159,171 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/comments': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['Rooms'],
+        summary: 'Comment threads in a room',
+        description:
+          'Every thread on the room: on whiteboard shapes and regions, on code lines and selections, and on files. Readable by anybody who can open the room. `seenAt` is when the caller last opened the comments, which is what the in-room notification counts from.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Newest activity first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    threads: { type: 'array', items: { $ref: '#/components/schemas/CommentThread' } },
+                    seenAt: { type: ['string', 'null'], format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          ...error(403, 'Not a room you can open', 'room_forbidden', 'You do not have access to this room'),
+          ...error(404, 'No room under that id', 'room_not_found', 'Room not found'),
+        },
+      },
+      post: {
+        tags: ['Rooms'],
+        summary: 'Open a comment thread',
+        description:
+          'Needs an account and comments:write, which every role from commenter up holds. The anchor says what the thread is attached to; a file anchor is checked against the room and named from the database. Mentions are kept only for people who belong to the room. The whole thread is announced to the room as `comment:thread`.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentCreateInput' } } },
+        },
+        responses: {
+          201: {
+            description: 'The new thread',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentThreadEnvelope' } } },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(403, 'Your role cannot comment', 'role_forbidden', 'Your role in this room does not allow that'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/comments/seen': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      post: {
+        tags: ['Rooms'],
+        summary: 'Mark the room comments as read',
+        description: 'Moves the caller read marker to now. Per person, per room.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'When they were marked read',
+            content: { 'application/json': { example: { seenAt: '2026-09-11T10:00:00.000Z' } } },
+          },
+          ...authRequired(),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/comments/{threadId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { name: 'threadId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      patch: {
+        tags: ['Rooms'],
+        summary: 'Resolve or reopen a thread',
+        description:
+          'Anybody who may comment may resolve or reopen. Idempotent: resolving a resolved thread records nothing. The change is announced to the room.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['resolved'], properties: { resolved: { type: 'boolean' } } },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The thread as it now stands',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentThreadEnvelope' } } },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(404, 'No such thread', 'comment_not_found', 'No such comment'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/comments/{threadId}/replies': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { name: 'threadId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      post: {
+        tags: ['Rooms'],
+        summary: 'Reply to a thread',
+        description: 'Same rules as opening one. Two replies at the same moment both land, in the order the database took them.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentMessageInput' } } },
+        },
+        responses: {
+          201: {
+            description: 'The thread with the reply',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentThreadEnvelope' } } },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(404, 'No such thread', 'comment_not_found', 'No such comment'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/comments/{threadId}/messages/{messageId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { name: 'threadId', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'messageId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      patch: {
+        tags: ['Rooms'],
+        summary: 'Edit a message',
+        description: 'Only its author may edit a message.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentMessageInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'The thread with the edit',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentThreadEnvelope' } } },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(403, 'Not your message', 'not_author', 'Only the person who wrote a comment can edit it'),
+        },
+      },
+      delete: {
+        tags: ['Rooms'],
+        summary: 'Delete a message',
+        description:
+          'Its author, or anybody with comments:moderate, may delete it. The words and mentions are cleared; the event that it existed is kept, so replay stays truthful.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The thread with the message blanked',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentThreadEnvelope' } } },
+          },
+          ...authRequired(),
+          ...error(403, 'Neither the author nor a moderator', 'not_author', 'Only the author or a moderator can delete this comment'),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/architecture': {
       get: {
         tags: ['AI'],
@@ -2137,6 +2302,104 @@ export const openapiDocument = {
           changes: { type: 'array', items: { type: 'string' } },
           cited: { type: 'object' },
           discarded: { type: 'integer' },
+        },
+      },
+
+      CommentAnchor: {
+        type: 'object',
+        required: ['kind'],
+        description:
+          'What a thread is attached to. shape: shapeId plus offsetX/offsetY as fractions of its bounds, so the pin moves with the shape; x/y are its last known place. region: a point (width and height 0) or a rectangle on the board. code: start and end are base64 Yjs relative positions into the room code, which follow the text through edits; line numbers and snippet are as they were when the comment was made. file: fileId of one of the room files.',
+        properties: {
+          kind: { type: 'string', enum: ['shape', 'region', 'code', 'file'] },
+          shapeId: { type: 'string' },
+          offsetX: { type: 'number', minimum: 0, maximum: 1 },
+          offsetY: { type: 'number', minimum: 0, maximum: 1 },
+          x: { type: 'number' },
+          y: { type: 'number' },
+          width: { type: 'number', minimum: 0 },
+          height: { type: 'number', minimum: 0 },
+          start: { type: 'string', description: 'base64 Yjs relative position' },
+          end: { type: 'string', description: 'base64 Yjs relative position' },
+          line: { type: 'integer', minimum: 1 },
+          endLine: { type: 'integer', minimum: 1 },
+          startColumn: { type: 'integer', minimum: 1 },
+          endColumn: { type: 'integer', minimum: 1 },
+          snippet: { type: 'string', maxLength: 280 },
+          fileId: { type: 'string' },
+          label: { type: 'string', maxLength: 120 },
+        },
+      },
+
+      CommentMessage: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          author: { type: 'string' },
+          authorName: { type: ['string', 'null'] },
+          body: { type: 'string', description: 'Empty once deleted' },
+          mentions: { type: 'array', items: { type: 'string' } },
+          createdAt: { type: 'string', format: 'date-time' },
+          editedAt: { type: ['string', 'null'], format: 'date-time' },
+          deleted: { type: 'boolean' },
+        },
+      },
+
+      CommentEvent: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['opened', 'replied', 'resolved', 'reopened', 'edited', 'deleted'] },
+          by: { type: ['string', 'null'] },
+          byName: { type: ['string', 'null'] },
+          at: { type: 'string', format: 'date-time' },
+          seq: { type: 'integer', description: 'How far the update log had got, for placing the event in replay' },
+          messageId: { type: ['string', 'null'] },
+        },
+      },
+
+      CommentThread: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          roomId: { type: 'string' },
+          anchor: { $ref: '#/components/schemas/CommentAnchor' },
+          status: { type: 'string', enum: ['open', 'resolved'] },
+          messages: { type: 'array', items: { $ref: '#/components/schemas/CommentMessage' } },
+          events: { type: 'array', items: { $ref: '#/components/schemas/CommentEvent' } },
+          createdSeq: { type: 'integer' },
+          version: { type: 'integer', description: 'Bumped by every change; clients keep the highest' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      CommentThreadEnvelope: {
+        type: 'object',
+        properties: { thread: { $ref: '#/components/schemas/CommentThread' } },
+      },
+
+      CommentMessageInput: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          text: { type: 'string', minLength: 1, maxLength: 4000 },
+          mentions: { type: 'array', maxItems: 20, items: { type: 'string' } },
+        },
+      },
+
+      CommentCreateInput: {
+        type: 'object',
+        required: ['anchor', 'text'],
+        properties: {
+          anchor: { $ref: '#/components/schemas/CommentAnchor' },
+          text: { type: 'string', minLength: 1, maxLength: 4000 },
+          mentions: { type: 'array', maxItems: 20, items: { type: 'string' } },
+          ref: {
+            type: 'string',
+            maxLength: 64,
+            description:
+              'The caller’s own id for the thread while it was being written. Echoed in the `comment:thread` announcement so the author’s client can replace its placeholder; never stored.',
+          },
         },
       },
 

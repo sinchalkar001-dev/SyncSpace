@@ -80,6 +80,11 @@ export const CAPABILITIES = Object.freeze({
   CODE_EXECUTE: 'code:execute',
   AI_GENERATE: 'ai:generate',
   REPLAY_VIEW: 'replay:view',
+
+  /** Opening, replying to, resolving and reopening comment threads. */
+  COMMENT_WRITE: 'comments:write',
+  /** Deleting other people's comments. Everybody may delete their own. */
+  COMMENT_MODERATE: 'comments:moderate',
 })
 
 const C = CAPABILITIES
@@ -88,7 +93,7 @@ const C = CAPABILITIES
 const VIEWER = [C.ROOM_VIEW, C.REPLAY_VIEW]
 
 /** Can say things, cannot change anything. */
-const COMMENTER = [...VIEWER, C.CHAT_SEND]
+const COMMENTER = [...VIEWER, C.CHAT_SEND, C.COMMENT_WRITE]
 
 /**
  * A commenter who may press Run.
@@ -111,6 +116,7 @@ const EDITOR = [
   C.FILES_DELETE,
   C.CODE_EXECUTE,
   C.AI_GENERATE,
+  C.COMMENT_MODERATE,
 ]
 
 /** Everything an editor can do, plus deciding who else is in the room. */
@@ -204,6 +210,9 @@ export function can(room, userId, capability) {
  */
 const ACCOUNT_ONLY = Object.freeze(
   new Set([
+    // A comment names its author for good, and a guest is a name typed into a box.
+    C.COMMENT_WRITE,
+    C.COMMENT_MODERATE,
     C.ROOM_DELETE,
     C.ROOM_TRANSFER,
     C.ROOM_SETTINGS,
@@ -290,4 +299,6 @@ export const CAPABILITY_LABELS = Object.freeze({
   [C.CODE_EXECUTE]: 'run code',
   [C.AI_GENERATE]: 'generate code from the whiteboard',
   [C.REPLAY_VIEW]: 'watch this room’s history',
+  [C.COMMENT_WRITE]: 'comment on this room',
+  [C.COMMENT_MODERATE]: 'delete other people’s comments',
 })

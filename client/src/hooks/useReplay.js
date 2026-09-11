@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { api } from '../api/client.js'
 import { STEP_MS } from '../lib/replay.js'
+import { resolveCodeAnchors, threadAt } from '../lib/comments.js'
 
 /**
  * A room's history, positioned anywhere in it.
@@ -30,10 +31,16 @@ const MAX_ENTRIES = 5000
 /** Frames held in memory. Bytes, not documents — the documents are transient. */
 const CACHE_LIMIT = 200
 
-const EMPTY_FRAME = { index: 0, seq: 0, shapes: [], code: '' }
+const NO_THREADS = []
+const NO_ANCHORS = new Map()
+
+const EMPTY_FRAME = { index: 0, seq: 0, shapes: [], code: '', threads: NO_THREADS, codeAnchors: NO_ANCHORS }
 
 /** The sequence number a scrubber position stands for. Position 0 predates the log. */
 const seqAt = (index, entries) => (index <= 0 ? 0 : (entries[index - 1]?.seq ?? 0))
+
+/** The room's comment threads as they stood at `seq`: only those opened by then, as they were then. */
+const threadsAt = (threads, seq) => threads.map((thread) => threadAt(thread, seq)).filter(Boolean)
 
 /**
  * Reads one recorded state into something React can render.
@@ -41,23 +48,37 @@ const seqAt = (index, entries) => (index <= 0 ? 0 : (entries[index - 1]?.seq ?? 
  * The document is built, read and destroyed inside this call: it exists only
  * to interpret the bytes, and keeping it would invite the mistake of applying
  * the next frame on top and wondering why deleted shapes never come back.
+ *
+ * Code comments are placed here too, while the document still exists. Their
+ * anchors are relative positions, so they resolve against this historical
+ * text exactly as they do against the live one — a comment shows on the line
+ * it was about as that line stood at this point, not where it is today.
  */
-function decode(bytes, index, seq) {
+function decode(bytes, index, seq, threads = NO_THREADS) {
   const doc = new Y.Doc()
   try {
     if (bytes?.byteLength) Y.applyUpdate(doc, bytes)
+    const code = doc.getText('code')
+    const present = threadsAt(threads, seq)
+    const onCode = present.filter((thread) => thread.anchor?.kind === 'code')
     return {
       index,
       seq,
       shapes: doc.getArray('shapes').toJSON(),
-      code: doc.getText('code').toString(),
+      code: code.toString(),
+      threads: present,
+      codeAnchors: onCode.length ? resolveCodeAnchors(onCode, code) : NO_ANCHORS,
     }
   } finally {
     doc.destroy()
   }
 }
 
-export function useReplay(roomId) {
+/**
+ * `threads` are the room's comment threads, whole. Each frame shows those that
+ * existed at its point in the history, in the state they were in then.
+ */
+export function useReplay(roomId, { threads = NO_THREADS } = {}) {
   const [state, setState] = useState('loading')
   const [error, setError] = useState('')
   const [entries, setEntries] = useState([])
@@ -184,7 +205,8 @@ export function useReplay(roomId) {
     // Position zero is the document before anything was recorded. The server
     // would answer it correctly; there is just nothing to ask about.
     if (seq === 0) {
-      setFrame({ ...EMPTY_FRAME, index })
+      const present = threadsAt(threads, 0)
+      setFrame({ ...EMPTY_FRAME, index, threads: present.length ? present : NO_THREADS })
       setFrameError('')
       setBusy(false)
       return undefined
@@ -197,7 +219,7 @@ export function useReplay(roomId) {
     bytesFor(seq, controller.signal)
       .then((bytes) => {
         if (cancelled) return
-        setFrame(decode(bytes, index, seq))
+        setFrame(decode(bytes, index, seq, threads))
         setFrameError('')
         setBusy(false)
       })
@@ -212,7 +234,7 @@ export function useReplay(roomId) {
       cancelled = true
       controller.abort()
     }
-  }, [index, state, bytesFor])
+  }, [index, state, bytesFor, threads])
 
   /**
    * Playback advances only once the frame on screen has arrived, so a slow

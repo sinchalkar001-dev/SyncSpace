@@ -29,6 +29,10 @@ import { CodeEditor } from '../components/Editor/CodeEditor.jsx'
 import { CommandPalette } from '../components/CommandPalette.jsx'
 import { ReplayViewer } from '../components/Replay/ReplayViewer.jsx'
 import { ShortcutsPanel } from '../components/ShortcutsPanel.jsx'
+import { CommentsPanel } from '../components/Comments/CommentsPanel.jsx'
+import { useComments } from '../hooks/useComments.js'
+import { useCodeAnchors } from '../hooks/useCodeAnchors.js'
+import { resolveCodeAnchors } from '../lib/comments.js'
 import { LANGUAGES } from '../lib/languages.js'
 import { TOOLS } from '../store/uiStore.js'
 
@@ -49,9 +53,10 @@ const TOOL_LABELS = {
   ellipse: 'Ellipse',
   text: 'Text',
   eraser: 'Eraser',
+  comment: 'Comment',
 }
 
-const TOOL_KEYS = { select: 'V', hand: 'H', pen: 'P', segment: 'L', arrow: 'A', rect: 'R', diamond: 'D', ellipse: 'O', text: 'T', eraser: 'E' }
+const TOOL_KEYS = { select: 'V', hand: 'H', pen: 'P', segment: 'L', arrow: 'A', rect: 'R', diamond: 'D', ellipse: 'O', text: 'T', eraser: 'E', comment: 'C' }
 
 const FONT_STEP = 0.5
 const FONT_MIN = 10
@@ -242,6 +247,122 @@ export default function Room() {
   const socketRef = useRef(null)
   const chat = useRoomChat({ roomId, socketRef, self: identity, open: chatOpen })
 
+  /**
+   * Comments: conversations attached to shapes, spots on the board, lines of
+   * code and files. Stored over REST and announced on the room's socket —
+   * never in the Yjs document, which somebody who may only comment is not
+   * allowed to write to, and whose history they would only clutter.
+   */
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentDraft, setCommentDraft] = useState(null)
+  const [activeThreadId, setActiveThreadId] = useState(null)
+  const [fileFocus, setFileFocus] = useState(null)
+  const onCommentError = useCallback((message) => toast.error(message), [toast])
+  const comments = useComments(roomId, { user, onError: onCommentError })
+  const canComment = isAuthenticated && access.can(CAP.COMMENT_WRITE)
+
+  const onCommentsOpenChange = useCallback((open) => {
+    setCommentsOpen(open)
+    // A comment is placed, then written. Closing the panel in between
+    // abandons it, rather than leaving it to reappear the next time.
+    if (!open) {
+      setCommentDraft(null)
+      setActiveThreadId(null)
+    }
+  }, [])
+
+  const startComment = useCallback((anchor) => {
+    setActiveThreadId(null)
+    setCommentDraft(anchor)
+    setCommentsOpen(true)
+  }, [])
+
+  const endCommentDraft = useCallback(() => setCommentDraft(null), [])
+
+  const openThread = useCallback((threadId) => {
+    setCommentDraft(null)
+    setActiveThreadId(threadId)
+    setCommentsOpen(true)
+  }, [])
+
+  const startFileComment = useCallback(
+    (file) => startComment({ kind: 'file', fileId: file.id, label: file.originalName }),
+    [startComment]
+  )
+
+  const openFileComments = useCallback(
+    (file) => {
+      const thread = comments.threads.find(
+        (candidate) =>
+          candidate.anchor?.kind === 'file' &&
+          candidate.anchor.fileId === file.id &&
+          candidate.status === 'open'
+      )
+      if (thread) openThread(thread.id)
+    },
+    [comments.threads, openThread]
+  )
+
+  const fileCommentCounts = useMemo(() => {
+    const counts = new Map()
+    for (const thread of comments.threads) {
+      if (thread.anchor?.kind !== 'file' || thread.status !== 'open') continue
+      counts.set(thread.anchor.fileId, (counts.get(thread.anchor.fileId) ?? 0) + 1)
+    }
+    return counts
+  }, [comments.threads])
+
+  // Current line numbers for the panel's labels, worked out only while it is open.
+  const codeLocations = useCodeAnchors(comments.threads, session?.code, { enabled: commentsOpen })
+  const locateComment = useCallback((thread) => codeLocations.get(thread.id) ?? null, [codeLocations])
+
+  /**
+   * Takes the room to what a comment is about: the line in the editor, the
+   * shape or spot on the board, the file in the files panel.
+   *
+   * Through the same navigator that following somebody uses, so each surface
+   * already knows how to bring a place into view — the editor scrolls to the
+   * line and flashes it, the board centres on the shape.
+   */
+  const focusThread = useCallback(
+    (thread) => {
+      const anchor = thread?.anchor
+      if (!anchor) return
+      setActiveThreadId(thread.id)
+
+      if (anchor.kind === 'file') {
+        setCommentsOpen(false)
+        setFileFocus({ fileId: anchor.fileId, at: Date.now() })
+        return
+      }
+
+      // Going to a comment is taking the view back from whoever was leading it.
+      unfollow()
+
+      if (anchor.kind === 'code') {
+        const at = session?.code ? resolveCodeAnchors([thread], session.code).get(thread.id) : null
+        presence.navigator.emit('surface', 'code')
+        presence.navigator.emit('code', { line: at && !at.orphaned ? at.line : anchor.line })
+        return
+      }
+
+      presence.navigator.emit('surface', 'board')
+      presence.navigator.emit(
+        'board',
+        anchor.kind === 'shape'
+          ? // The shape if it is still there, where it last was if not.
+            { selected: [anchor.shapeId], point: { x: anchor.x, y: anchor.y } }
+          : {
+              point: {
+                x: anchor.x + (anchor.width || 0) / 2,
+                y: anchor.y + (anchor.height || 0) / 2,
+              },
+            }
+      )
+    },
+    [unfollow, presence.navigator, session]
+  )
+
   // Runs are announced to the whole room, so the console shows everyone's.
   const socketHandlers = useMemo(
     () => ({
@@ -254,6 +375,8 @@ export default function Room() {
       'session:ended': onSessionEnded,
       'ai:generation': onRemoteGeneration,
       'ai:applied': onRemoteApplied,
+      // A whole thread, versioned, whenever anybody changes one.
+      'comment:thread': comments.receive,
     }),
     [
       runner.receive,
@@ -263,6 +386,7 @@ export default function Room() {
       onSessionEnded,
       onRemoteGeneration,
       onRemoteApplied,
+      comments.receive,
     ]
   )
 
@@ -453,6 +577,14 @@ export default function Room() {
         run: () => setReplayOpen(true),
       },
       {
+        id: 'room:comments',
+        group: 'Room',
+        icon: 'comment',
+        title: 'Open comments',
+        keywords: 'comments threads discussion review mentions',
+        run: () => setCommentsOpen(true),
+      },
+      {
         id: 'room:shortcuts',
         group: 'Room',
         icon: 'key',
@@ -591,6 +723,22 @@ export default function Room() {
             onOpenChange={setChatOpen}
             canSend={access.can(CAP.CHAT_SEND)}
           />
+          {/* Reading comments follows the room; writing them needs an
+              account and a role that includes it. */}
+          <CommentsPanel
+            comments={comments}
+            open={commentsOpen}
+            onOpenChange={onCommentsOpenChange}
+            userId={user?.id}
+            signedIn={isAuthenticated}
+            canWrite={canComment}
+            canModerate={isAuthenticated && access.can(CAP.COMMENT_MODERATE)}
+            draft={commentDraft}
+            onDraftDone={endCommentDraft}
+            activeId={activeThreadId}
+            locate={locateComment}
+            onFocusThread={focusThread}
+          />
           {/* Every file route is behind requireAuth, so a guest is told why
               rather than shown a panel that can only fail. */}
           <FilesPanel
@@ -599,6 +747,11 @@ export default function Room() {
             canUse={isAuthenticated}
             canUpload={access.can(CAP.FILES_UPLOAD)}
             canDelete={access.can(CAP.FILES_DELETE)}
+            commentCounts={fileCommentCounts}
+            canComment={canComment}
+            onComment={startFileComment}
+            onOpenComments={openFileComments}
+            focus={fileFocus}
           />
           {/* Turning the board into code. Generating needs an account — it
               spends a real request and is recorded against whoever asked —
@@ -654,6 +807,12 @@ export default function Room() {
               readOnly={!access.can(CAP.WHITEBOARD_EDIT)}
               presence={presence}
               sharing={sharing}
+              commentThreads={comments.threads}
+              canComment={canComment}
+              onComment={startComment}
+              onOpenThread={openThread}
+              activeThreadId={activeThreadId}
+              pendingAnchor={commentsOpen ? commentDraft : null}
             />
           }
           right={
@@ -668,6 +827,11 @@ export default function Room() {
               canEdit={access.can(CAP.CODE_EDIT)}
               canExecute={access.can(CAP.CODE_EXECUTE)}
               accessLoaded={access.loaded}
+              commentThreads={comments.threads}
+              canComment={canComment}
+              onComment={startComment}
+              onOpenThread={openThread}
+              activeThreadId={activeThreadId}
             />
           }
         />
@@ -688,6 +852,7 @@ export default function Room() {
       {replayOpen && (
         <ReplayViewer
           roomId={roomId}
+          comments={comments.all}
           onClose={() => setReplayOpen(false)}
           summarizeBlocker={
             !isAuthenticated

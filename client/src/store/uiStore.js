@@ -11,6 +11,9 @@ export const TOOLS = [
   'ellipse',
   'text',
   'eraser',
+  // Not a drawing tool: it pins a comment to a shape or a spot on the board,
+  // and it is the one tool somebody who may only comment can pick up.
+  'comment',
 ]
 
 export const STROKE_COLORS = [

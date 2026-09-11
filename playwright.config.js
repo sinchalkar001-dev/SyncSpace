@@ -72,6 +72,7 @@ export default defineConfig({
         AUTH_RATE_LIMIT_RESET_MAX: '500',
         AUTH_RATE_LIMIT_PASSWORD_CHANGE_MAX: '500',
         AI_RATE_LIMIT_MAX: '500',
+        COMMENT_RATE_LIMIT_MAX: '500',
         /**
          * Generation is pointed at a local stand-in for the Messages API (see
          * e2e/fixtures/model-stub.js), so the whole path is exercised — the

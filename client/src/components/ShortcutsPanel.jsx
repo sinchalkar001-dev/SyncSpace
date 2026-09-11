@@ -30,6 +30,7 @@ const GROUPS = [
       ['O', 'Ellipse'],
       ['T', 'Text'],
       ['E', 'Eraser'],
+      ['C', 'Comment on a shape or a spot'],
     ],
   },
   {

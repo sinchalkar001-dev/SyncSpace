@@ -2481,6 +2481,35 @@
 }
 
 /*
+ * The header's panels on a narrow screen — people, chat, comments, files.
+ *
+ * Each one hangs from the right edge of its own button, which on a desktop
+ * puts it under what was pressed. On a narrower screen the buttons sit well
+ * left of the edge and the panel is wider than the space to their left, so
+ * they opened partly off the screen: at 390px the people panel lost 233px.
+ *
+ * Measured rather than guessed: the people panel, whose button sits furthest
+ * left, still lost 63px at 1100px and was clear at 1180px — the width the
+ * dashboard already breaks at. Up to there the buttons stop being the
+ * reference. `.presence-menu` goes static, so the panel measures from the
+ * header itself and sits against its right edge, as wide as the screen
+ * allows. `.comments` is named so its own width, set later in comments.css,
+ * does not undo this.
+ */
+@media (max-width: 1180px) {
+  .topbar .presence-menu {
+    position: static;
+  }
+
+  .topbar .presence-menu__panel,
+  .topbar .presence-menu__panel.comments {
+    left: auto;
+    right: var(--space-3);
+    width: min(30rem, calc(100vw - var(--space-3) * 2));
+  }
+}
+
+/*
   The role control in a roster row.
 
   Matched to the small button beside it rather than to a full-height field:

@@ -1,20 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { createRoomsRouter } from '../src/routes/rooms.routes.js'
+import { createCommentsRouter } from '../src/routes/comments.routes.js'
 import { openapiDocument } from '../src/docs/openapi.js'
 
 /**
  * The rooms section of the OpenAPI document is verified against the live
- * router itself: its layer stack is walked for methods, paths and auth
- * middleware, then compared with what the document claims. If a route is
+ * routers themselves: their layer stacks are walked for methods, paths and
+ * auth middleware, then compared with what the document claims. If a route is
  * added, removed, re-authed or renamed without updating the docs (or vice
  * versa), this file fails.
+ *
+ * Comments have a router of their own, mounted under a room, so both are
+ * walked — each with the prefix app.js mounts it at.
  */
 
 const ROOMS_PREFIX = '/api/v1/rooms'
+const COMMENTS_PREFIX = ROOMS_PREFIX + '/{roomId}/comments'
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options'])
 
 /** Flattens an Express router into [{ method, path, requireAuth, optionalAuth }]. */
-function actualRoutes(router) {
+function actualRoutes(router, prefix) {
   const routes = []
   for (const layer of router.stack) {
     if (!layer.route) continue
@@ -24,19 +29,22 @@ function actualRoutes(router) {
       routes.push({
         method,
         // Express stores params as ":roomId"; OpenAPI as "{roomId}".
-        path: ROOMS_PREFIX + (route.path === '/' ? '' : route.path).replace(/:(\w+)/g, '{$1}'),
+        path: prefix + (route.path === '/' ? '' : route.path).replace(/:(\w+)/g, '{$1}'),
         requireAuth: route.stack.some((l) => l.name === 'requireAuth'),
         optionalAuth: route.stack.some((l) => l.name === 'optionalAuth'),
       })
     }
   }
-  return routes.sort((a, b) => (a.path + a.method).localeCompare(b.path + b.method))
+  return routes
 }
 
 const operationOf = (path, method) => openapiDocument.paths[path]?.[method]
 
 describe('room routes ↔ OpenAPI parity', () => {
-  const routes = actualRoutes(createRoomsRouter())
+  const routes = [
+    ...actualRoutes(createRoomsRouter(), ROOMS_PREFIX),
+    ...actualRoutes(createCommentsRouter(), COMMENTS_PREFIX),
+  ].sort((a, b) => (a.path + a.method).localeCompare(b.path + b.method))
 
   it('the router actually mounts room routes to compare against', () => {
     expect(routes.length).toBeGreaterThanOrEqual(10)

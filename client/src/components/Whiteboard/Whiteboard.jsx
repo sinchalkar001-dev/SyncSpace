@@ -25,8 +25,20 @@ import { centerOn, viewCenter } from '../../lib/presence.js'
 import { ToolRail } from './ToolRail.jsx'
 import { CanvasControls } from './CanvasControls.jsx'
 import { TextComposer } from './TextComposer.jsx'
+import { CommentPins } from './CommentPins.jsx'
+import { regionAnchor, shapeAnchor } from '../../lib/comments.js'
 
 const MIN_POINT_DISTANCE = 2
+
+const NO_THREADS = []
+
+// How far, in screen pixels, a press with the comment tool may travel and still
+// count as a click on one spot rather than a drag around an area.
+const COMMENT_DRAG = 8
+
+// How close to a shape, in screen pixels, a comment click has to land to be
+// attached to it rather than to the empty board beside it.
+const COMMENT_REACH = 6
 
 // The eraser reaches this far, in screen pixels. A bare point test makes thin
 // strokes almost impossible to hit while dragging, which reads as "the eraser
@@ -48,6 +60,7 @@ const SHORTCUTS = {
   o: 'ellipse',
   t: 'text',
   e: 'eraser',
+  c: 'comment',
 }
 
 // Shapes whose geometry is a dragged box.
@@ -81,8 +94,17 @@ export function Whiteboard({
   readOnly = false,
   presence,
   sharing = true,
+  commentThreads = NO_THREADS,
+  canComment = false,
+  onComment,
+  onOpenThread,
+  activeThreadId = null,
+  pendingAnchor = null,
 }) {
   const [containerRef, size] = useElementSize()
+  // A comment being placed: where the press began, and the shape under it.
+  const placingRef = useRef(null)
+  const [placing, setPlacing] = useState(null)
   const [draft, setDraftState] = useState(null)
   const [textDraft, setTextDraftState] = useState(null)
   // Mirrors of the two drafts. Committing a shape is a side effect, and side
@@ -197,7 +219,27 @@ export function Whiteboard({
     })
   }, [presence?.navigator, setViewport])
 
-  const isDrawingTool = tool !== 'select' && tool !== 'eraser' && tool !== 'hand'
+  const isDrawingTool =
+    tool !== 'select' && tool !== 'eraser' && tool !== 'hand' && tool !== 'comment'
+  const commenting = tool === 'comment' && canComment
+
+  /**
+   * Resolved threads leave the board, as they leave the editor's gutter: a
+   * finished conversation should not keep marking the work. The one open in
+   * the panel stays, so going to a resolved comment still lands on something.
+   */
+  const boardThreads = useMemo(
+    () =>
+      commentThreads.filter(
+        (thread) =>
+          (thread.anchor?.kind === 'shape' || thread.anchor?.kind === 'region') &&
+          (thread.status !== 'resolved' || thread.id === activeThreadId)
+      ),
+    [commentThreads, activeThreadId]
+  )
+
+  const boardDraft =
+    placing ?? (pendingAnchor?.kind === 'shape' || pendingAnchor?.kind === 'region' ? pendingAnchor : null)
 
   /** Turns a finished marquee drag into a selection. */
   const commitMarquee = useCallback(
@@ -315,6 +357,30 @@ export function Whiteboard({
     [shapes, list]
   )
 
+  /**
+   * Finishes placing a comment. A press that did not travel is a comment on
+   * the shape under it, or on that spot when there is no shape; a drag is a
+   * comment on the area dragged out. Nothing is written to the board either
+   * way — the anchor goes to the comments panel, where the comment is written.
+   */
+  const commitComment = useCallback(
+    (stage) => {
+      const started = placingRef.current
+      placingRef.current = null
+      setPlacing(null)
+      if (!started) return
+
+      const end = (stage && worldPointer(stage)) || started.origin
+      const scale = stage?.scaleX() || 1
+      const travelled = Math.hypot(end.x - started.origin.x, end.y - started.origin.y) * scale
+
+      if (travelled >= COMMENT_DRAG) onComment?.(regionAnchor(started.origin, end))
+      else if (started.shape) onComment?.(shapeAnchor(started.shape, started.origin))
+      else onComment?.(regionAnchor(started.origin))
+    },
+    [onComment]
+  )
+
   const handlePointerDown = useCallback(
     (event) => {
       const stage = event.target.getStage()
@@ -324,6 +390,19 @@ export function Whiteboard({
       // An open composer commits before anything else happens.
       if (textDraft) {
         commitText()
+        return
+      }
+
+      // Before the read-only check on purpose: commenting changes nothing on
+      // the board, and it is the one thing a commenter came here to do.
+      if (tool === 'comment') {
+        if (!canComment || (event.evt?.button ?? 0) !== 0) return
+        setHovered(null)
+        // Shapes paint in list order, so the last hit is the one on top.
+        const hits = shapesHitBy(list, point.x, point.y, COMMENT_REACH / (stage.scaleX() || 1))
+        const shape = hits.length ? list.find((candidate) => candidate.id === hits[hits.length - 1]) : null
+        placingRef.current = { origin: point, shape: shape ?? null }
+        setPlacing(regionAnchor(point))
         return
       }
 
@@ -388,6 +467,8 @@ export function Whiteboard({
       textDraft,
       commitText,
       readOnly,
+      canComment,
+      list,
       eraseAtPointer,
       setDraft,
       setTextDraft,
@@ -403,6 +484,11 @@ export function Whiteboard({
       const shiftKey = Boolean(event.evt?.shiftKey)
       publishCursor({ x: point.x, y: point.y })
       presenceRef.current?.touch()
+
+      if (placingRef.current) {
+        setPlacing(regionAnchor(placingRef.current.origin, point))
+        return
+      }
 
       if (erasingRef.current) {
         eraseAtPointer(stage)
@@ -689,17 +775,18 @@ export function Whiteboard({
       marqueeRef.current = null
       setMarquee(null)
       if (drawingRef.current) commitDraft()
+      if (placingRef.current) commitComment(stageRef.current)
     }
     window.addEventListener('pointerup', onUp)
     return () => window.removeEventListener('pointerup', onUp)
-  }, [commitDraft, commitMarquee])
+  }, [commitDraft, commitMarquee, commitComment])
 
   const boardClass = [
     'board',
-    isDrawingTool && !readOnly ? 'board--draw' : '',
+    (isDrawingTool && !readOnly) || commenting ? 'board--draw' : '',
     tool === 'eraser' && !readOnly ? 'board--erase' : '',
     tool === 'hand' ? 'board--pan' : '',
-    readOnly ? 'board--locked' : '',
+    readOnly && !commenting ? 'board--locked' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -722,6 +809,7 @@ export function Whiteboard({
           canUndo={canUndo}
           canRedo={canRedo}
           disabled={readOnly}
+          canComment={canComment}
         />
         <CanvasControls />
 
@@ -749,6 +837,7 @@ export function Whiteboard({
               const drew = Boolean(draftRef.current) || erasingRef.current
               commitMarquee(event.target.getStage())
               commitDraft()
+              commitComment(event.target.getStage())
               if (drew && !readOnly) presenceRef.current?.reportBoard({ drew: true })
             }}
             onPointerLeave={clearCursor}
@@ -787,6 +876,19 @@ export function Whiteboard({
                 name tag never hides the cursor it belongs to. */}
             <Layer listening={false}>
               <RemoteSelections peers={peers} shapes={list} scale={viewport.scale} />
+            </Layer>
+            {/* Listening, unlike the layers either side of it: a pin is a
+                thing to click. Above the shapes, under other people's
+                pointers. */}
+            <Layer>
+              <CommentPins
+                threads={boardThreads}
+                shapes={list}
+                scale={viewport.scale}
+                activeId={activeThreadId}
+                draft={boardDraft}
+                onOpen={onOpenThread}
+              />
             </Layer>
             <Layer listening={false}>
               <RemoteCursors peers={peers} scale={viewport.scale} provider={provider} />

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Layer, Stage } from 'react-konva'
 import { ShapeNode } from '../Whiteboard/ShapeNode.jsx'
+import { CommentPins } from '../Whiteboard/CommentPins.jsx'
 import { useElementSize } from '../../hooks/useElementSize.js'
 import { unionBounds } from '../../lib/hitTest.js'
 import { covers, fitTo, union } from '../../lib/replay.js'
 
 const noop = () => {}
+const NO_THREADS = []
 
 /**
  * The whiteboard as it stood at one point in the history.
@@ -19,8 +21,16 @@ const noop = () => {}
  * Kept in its own file so the viewer can be tested. Konva paints to a canvas
  * that jsdom does not implement, and mocking one small component is honest in
  * a way that mocking the whole viewer would not be.
+ *
+ * `threads` are the board's comments as they stood at this point, pinned with
+ * the live board's own pins — resolved ones included, greyed, because a
+ * replay is the place to see a conversation that has since been settled.
  */
-export function ReplayBoard({ shapes, label = 'Whiteboard at this point in the history' }) {
+export function ReplayBoard({
+  shapes,
+  threads = NO_THREADS,
+  label = 'Whiteboard at this point in the history',
+}) {
   const [containerRef, size] = useElementSize()
   const [box, setBox] = useState(null)
 
@@ -63,6 +73,11 @@ export function ReplayBoard({ shapes, label = 'Whiteboard at this point in the h
               />
             ))}
           </Layer>
+          {threads.length > 0 && (
+            <Layer>
+              <CommentPins threads={threads} shapes={shapes} scale={view.scale} interactive={false} />
+            </Layer>
+          )}
         </Stage>
       )}
 

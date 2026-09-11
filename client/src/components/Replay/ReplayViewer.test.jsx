@@ -5,6 +5,7 @@ import * as Y from 'yjs'
 import { ReplayViewer } from './ReplayViewer.jsx'
 import { setAuthToken } from '../../api/client.js'
 import { covers, describeStep, fitTo, formatBytes, union } from '../../lib/replay.js'
+import { codeAnchor } from '../../lib/comments.js'
 
 /**
  * Watching a room being built.
@@ -17,8 +18,12 @@ import { covers, describeStep, fitTo, formatBytes, union } from '../../lib/repla
  */
 
 vi.mock('./ReplayBoard.jsx', () => ({
-  ReplayBoard: ({ shapes }) => (
-    <div data-testid="board" data-count={shapes.length}>
+  ReplayBoard: ({ shapes, threads = [] }) => (
+    <div
+      data-testid="board"
+      data-count={shapes.length}
+      data-threads={threads.map((thread) => thread.id + ':' + thread.status).join(',')}
+    >
       {shapes.map((shape) => (
         <span key={shape.id}>{shape.id}</span>
       ))}
@@ -306,6 +311,85 @@ describe('ReplayViewer', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+/**
+ * Comments in the history. Each thread is shown only from the point it was
+ * opened, in the state it was in at each point, and a code comment is placed
+ * against the code as it stood then.
+ */
+describe('comments in the history', () => {
+  /** An anchor over "hello", made from the same document the log recorded. */
+  function helloAnchor() {
+    const doc = new Y.Doc()
+    Y.applyUpdate(doc, stateAt(3))
+    const anchor = codeAnchor(doc.getText('code'), {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 6,
+    })
+    doc.destroy()
+    return anchor
+  }
+
+  const said = (id, body) => ({ id, author: ALICE, authorName: 'Ada', body, mentions: [], deleted: false })
+
+  const COMMENTS = [
+    {
+      id: 'code-1',
+      status: 'open',
+      createdSeq: 1,
+      anchor: helloAnchor(),
+      messages: [said('m1', 'Rename this')],
+      events: [{ type: 'opened', seq: 1, messageId: 'm1' }],
+    },
+    {
+      id: 'shape-1',
+      status: 'resolved',
+      createdSeq: 2,
+      anchor: { kind: 'shape', shapeId: 's1', offsetX: 0.5, offsetY: 0.5, x: 30, y: 25 },
+      messages: [said('m2', 'Is this the cache?')],
+      events: [
+        { type: 'opened', seq: 2, messageId: 'm2' },
+        { type: 'resolved', seq: 3 },
+      ],
+    },
+  ]
+
+  it('marks the commented line, and says what was said on it', async () => {
+    open({ comments: COMMENTS })
+    await settled(3, 3)
+
+    const line = await screen.findByTitle('Ada: Rename this')
+    expect(line).toHaveTextContent('hello world')
+    expect(line).toHaveClass('has-comment')
+  })
+
+  it('pins board comments only once they existed, as they were then', async () => {
+    open({ comments: COMMENTS })
+    await settled(3, 3)
+    await waitFor(() => expect(board()).toHaveAttribute('data-threads', 'shape-1:resolved'))
+
+    dragTo(2)
+    await settled(2, 3)
+    await waitFor(() => expect(board()).toHaveAttribute('data-threads', 'shape-1:open'))
+
+    dragTo(1)
+    await settled(1, 3)
+    await waitFor(() => expect(board()).toHaveAttribute('data-threads', ''))
+    expect(await screen.findByTitle('Ada: Rename this')).toHaveTextContent('hello')
+  })
+
+  it('shows no comment before it was written', async () => {
+    open({ comments: COMMENTS })
+    await settled(3, 3)
+
+    dragTo(0)
+    await settled(0, 3)
+    expect(screen.queryByTitle(/Rename this/)).not.toBeInTheDocument()
+    expect(board()).toHaveAttribute('data-threads', '')
   })
 })
 

@@ -14,6 +14,7 @@ const LABELS = {
   ellipse: 'Ellipse',
   text: 'Text',
   eraser: 'Eraser',
+  comment: 'Comment',
 }
 
 const KEYS = {
@@ -27,6 +28,7 @@ const KEYS = {
   ellipse: 'O',
   text: 'T',
   eraser: 'E',
+  comment: 'C',
 }
 
 /**
@@ -38,8 +40,20 @@ const KEYS = {
  *
  * Geometry note: the rail must stay inside the left 140px of `.board`, which
  * the eraser end-to-end tests clip out of their screenshots. See layout.css.
+ *
+ * `disabled` switches off everything that changes the board. The comment tool
+ * answers to `canComment` instead: commenting changes nothing on the board, so
+ * somebody who may only comment still gets to pick it up.
  */
-export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled = false }) {
+export function ToolRail({
+  onClear,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  disabled = false,
+  canComment = false,
+}) {
   const tool = useUIStore((s) => s.tool)
   const setTool = useUIStore((s) => s.setTool)
   const strokeColor = useUIStore((s) => s.strokeColor)
@@ -83,7 +97,7 @@ export function ToolRail({ onClear, onUndo, onRedo, canUndo, canRedo, disabled =
             aria-label={LABELS[name]}
             aria-keyshortcuts={KEYS[name]}
             aria-pressed={tool === name}
-            disabled={disabled}
+            disabled={name === 'comment' ? !canComment : disabled}
           >
             <Icon name={name} size={18} />
           </button>

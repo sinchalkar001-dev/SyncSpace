@@ -4,6 +4,7 @@ import { DocUpdate } from '../models/DocUpdate.js'
 import { Execution } from '../models/Execution.js'
 import { Activity, ACTIVITY } from '../models/Activity.js'
 import { Generation } from '../models/Generation.js'
+import { CommentThread } from '../models/Comment.js'
 import { User } from '../models/User.js'
 import { extractArchitecture } from './architecture.service.js'
 import { stateAt } from './replay.service.js'
@@ -406,11 +407,57 @@ function generationEvents(generation) {
   return events
 }
 
+/**
+ * What a comment was about, in the words a timeline uses.
+ *
+ * Taken from the anchor as it was when the comment was made, so a comment on
+ * a line since deleted still says which line it was about.
+ */
+function placeOf(anchor) {
+  if (!anchor) return 'the room'
+  if (anchor.kind === 'code') {
+    return anchor.endLine && anchor.endLine !== anchor.line
+      ? 'lines ' + anchor.line + '-' + anchor.endLine
+      : 'line ' + anchor.line
+  }
+  if (anchor.kind === 'file') return anchor.label || 'a file'
+  if (anchor.kind === 'shape') return anchor.label || 'a shape'
+  return 'the whiteboard'
+}
+
+/**
+ * Comments opened, resolved and reopened, from each thread's own record.
+ *
+ * Replies are left out: a back-and-forth is one conversation, and the
+ * timeline is for what happened to the work. What was said is left out too,
+ * for the same reason chat is - the event is that people discussed it.
+ */
+function commentEvents(thread) {
+  const place = placeOf(thread.anchor)
+  const words = {
+    opened: 'commented on ' + place,
+    resolved: 'resolved a comment on ' + place,
+    reopened: 'reopened a comment on ' + place,
+  }
+
+  return (thread.events ?? [])
+    .filter((event) => words[event.type])
+    .map((event) => ({
+      at: event.at,
+      seq: event.seq > 0 ? event.seq : undefined,
+      actorId: event.by ? String(event.by) : null,
+      actorName: event.byName ?? null,
+      kind: 'comment.' + event.type,
+      text: words[event.type],
+      detail: null,
+    }))
+}
+
 /* ---------- the timeline ---------- */
 
 /** Everything a timeline is built from, cheaply, so a cache can be trusted. */
 export async function timelineSignature(roomId) {
-  const [last, runs, activity, generations] = await Promise.all([
+  const [last, runs, activity, generations, comments] = await Promise.all([
     DocUpdate.findOne({ roomId }).sort({ seq: -1 }).select({ seq: 1 }).lean(),
     Execution.countDocuments({ roomId, state: { $in: TERMINAL } }),
     Activity.countDocuments({
@@ -418,10 +465,17 @@ export async function timelineSignature(roomId) {
       kind: { $in: [ACTIVITY.COLLABORATOR_JOINED, ACTIVITY.COMMENT_ADDED] },
     }),
     Generation.countDocuments({ roomId }),
+    // Replies and resolves change a thread without adding one, so the newest
+    // change is what moves the signature, not the count.
+    CommentThread.findOne({ roomId }).sort({ updatedAt: -1 }).select({ updatedAt: 1 }).lean(),
   ])
 
   const throughSeq = last?.seq ?? 0
-  return { throughSeq, signature: [throughSeq, runs, activity, generations].join(':') }
+  const commented = comments?.updatedAt ? new Date(comments.updatedAt).getTime() : 0
+  return {
+    throughSeq,
+    signature: [throughSeq, runs, activity, generations, commented].join(':'),
+  }
 }
 
 /** Which events to let go of first when a session has more than can be shown. */
@@ -467,7 +521,7 @@ export async function buildSessionTimeline(roomId) {
   const cached = cache.get(roomId)
   if (cached?.signature === signature) return cached.timeline
 
-  const [log, runs, activity, generations] = await Promise.all([
+  const [log, runs, activity, generations, threads] = await Promise.all([
     walkLog(roomId),
     Execution.find({ roomId, state: { $in: TERMINAL } })
       .select({ state: 1, language: 1, stderr: 1, user: 1, userName: 1, finishedAt: 1, createdAt: 1 })
@@ -483,6 +537,11 @@ export async function buildSessionTimeline(roomId) {
       .sort({ createdAt: 1 })
       .limit(50)
       .lean(),
+    CommentThread.find({ roomId })
+      .select({ anchor: 1, events: 1 })
+      .sort({ createdAt: 1 })
+      .limit(MAX_RUNS)
+      .lean(),
   ])
 
   const merged = [
@@ -490,6 +549,7 @@ export async function buildSessionTimeline(roomId) {
     ...runs.map(runEvent),
     ...activity.map(activityEvent),
     ...generations.flatMap(generationEvents),
+    ...threads.flatMap(commentEvents),
   ]
     .filter((event) => event.at)
     .sort((a, b) => new Date(a.at) - new Date(b.at))

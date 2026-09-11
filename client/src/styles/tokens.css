@@ -148,8 +148,14 @@
   /* ---------- layering ---------- */
   --z-base: 1;
   --z-raised: 10;
-  --z-sticky: 100;
   --z-rail: 200;
+  /*
+   * The sticky header sits above the board's floating controls. Its blur makes
+   * it a stacking context of its own, so its panels can only ever outrank what
+   * it outranks — and on a phone they open over the tool rail, which at 100
+   * drew on top of every one of them.
+   */
+  --z-sticky: 250;
   --z-popover: 300;
   --z-modal: 400;
   --z-toast: 500;
