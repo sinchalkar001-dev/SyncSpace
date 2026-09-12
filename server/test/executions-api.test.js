@@ -4,6 +4,7 @@ import { clearDatabase, startMemoryMongo, stopMemoryMongo, waitFor } from './hel
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { setIo } from '../src/realtime/registry.js'
+import { Execution } from '../src/models/Execution.js'
 
 /**
  * Seeing what has run in a room, and stopping what is still running.
@@ -90,6 +91,28 @@ describe('GET /rooms/:roomId/executions', () => {
     expect(res.body.executions[0].stdout).toBe('second\n')
     expect(res.body.executions[0].state).toBe('completed')
     expect(res.body.executions[0].by.name).toBe('Owner')
+  })
+
+  /**
+   * A run is one row, and it is there when the answer arrives.
+   *
+   * Every transition upserts the same row by id, and they used to be written
+   * without waiting for each other: two that both found no row both inserted
+   * one, and the same run was listed two or three times. The unique index
+   * catches that only once it has finished building — so the first run against
+   * a fresh database was the one most likely to be recorded twice, which is
+   * exactly where CI caught it.
+   */
+  it('records each run exactly once, before the request answers', async () => {
+    const owner = (await register(OWNER)).body
+    const roomId = await makeRoom(owner.token)
+
+    const posted = await run(roomId, { language: 'javascript', code: 'console.log("once")' }, owner.token)
+
+    const rows = await Execution.find({ roomId })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].executionId).toBe(posted.body.run.executionId)
+    expect(rows[0].state).toBe('completed')
   })
 
   it('records how a run ended, not only that it did', async () => {

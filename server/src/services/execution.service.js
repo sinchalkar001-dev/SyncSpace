@@ -126,7 +126,7 @@ async function runJob(job, signal) {
 }
 
 /** Written on every transition, so a crash cannot lose a run that mattered. */
-async function persist(job) {
+async function write(job) {
   // Running code does not depend on the database being up. Without this,
   // Mongoose buffers the write and resolves it ten seconds later against a
   // connection that is not coming back, holding the transition open — a
@@ -167,6 +167,24 @@ async function persist(job) {
     // A run that worked must not fail because the record of it did not.
     logger.warn({ err: error, executionId: job.executionId }, 'could not record an execution')
   })
+}
+
+/**
+ * One transition written at a time, per run.
+ *
+ * Every transition upserts the same row by `executionId`, and `onState` fires
+ * them without waiting — so queued, running and finished all raced. Two
+ * upserts that both find no row both insert one, and the same run appeared in
+ * the room's console twice or three times. The unique index on `executionId`
+ * catches that only once it has finished building, which on a connection that
+ * is seconds old it has not: the very first run against a fresh database is
+ * the one most likely to be recorded twice.
+ *
+ * The chain hangs off the job, so one run never waits for another.
+ */
+function persist(job) {
+  job.persisted = (job.persisted ?? Promise.resolve()).then(() => write(job))
+  return job.persisted
 }
 
 /**
@@ -263,6 +281,10 @@ function assertRunnable(language) {
 export async function runCode({ language, code, stdin = '', room, user, runId }) {
   const job = await startExecution({ language, code, stdin, room, user, runId })
   await job.done
+
+  // The record is on disk before the answer goes back, so a console that
+  // reloads the moment it sees a result finds the run it just watched.
+  await job.persisted
 
   if (job.error) throw job.error
 
