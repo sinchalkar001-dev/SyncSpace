@@ -864,6 +864,88 @@ session timeline lists comments being opened and resolved.
 and up); deleting other people's messages needs `comments:moderate` (editor and up). Writes are
 rate-limited by `COMMENT_RATE_LIMIT_MAX` (default 120 per `RATE_LIMIT_WINDOW_MS`).
 
+## Engineering copilot
+
+One panel (`Ctrl+Shift+I`, or the sparkle in the header) that offers what fits whatever you are
+doing, rather than a chat box that makes you responsible for knowing what it can do.
+
+**It follows the room.** The context is worked out from what is on screen — highlighted code, a run
+that has just failed, an open replay, which half of the split you are working in — and the actions
+change with it. The strip at the top shows which context is live and marks the one it picked for
+itself; choosing another overrides it until the panel closes. Guessing is fine; guessing and
+refusing to be corrected is not.
+
+| Context | Actions |
+| --- | --- |
+| **Whiteboard** | Explain architecture · Review architecture · Generate code · Generate API · Find risks · Generate implementation plan |
+| **Code** | Explain selection · Find bug · Generate tests · Optimize · Review · Generate documentation |
+| **Runs** | Explain error · Diagnose failure · Generate test case · Suggest fix · Compare runs |
+| **Replay** | Explain this moment · Summarize changes · Compare versions · Explain decision |
+| **Room** | Summarize session · Generate tasks · Find unfinished work · Generate engineering report |
+
+**It says what it read.** Every action declares the room data it uses, and those sources are sent
+to the browser *before* the model is called — so "Whiteboard architecture — 7 components, 6
+connections" is on screen while the answer is being written, not appended afterwards by the thing
+being audited. A source that was consulted and found empty keeps its chip, because omitting it
+would leave you assuming the answer rested on it. Nothing undeclared is read: *Explain selection*
+reads the selection and does not quietly carry the room's comment threads along because they were
+to hand.
+
+**Coordinates travel, material does not.** A request carries a line range, a point in the history,
+a run id — never code or text. The server slices its own copy of the room. An answer is recorded in
+the room's history and shown to everyone in it, so it should describe the room rather than whatever
+one tab claimed was in it, and the prompt stays a view of the room rather than an open field.
+
+**Streaming.** Answers come back as a forced tool call, which is what stops a model wrapping them
+in a code fence — but that means the prose arrives as a JSON string being assembled a fragment at a
+time. The server reads the field out of the partial JSON as it grows and forwards the difference
+over SSE, holding back any escape that has not finished arriving. Anthropic streams tool arguments
+incrementally; Google delivers a function call whole, so there the answer arrives in one piece and
+the run records `streamed: false` rather than pretending otherwise. A POST carries the request, so
+the stream is read by hand rather than with `EventSource` — which can only issue a GET, and would
+put a line range and a typed note in a query string that proxies log and cache.
+
+**Review before apply, always.** Most actions can only advise — they produce no applicable output
+at all, so they cannot change anything by construction rather than by remembering to check. The few
+that can produce one of two things:
+
+- A **change set**: whole files, reviewed one at a time. A file landing on a name the room already
+  has is turned into a modification carrying the contents it would replace, whatever the model
+  called it — which is what keeps "generate" from quietly meaning "overwrite". What you do not tick
+  is recorded as turned down, so a proposal always says what somebody concluded.
+- A **change to the shared buffer**: shown as the lines it touches, and applied by the *client*,
+  inside one Yjs transaction with its own origin — so it undoes in one step and reaches everybody
+  else as an ordinary edit by the person who accepted it. It is narrowed to the part that actually
+  differs, so cursors and comment anchors in the untouched text survive. If anyone typed while the
+  model was thinking, the buffer no longer matches what it was shown and the change is refused as
+  `stale` rather than applied over the difference — said before the button is pressed, not after.
+  A copilot that wins races against the people using it is worse than no copilot.
+
+**Grounded where it can be.** Replay and room actions cite timeline event ids, and every citation
+is checked against the room's own timeline before it is shown: an id naming an event that never
+happened is dropped and counted, and the count is displayed. The events travel with the answer, so
+each citation opens the thing it rests on.
+
+**History is not rewritten.** Every run records the update-log position the room stood at, the
+sources it read exactly as you were shown them, and what became of anything it proposed. Later runs
+are new documents. A summary of a session does not silently become a summary of a different session
+because somebody drew another box.
+
+**Permissions.** Asking needs an account and `copilot:use` (editor and up). Acting on an answer
+needs the capability for the surface being written — `files:upload` for a change set, `code:edit`
+for a buffer change — because asking and acting are different questions. Rate-limited per address
+by `COPILOT_RATE_LIMIT_MAX` (default 40 per `RATE_LIMIT_WINDOW_MS`) and capped at
+`COPILOT_MAX_CONCURRENT` (default 2) answers in flight per person, since a window budget does not
+bound concurrency.
+
+**Adding a capability.** An action is an entry in `server/src/services/copilot/actions.js`: a
+title, the context it belongs to, the room data it reads, the blocks its answer is made of, and the
+sentences that ask for it. The tool schema, the sanitising, the permission check, the rate limit,
+the streaming, the record and the button all follow from that — there is no route, service or
+component to add, and the registry validates itself at import, so a typo fails at start-up rather
+than on whichever button nobody pressed. Twenty-five actions share eleven blocks; a new *block* is
+one entry in `blocks.js` and one renderer.
+
 ## API
 
 | Method | Path | Notes |
@@ -913,6 +995,12 @@ rate-limited by `COMMENT_RATE_LIMIT_MAX` (default 120 per `RATE_LIMIT_WINDOW_MS`
 | `GET` | `/api/rooms/:roomId/generations` | The room's AI timeline, newest first, failures included |
 | `GET` | `/api/rooms/:roomId/generations/:id` | One change set in full, with every proposed file |
 | `POST` | `/api/rooms/:roomId/generations/:id/apply` | Accepts the named files and records the rest as rejected |
+| `GET` | `/api/rooms/:roomId/copilot` | The catalogue: the five contexts, every action in each with the room data it reads, whether this server can reach a model, and whether the caller may ask |
+| `POST` | `/api/rooms/:roomId/copilot/runs` | Runs an action. Answers `text/event-stream`: `sources` before the model is called, `delta` as the prose is written, `result`, `done`. A failure after the stream opens arrives as an `error` frame, so treat a stream ending without `result` as a failure. Needs `copilot:use`. Writes nothing |
+| `GET` | `/api/rooms/:roomId/copilot/runs` | Every question put to the copilot here, newest first, each with the room data it read |
+| `GET` | `/api/rooms/:roomId/copilot/runs/:id` | One answer in full, including anything still awaiting a decision |
+| `POST` | `/api/rooms/:roomId/copilot/runs/:id/apply` | Accepts the named files and records the rest as turned down; needs `files:upload` |
+| `POST` | `/api/rooms/:roomId/copilot/runs/:id/patch` | Records what became of a proposed buffer change — `applied`, `rejected` or `stale`. The server never writes the Yjs document; the client applies it in one transaction |
 
 ### The dashboard, and what it is built on
 

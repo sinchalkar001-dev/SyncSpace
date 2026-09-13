@@ -93,6 +93,20 @@ export function createRateLimiters() {
       message: 'Too many generations from this address, try again later',
     }),
 
+    /**
+     * The copilot, budgeted apart from generation.
+     *
+     * Sharing the generation budget would mean a few explanations exhausting
+     * the allowance for turning the board into code, which is the slower and
+     * more valuable of the two. They cost differently and are reached for at
+     * different rates, so they are counted differently.
+     */
+    copilotLimiter: build({
+      windowMs: env.RATE_LIMIT_WINDOW_MS,
+      max: env.COPILOT_RATE_LIMIT_MAX,
+      message: 'Too many copilot requests from this address, try again shortly',
+    }),
+
     /** File uploads are expensive (disk I/O, bandwidth); cap them separately. */
     commentLimiter: build({
       windowMs: env.RATE_LIMIT_WINDOW_MS,

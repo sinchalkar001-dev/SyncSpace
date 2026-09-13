@@ -24,8 +24,17 @@ import { WebSocket } from 'ws'
  * "Connected" that can never arrive, and thirty tests fail for one reason that
  * none of them mention.
  */
+/**
+ * Where the backend is.
+ *
+ * Configurable because the ports already are: a machine with something else on
+ * 4000 can point a run elsewhere, and this check has to follow it rather than
+ * asserting things about whatever happens to be on the default.
+ */
+const API_ORIGIN = process.env.E2E_API_ORIGIN ?? 'http://127.0.0.1:4000'
+
 async function assertCollabAcceptsOrigin(origin) {
-  const socket = new WebSocket('ws://127.0.0.1:4000/collab', { origin })
+  const socket = new WebSocket(API_ORIGIN.replace(/^http/, 'ws') + '/collab', { origin })
 
   await new Promise((resolve, reject) => {
     socket.once('open', () => {
@@ -35,14 +44,16 @@ async function assertCollabAcceptsOrigin(origin) {
     socket.once('unexpected-response', (_request, response) => {
       reject(
         new Error(
-          'The server on port 4000 refused a collab connection from ' +
+          'The server at ' +
+            API_ORIGIN +
+            ' refused a collab connection from ' +
             origin +
             ' (HTTP ' +
             response.statusCode +
             '). It is almost certainly a leftover server started without ' +
             'CORS_ORIGIN=' +
             origin +
-            '. Stop whatever is listening on port 4000 and run the suite again.'
+            '. Stop whatever is listening there and run the suite again.'
         )
       )
     })

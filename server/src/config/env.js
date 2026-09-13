@@ -354,6 +354,24 @@ const schema = z
     AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(180000),
     // Far tighter than the general budget: each call is a real cost.
     AI_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    /**
+     * Copilot answers per window, per address.
+     *
+     * Looser than generation because the actions are smaller — an explanation
+     * of a selection is a fraction of a change set — and because the copilot
+     * is meant to be reached for mid-task rather than saved up for. Still well
+     * under the general API budget: the cost of abuse here is a bill.
+     */
+    COPILOT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(40),
+    /**
+     * Answers one person may have in flight at once.
+     *
+     * A window budget does not bound concurrency: twenty streams opened in the
+     * same second are twenty requests the provider is being paid for and
+     * twenty connections this server is holding. Two is enough to ask a second
+     * question without waiting and few enough that a loop achieves nothing.
+     */
+    COPILOT_MAX_CONCURRENT: z.coerce.number().int().positive().max(10).default(2),
     // Comments, replies, resolves and edits per window. A conversation is
     // bursty; this stops a script, not a person.
     COMMENT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),

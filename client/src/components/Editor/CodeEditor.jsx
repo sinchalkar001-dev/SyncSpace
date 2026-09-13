@@ -104,6 +104,7 @@ export function CodeEditor({
   onComment,
   onOpenThread,
   activeThreadId = null,
+  onSelectionChange,
 }) {
   const bindingRef = useRef(null)
   const editorRef = useRef(null)
@@ -117,6 +118,13 @@ export function CodeEditor({
   useEffect(() => {
     presenceRef.current = presence
   }, [presence])
+
+  // The same again: Monaco's selection listener is registered once at mount,
+  // so it reports through a ref rather than closing over the first callback.
+  const selectionRef = useRef(onSelectionChange)
+  useEffect(() => {
+    selectionRef.current = onSelectionChange
+  }, [onSelectionChange])
 
   // The same, for the comment callbacks and which lines carry comments.
   const commentRef = useRef({ canComment, onComment, onOpenThread, byLine: new Map() })
@@ -218,6 +226,21 @@ export function CodeEditor({
         const selection = editor.getSelection()
         const selected = selection ? model.getValueInRange(selection).length : 0
         if (at) setPosition({ line: at.lineNumber, column: at.column, selected })
+
+        /**
+         * The line range, for anything outside the editor that wants to act on
+         * what is highlighted — the copilot, at present. Lines rather than
+         * characters, and no text: whoever needs the code reads it from the
+         * shared document, which is the same one everybody else has.
+         */
+        selectionRef.current?.(
+          selected > 0 && selection
+            ? {
+                startLine: Math.min(selection.startLineNumber, selection.endLineNumber),
+                endLine: Math.max(selection.startLineNumber, selection.endLineNumber),
+              }
+            : null
+        )
       }
 
       readPosition()

@@ -43,11 +43,9 @@ const MAX_DIFF_BYTES = 200_000
  * is. A room nobody has open is rebuilt the way `onLoadDocument` rebuilds it:
  * snapshot first, then the log written after it.
  */
-export async function readRoomShapes(roomId) {
+async function withRoomDoc(roomId, read) {
   const live = getHocuspocus()?.documents?.get(roomId)
-  if (live) {
-    return { shapes: live.getArray('shapes').toJSON(), source: 'live' }
-  }
+  if (live) return { value: read(live), source: 'live' }
 
   const snapshot = await Snapshot.findOne({ roomId }).lean()
   const doc = new Y.Doc()
@@ -62,10 +60,31 @@ export async function readRoomShapes(roomId) {
 
     tail.forEach((entry) => Y.applyUpdate(doc, toUint8(entry.update)))
 
-    return { shapes: doc.getArray('shapes').toJSON(), source: snapshot ? 'snapshot' : 'log' }
+    return { value: read(doc), source: snapshot ? 'snapshot' : 'log' }
   } finally {
     doc.destroy()
   }
+}
+
+export async function readRoomShapes(roomId) {
+  const { value, source } = await withRoomDoc(roomId, (doc) => doc.getArray('shapes').toJSON())
+  return { shapes: value, source }
+}
+
+/**
+ * The room's shared code buffer, read the same way as its shapes.
+ *
+ * The copilot reads the server's copy rather than taking the buffer from the
+ * request for the reason the whole of this module reads the server's copy: an
+ * answer is recorded in the room's history and shown to everybody in it, so it
+ * should describe the room's code and not whatever one tab said was in it.
+ * Running code is the deliberate exception — see the `/run` route, where the
+ * person is looking at their own keystrokes and confusion about which version
+ * ran would be worse.
+ */
+export async function readRoomCode(roomId) {
+  const { value, source } = await withRoomDoc(roomId, (doc) => doc.getText('code').toString())
+  return { code: value, source }
 }
 
 /** The architecture graph for a room, with no model involved. */

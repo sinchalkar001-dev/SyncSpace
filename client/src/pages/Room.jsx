@@ -30,6 +30,8 @@ import { CommandPalette } from '../components/CommandPalette.jsx'
 import { ReplayViewer } from '../components/Replay/ReplayViewer.jsx'
 import { ShortcutsPanel } from '../components/ShortcutsPanel.jsx'
 import { CommentsPanel } from '../components/Comments/CommentsPanel.jsx'
+import { CopilotPanel } from '../components/Copilot/CopilotPanel.jsx'
+import { useCopilot } from '../hooks/useCopilot.js'
 import { useComments } from '../hooks/useComments.js'
 import { useCodeAnchors } from '../hooks/useCodeAnchors.js'
 import { resolveCodeAnchors } from '../lib/comments.js'
@@ -205,6 +207,36 @@ export default function Room() {
   const generationState = useGeneration(roomId, { enabled: generateOpen && isAuthenticated })
 
   /**
+   * The copilot: one panel, every AI action, driven by what is on screen.
+   *
+   * It is only asked what it can do once the panel opens — the catalogue is a
+   * request, the history is another, and a room where nobody opens it should
+   * pay for neither.
+   *
+   * Declared here rather than beside the other panels because the socket
+   * handlers below refer to it, and a `const` referenced above its own
+   * declaration is a crash rather than an undefined.
+   */
+  const [copilotOpen, setCopilotOpen] = useState(false)
+  const [selection, setSelection] = useState(null)
+  const onCopilotError = useCallback((message) => toast.error(message), [toast])
+  const copilot = useCopilot(roomId, {
+    enabled: copilotOpen && isAuthenticated,
+    onError: onCopilotError,
+  })
+
+  /**
+   * Which surface this person last worked in — a better signal than the layout
+   * for what they are asking about. Reported through the same navigator that
+   * following somebody uses, so it is already accurate.
+   */
+  const [focusedSurface, setFocusedSurface] = useState(null)
+  useEffect(
+    () => presence.navigator.on('surface', (surface) => setFocusedSurface(surface)),
+    [presence.navigator]
+  )
+
+  /**
    * Somebody else in the room generated or applied something.
    *
    * The diagram was drawn together, so what it produced belongs to everyone
@@ -238,6 +270,46 @@ export default function Room() {
           payload.applied +
           (payload.applied === 1 ? ' generated file' : ' generated files') +
           ' to this room'
+      )
+    },
+    [toast, user?.id]
+  )
+
+  /**
+   * Somebody else asked the copilot something.
+   *
+   * The question is announced, never the answer. An answer can be a page of
+   * review notes, and pushing that at three people who did not ask would be
+   * worse than not telling them — the run is in the room's history for anybody
+   * who wants to read it.
+   */
+  const onRemoteCopilot = useCallback(
+    (payload) => {
+      if (payload?.run?.requestedBy === user?.id) return
+      copilot.noteRemote()
+    },
+    // The refresh callback, not the whole hook: that object is rebuilt every
+    // render, and depending on it would rebuild this handler every render too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user?.id, copilot.noteRemote]
+  )
+
+  /**
+   * A copilot proposal was accepted by somebody else. Worth saying out loud:
+   * a change set just changed the room's files, and an accepted patch has just
+   * rewritten the buffer everybody is looking at.
+   */
+  const onRemoteCopilotApplied = useCallback(
+    (payload) => {
+      if (payload?.by?.id === user?.id) return
+      toast.info(
+        (payload?.by?.name ?? 'Someone') +
+          (payload?.kind === 'code'
+            ? ' applied a copilot change to the code'
+            : ' added ' +
+              payload.applied +
+              (payload.applied === 1 ? ' file' : ' files') +
+              ' from the copilot')
       )
     },
     [toast, user?.id]
@@ -375,6 +447,9 @@ export default function Room() {
       'session:ended': onSessionEnded,
       'ai:generation': onRemoteGeneration,
       'ai:applied': onRemoteApplied,
+      // That somebody asked, not what they were told.
+      'copilot:run': onRemoteCopilot,
+      'copilot:applied': onRemoteCopilotApplied,
       // A whole thread, versioned, whenever anybody changes one.
       'comment:thread': comments.receive,
     }),
@@ -386,6 +461,8 @@ export default function Room() {
       onSessionEnded,
       onRemoteGeneration,
       onRemoteApplied,
+      onRemoteCopilot,
+      onRemoteCopilotApplied,
       comments.receive,
     ]
   )
@@ -460,6 +537,15 @@ export default function Room() {
         event.preventDefault()
         event.stopPropagation()
         setPaletteOpen((open) => !open)
+        return
+      }
+
+      // Ctrl/Cmd+Shift+I opens the copilot. Shift, because Ctrl+I is Monaco's
+      // own and taking it would cost the editor a binding people use.
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'i') {
+        event.preventDefault()
+        event.stopPropagation()
+        setCopilotOpen((open) => !open)
         return
       }
 
@@ -583,6 +669,15 @@ export default function Room() {
         title: 'Open comments',
         keywords: 'comments threads discussion review mentions',
         run: () => setCommentsOpen(true),
+      },
+      {
+        id: 'room:copilot',
+        group: 'Room',
+        icon: 'sparkle',
+        title: 'Open the engineering copilot',
+        keywords: 'ai copilot explain review generate diagnose summarise assistant',
+        hint: 'Ctrl ⇧ I',
+        run: () => setCopilotOpen(true),
       },
       {
         id: 'room:shortcuts',
@@ -753,6 +848,22 @@ export default function Room() {
             onOpenComments={openFileComments}
             focus={fileFocus}
           />
+          {/* The copilot follows what you are doing and offers what fits it.
+              Like generating, it needs an account: every answer spends a real
+              request and is recorded against whoever asked. */}
+          <CopilotPanel
+            open={copilotOpen}
+            onOpenChange={setCopilotOpen}
+            copilot={copilot}
+            signedIn={isAuthenticated}
+            paneMode={paneMode}
+            selection={selection}
+            replay={{ open: replayOpen }}
+            lastRun={runner.result}
+            hasRuns={Boolean(runner.result) || (copilot.catalogue.data?.runs ?? 0) > 0}
+            focusedSurface={focusedSurface}
+            buffer={session?.code}
+          />
           {/* Turning the board into code. Generating needs an account — it
               spends a real request and is recorded against whoever asked —
               so a guest is told that rather than shown a button that fails. */}
@@ -832,6 +943,7 @@ export default function Room() {
               onComment={startComment}
               onOpenThread={openThread}
               activeThreadId={activeThreadId}
+              onSelectionChange={setSelection}
             />
           }
         />

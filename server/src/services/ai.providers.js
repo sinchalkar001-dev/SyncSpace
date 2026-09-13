@@ -116,6 +116,50 @@ const ANTHROPIC = {
       },
     }
   },
+
+  /**
+   * The same call, delivered a fragment at a time.
+   *
+   * Anthropic streams a forced tool call as `input_json_delta` — the arguments
+   * as they are written, which is exactly what the copilot needs: the prose is
+   * the first field of the schema, so it arrives first and can be shown while
+   * the rest of the answer is still being produced.
+   */
+  stream: {
+    request(options) {
+      const call = ANTHROPIC.request(options)
+      return { ...call, body: { ...call.body, stream: true } }
+    },
+
+    /** One SSE frame, as whatever it tells the caller. Unknown frames say nothing. */
+    event({ event, data }) {
+      if (event === 'message_start') {
+        return {
+          model: data?.message?.model ?? null,
+          usage: { inputTokens: data?.message?.usage?.input_tokens ?? null },
+        }
+      }
+
+      if (event === 'content_block_delta' && data?.delta?.type === 'input_json_delta') {
+        return { partial: data.delta.partial_json ?? '' }
+      }
+
+      if (event === 'message_delta') {
+        return {
+          stopReason: data?.delta?.stop_reason ?? null,
+          usage: { outputTokens: data?.usage?.output_tokens ?? null },
+        }
+      }
+
+      // Anthropic reports mid-stream failures as a frame rather than a status
+      // code: the response was already 200 by the time anything went wrong.
+      if (event === 'error') {
+        return { error: data?.error?.type ?? 'stream_error' }
+      }
+
+      return null
+    },
+  },
 }
 
 const GOOGLE = {
@@ -185,6 +229,16 @@ const GOOGLE = {
   },
 }
 
+/**
+ * Google has no `stream` on purpose.
+ *
+ * `streamGenerateContent` streams text, but a function call is delivered as
+ * one complete part — there is no equivalent of `input_json_delta`, so there
+ * is nothing to stream when the answer is a forced tool call. Pretending
+ * otherwise would mean a stream that emits nothing and then everything, which
+ * is what the non-streaming path already does, with one fewer moving part.
+ * `streamModelTool` falls back to it and says so in the run's record.
+ */
 const PROVIDERS = { anthropic: ANTHROPIC, google: GOOGLE }
 
 export const providerNamed = (name) => PROVIDERS[name] ?? null

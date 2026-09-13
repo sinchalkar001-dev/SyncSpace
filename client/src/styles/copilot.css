@@ -1,0 +1,724 @@
+/**
+ * The engineering copilot.
+ *
+ * A drawer rather than a dialog, because the answer is usually about something
+ * on screen and covering it up would be exactly backwards. It sits under the
+ * header and above the workspace, and the workspace stays usable underneath.
+ *
+ * On a narrow screen there is no room beside anything, so it becomes a sheet
+ * over the whole workspace — still below the header, so the way out is where
+ * it always is.
+ */
+
+.copilot {
+  position: fixed;
+  top: var(--bar-h);
+  right: 0;
+  bottom: 0;
+  width: min(30rem, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-3);
+  /* Above the tool rail, below the header it hangs from. */
+  z-index: var(--z-popover);
+  animation: slide-in-right 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot {
+    animation: none;
+  }
+}
+
+.copilot__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+.copilot__head h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  letter-spacing: 0.01em;
+}
+
+.copilot__head h3 svg {
+  color: var(--accent);
+}
+
+.copilot__close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.copilot__close:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* ---------- the context strip ---------- */
+
+.copilot__contexts {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+  overflow-x: auto;
+  flex: 0 0 auto;
+  scrollbar-width: none;
+}
+
+.copilot__contexts::-webkit-scrollbar {
+  display: none;
+}
+
+.copilot__context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.copilot__context:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.copilot__context.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-hi);
+}
+
+/* The dot that says this one was worked out rather than chosen. */
+.copilot__auto {
+  font-size: 7px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.copilot__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.copilot__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* ---------- the actions ---------- */
+
+.copilot__actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.copilot__action {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.copilot__action:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--surface-2);
+}
+
+.copilot__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.copilot__actionicon {
+  margin-top: 2px;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.copilot__action:disabled .copilot__actionicon {
+  color: var(--text-faint);
+}
+
+.copilot__actiontext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.copilot__actiontext strong {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.copilot__actiontext .muted {
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+/* Marks the few actions that can propose a change rather than only advise. */
+.copilot__applies {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-hi);
+}
+
+.copilot__note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ---------- an answer ---------- */
+
+.copilot__answerhead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.copilot__answerhead strong {
+  flex: 1 1 auto;
+  font-size: var(--text-base);
+}
+
+.copilot__answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.copilot__blocktitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------- which room data was read ---------- */
+
+.copilot__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.copilot__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: var(--text-2xs);
+  max-width: 100%;
+}
+
+.copilot__chip svg {
+  color: var(--ok);
+  flex: 0 0 auto;
+}
+
+.copilot__chip.is-empty {
+  opacity: 0.6;
+}
+
+.copilot__chip.is-empty svg {
+  color: var(--text-faint);
+}
+
+.copilot__chiplabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copilot__chipdetail {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ---------- the prose ---------- */
+
+.copilot__prose p {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+
+.copilot__prose p:last-child {
+  margin-bottom: 0;
+}
+
+/* A caret on the last paragraph while the answer is still being written. */
+.copilot__prose.is-streaming p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot__prose.is-streaming p:last-child::after {
+    animation: none;
+  }
+}
+
+.copilot__thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.copilot__dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.copilot__dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  animation: pulse-dot 1.1s ease-in-out infinite;
+}
+
+.copilot__dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.copilot__dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot__dots i {
+    animation: none;
+  }
+}
+
+/* ---------- findings ---------- */
+
+.copilot__findings,
+.copilot__tasks,
+.copilot__list,
+.copilot__citations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.copilot__list {
+  list-style: disc;
+  padding-left: var(--space-5);
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.copilot__finding,
+.copilot__task {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.copilot__finding.is-high {
+  border-left-color: var(--danger);
+}
+
+.copilot__finding.is-medium {
+  border-left-color: var(--warn);
+}
+
+.copilot__finding.is-low {
+  border-left-color: var(--border-strong);
+}
+
+.copilot__findinghead,
+.copilot__taskhead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.copilot__findinghead strong,
+.copilot__taskhead strong {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.copilot__severity,
+.copilot__size {
+  flex: 0 0 auto;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.copilot__severity.is-high {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.copilot__severity.is-medium {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.copilot__findingdetail {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--text-dim);
+}
+
+.copilot__evidence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+}
+
+.copilot__steps {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.copilot__block--ask .copilot__blocktitle {
+  color: var(--warn);
+}
+
+/* ---------- a comparison ---------- */
+
+.copilot__tablewrap {
+  overflow-x: auto;
+}
+
+.copilot__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.copilot__table th,
+.copilot__table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.copilot__table thead th {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+}
+
+.copilot__table code {
+  font-size: var(--text-2xs);
+  word-break: break-word;
+}
+
+.copilot__note {
+  display: block;
+  font-weight: 400;
+}
+
+/* ---------- citations ---------- */
+
+.copilot__citation {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.copilot__citation:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+.copilot__citation:disabled {
+  cursor: default;
+}
+
+.copilot__clock {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--accent);
+}
+
+.copilot__discarded,
+.copilot__provenance {
+  margin: 0;
+  font-size: var(--text-2xs);
+}
+
+.copilot__provenance {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------- review ---------- */
+
+.copilot__review {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.copilot__done {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.copilot__done svg {
+  color: var(--ok);
+}
+
+.copilot__stale {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--warn-soft);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+.copilot__stale svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+/* ---------- the proposed edit ---------- */
+
+.copilot__diff {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--ink-1);
+  overflow-x: auto;
+}
+
+.copilot__diffline {
+  display: block;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--text-2xs);
+}
+
+.copilot__diffrow {
+  display: flex;
+  gap: var(--space-2);
+  padding: 1px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre;
+}
+
+.copilot__diffrow.is-removed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.copilot__diffrow.is-added {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.copilot__diffrow code {
+  font: inherit;
+}
+
+/* ---------- history ---------- */
+
+.copilot__history ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.copilot__historyitem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.copilot__historyitem:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.copilot__historyitem:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.copilot__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ok);
+}
+
+.copilot__dot.is-failed {
+  background: var(--danger);
+}
+
+.copilot__historytext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.copilot__historytext strong {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--leading-snug);
+  /* Two lines of the answer is enough to recognise it by. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.copilot__historytext .muted {
+  font-size: var(--text-2xs);
+}
+
+/* ---------- narrow screens ---------- */
+
+/*
+ * Below this there is no room beside anything, so the drawer becomes a sheet
+ * over the workspace. Still under the header: the way out stays where it is.
+ */
+@media (max-width: 720px) {
+  .copilot {
+    width: 100vw;
+    border-left: none;
+  }
+}

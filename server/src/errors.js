@@ -13,6 +13,15 @@ export const forbidden = (m, c) => new AppError(403, m || 'Forbidden', c || 'for
 export const notFound = (m, c) => new AppError(404, m || 'Not found', c || 'not_found')
 export const conflict = (m, c) => new AppError(409, m, c || 'conflict')
 
+/**
+ * Too much at once from one caller — a budget, not a refusal.
+ *
+ * Distinct from the rate limiter, which counts requests per address over a
+ * window. This is for work that is expensive while it is happening rather than
+ * expensive to ask for, where the question is how many at a time.
+ */
+export const tooMany = (m, c) => new AppError(429, m, c || 'too_many')
+
 /** Something this deployment is not set up to do, rather than a bad request. */
 export const unavailable = (m, c) => new AppError(503, m, c || 'unavailable')
 

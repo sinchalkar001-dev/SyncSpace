@@ -1,4 +1,5 @@
 import { API_URL } from '../lib/env.js'
+import { readEventStream } from '../lib/sse.js'
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -188,6 +189,32 @@ export async function apiDownload(path, { signal } = {}) {
 export async function apiBytes(path, { signal } = {}) {
   const response = await authedFetch(path, { signal })
   return new Uint8Array(await response.arrayBuffer())
+}
+
+/**
+ * Opens a copilot answer and reads it as it is written.
+ *
+ * Not `apiFetch`, which assumes JSON in both directions, and not `EventSource`,
+ * which can only issue a GET — the request carries a line range, a point in
+ * the history and sometimes a note somebody typed, none of which belong in a
+ * query string that proxies log and cache.
+ *
+ * A refusal before the stream opens is an ordinary ApiError and is thrown, so
+ * "your role does not include the copilot" arrives the way every other refusal
+ * in this client does. Once the stream is open the status is already 200, so
+ * anything that goes wrong afterwards arrives as an `error` event instead —
+ * which is why the caller must treat a stream ending without a `result` as a
+ * failure whether or not it saw one.
+ */
+export async function streamCopilot(roomId, body, { onEvent, signal } = {}) {
+  const response = await authedFetch('/rooms/' + encodeURIComponent(roomId) + '/copilot/runs', {
+    method: 'POST',
+    headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+
+  await readEventStream(response, onEvent)
 }
 
 /**
@@ -527,6 +554,51 @@ export const api = {
   /** Moves this person's read marker to now. Safe to repeat. */
   commentsSeen: (roomId) =>
     apiFetch('/rooms/' + encodeURIComponent(roomId) + '/comments/seen', { method: 'POST', body: {} }),
+
+  /**
+   * What the copilot can do in this room, and whether this person may ask.
+   *
+   * The contexts, every action in each, and why not when the answer is no.
+   * Asked when the panel opens rather than on every action, since none of it
+   * changes while somebody is looking at it.
+   */
+  copilot: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/copilot', { signal, retry: 2 }),
+
+  /** Every question put to the copilot in this room, newest first. */
+  copilotRuns: (roomId, signal) =>
+    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/copilot/runs', { signal, retry: 2 }),
+
+  /** One answer in full, including anything still awaiting a decision. */
+  copilotRun: (roomId, runId, signal) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/copilot/runs/' + encodeURIComponent(runId),
+      { signal, retry: 2 }
+    ),
+
+  /**
+   * Accepts part of a proposed change set. Everything not named is recorded
+   * as rejected, so an empty array is a decision rather than a no-op.
+   */
+  applyCopilotFiles: (roomId, runId, accept) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/copilot/runs/' + encodeURIComponent(runId) + '/apply',
+      { method: 'POST', body: { accept } }
+    ),
+
+  /**
+   * Records what became of a proposed change to the shared buffer.
+   *
+   * The buffer itself is written by the client, inside one Yjs transaction, so
+   * that undo works and everyone receives it as an ordinary edit. This is the
+   * record of what was decided — including `stale`, which means the buffer had
+   * moved and the change was refused rather than applied over somebody's work.
+   */
+  recordCopilotPatch: (roomId, runId, outcome) =>
+    apiFetch(
+      '/rooms/' + encodeURIComponent(roomId) + '/copilot/runs/' + encodeURIComponent(runId) + '/patch',
+      { method: 'POST', body: { outcome } }
+    ),
 
   /** Explains the point a replay is paused on. Not retried, for the same reason. */
   explainMoment: (roomId, seq, signal) =>

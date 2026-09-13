@@ -3,6 +3,7 @@ import { logger } from '../config/logger.js'
 import { unavailable, upstream } from '../errors.js'
 import { architectureToPrompt } from './architecture.service.js'
 import { providerNamed, resolveProvider } from './ai.providers.js'
+import { createEventStreamParser, partialString } from '../utils/partial-json.js'
 
 /**
  * Turning an architecture graph into a proposed implementation.
@@ -191,10 +192,10 @@ function buildUserPrompt({ architecture, targets, intent }) {
     .join('\n')
 }
 
-const clampText = (value, limit = MAX_TEXT) =>
+export const clampText = (value, limit = MAX_TEXT) =>
   typeof value === 'string' ? value.trim().slice(0, limit) : ''
 
-const clampList = (value, limit = MAX_LIST_ITEMS) =>
+export const clampList = (value, limit = MAX_LIST_ITEMS) =>
   (Array.isArray(value) ? value : [])
     .map((item) => clampText(item))
     .filter(Boolean)
@@ -229,19 +230,24 @@ export function isSafePath(path) {
 }
 
 /**
- * Takes what the model returned and keeps only what is usable.
+ * Keeps the proposed files that are usable, and says why the rest went.
+ *
+ * Split out from `sanitiseProposal` so the copilot's change sets go through
+ * exactly these checks rather than a second copy of them. A file list produced
+ * by a model is a list of paths and contents about to be written somewhere —
+ * there should be one place that decides what is allowed, not one per feature.
  *
  * Refusals are collected rather than thrown: one bad path out of thirty files
- * should cost that file and a line explaining it, not the whole generation
- * the user just waited for.
+ * should cost that file and a line explaining it, not the whole answer the
+ * user just waited for.
  */
-export function sanitiseProposal(raw) {
+export function sanitiseFiles(raw) {
   const rejected = []
   const seen = new Set()
   const files = []
   let totalBytes = 0
 
-  for (const candidate of Array.isArray(raw?.files) ? raw.files : []) {
+  for (const candidate of Array.isArray(raw) ? raw : []) {
     if (files.length >= MAX_FILES) {
       rejected.push('More than ' + MAX_FILES + ' files were proposed; the rest were dropped.')
       break
@@ -292,6 +298,15 @@ export function sanitiseProposal(raw) {
     })
   }
 
+  return { files, rejected }
+}
+
+/**
+ * Takes what the model returned and keeps only what is usable.
+ */
+export function sanitiseProposal(raw) {
+  const { files, rejected } = sanitiseFiles(raw?.files)
+
   const plan = (Array.isArray(raw?.plan) ? raw.plan : [])
     .map((item) => ({
       step: clampText(item?.step, 200),
@@ -325,29 +340,40 @@ export function sanitiseProposal(raw) {
  * `hints` is what to suggest when the answer times out or is cut short, because
  * "try a smaller diagram" is advice that only makes sense for one feature.
  */
-export async function callModelTool({ system, prompt, tool, maxTokens, model, hints = {} }) {
+
+/**
+ * The one place a model request is prepared, so the streaming path and the
+ * plain one cannot drift on which key, which model, or which timeout.
+ */
+function prepare({ system, prompt, tool, maxTokens, model }) {
   const status = aiStatus()
   if (!status.enabled) throw unavailable(status.reason, 'ai_disabled')
 
   const { key } = resolveProvider()
   const vendor = providerNamed(status.provider)
 
-  const call = vendor.request({
-    baseUrl: env.AI_BASE_URL ?? vendor.defaultBaseUrl,
-    key,
-    model: model || status.model,
-    system,
-    prompt,
-    tool,
-    maxTokens: maxTokens ?? env.AI_MAX_OUTPUT_TOKENS,
-  })
+  return {
+    vendor,
+    status,
+    options: {
+      baseUrl: env.AI_BASE_URL ?? vendor.defaultBaseUrl,
+      key,
+      model: model || status.model,
+      system,
+      prompt,
+      tool,
+      maxTokens: maxTokens ?? env.AI_MAX_OUTPUT_TOKENS,
+    },
+  }
+}
 
+/** Sends a prepared call, or explains why it could not be sent. */
+async function send(call, hints) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), env.AI_TIMEOUT_MS)
 
-  let response
   try {
-    response = await fetch(call.url, {
+    return await fetch(call.url, {
       method: 'POST',
       signal: controller.signal,
       headers: call.headers,
@@ -364,54 +390,69 @@ export async function callModelTool({ system, prompt, tool, maxTokens, model, hi
   } finally {
     clearTimeout(timer)
   }
+}
 
-  if (!response.ok) {
-    // Read the body for the log, never for the response: provider errors
-    // quote request fields back, and the API key travels in a header that
-    // some gateways echo.
-    const detail = await response.text().catch(() => '')
-    logger.error(
-      { status: response.status, detail: detail.slice(0, 500) },
-      'AI request was refused'
-    )
-    /**
-     * "Refused" is the wrong word for most of these, and the wrong word sends
-     * somebody looking for a fault in their own input.
-     *
-     * 429 and 503 are both temporary and both mean try again - 503 especially,
-     * which is the provider being busy and has nothing to do with the request.
-     * 401 and 403 mean the key, which is a different job entirely. Only what
-     * is left is genuinely a refusal.
-     */
-    const temporary = response.status === 429 || response.status === 503
-    const credential = response.status === 401 || response.status === 403
+/**
+ * Turns a refused response into something worth reading.
+ *
+ * "Refused" is the wrong word for most of these, and the wrong word sends
+ * somebody looking for a fault in their own input.
+ *
+ * 429 and 503 are both temporary and both mean try again - 503 especially,
+ * which is the provider being busy and has nothing to do with the request.
+ * 401 and 403 mean the key, which is a different job entirely. Only what is
+ * left is genuinely a refusal.
+ */
+async function refused(response) {
+  // Read the body for the log, never for the response: provider errors quote
+  // request fields back, and the API key travels in a header that some
+  // gateways echo.
+  const detail = await response.text().catch(() => '')
+  logger.error({ status: response.status, detail: detail.slice(0, 500) }, 'AI request was refused')
 
-    throw upstream(
-      temporary
-        ? response.status === 429
-          ? 'The model is rate limiting this server. Try again shortly.'
-          : 'The model is busy right now. Try again in a moment.'
-        : credential
-          ? "The model rejected this server's API key (HTTP " + response.status + ').'
-          : 'The model refused the request (HTTP ' + response.status + ').',
-      temporary ? 'ai_unavailable' : credential ? 'ai_bad_key' : 'ai_failed'
-    )
-  }
+  const temporary = response.status === 429 || response.status === 503
+  const credential = response.status === 401 || response.status === 403
+
+  return upstream(
+    temporary
+      ? response.status === 429
+        ? 'The model is rate limiting this server. Try again shortly.'
+        : 'The model is busy right now. Try again in a moment.'
+      : credential
+        ? "The model rejected this server's API key (HTTP " + response.status + ').'
+        : 'The model refused the request (HTTP ' + response.status + ').',
+    temporary ? 'ai_unavailable' : credential ? 'ai_bad_key' : 'ai_failed'
+  )
+}
+
+/** The failure when an answer arrives in a shape nothing can read. */
+function malformed({ provider, stopReason, tool, hints }) {
+  logger.error({ provider, stop: stopReason, tool }, 'AI answered without using the required tool')
+
+  return upstream(
+    stopReason === 'max_tokens'
+      ? (hints.cutoff ?? 'The answer was cut off before it was complete.')
+      : 'The model did not answer in the expected shape.',
+    'ai_malformed'
+  )
+}
+
+export async function callModelTool({ system, prompt, tool, maxTokens, model, hints = {} }) {
+  const { vendor, status, options } = prepare({ system, prompt, tool, maxTokens, model })
+
+  const response = await send(vendor.request(options), hints)
+  if (!response.ok) throw await refused(response)
 
   const payload = await response.json().catch(() => null)
   const answer = vendor.parse(payload, tool.name)
 
   if (!answer.input) {
-    logger.error(
-      { provider: vendor.name, stop: answer.stopReason, tool: tool.name },
-      'AI answered without using the required tool'
-    )
-    throw upstream(
-      answer.stopReason === 'max_tokens'
-        ? (hints.cutoff ?? 'The answer was cut off before it was complete.')
-        : 'The model did not answer in the expected shape.',
-      'ai_malformed'
-    )
+    throw malformed({
+      provider: vendor.name,
+      stopReason: answer.stopReason,
+      tool: tool.name,
+      hints,
+    })
   }
 
   return {
@@ -419,6 +460,122 @@ export async function callModelTool({ system, prompt, tool, maxTokens, model, hi
     model: answer.model ?? model ?? status.model,
     provider: vendor.name,
     usage: answer.usage,
+  }
+}
+
+/**
+ * The same call, with the answer's prose delivered as it is written.
+ *
+ * `onDelta` is handed each new piece of `streamField` — the difference since
+ * the last call, never the whole thing again, because the caller is forwarding
+ * it to a browser and cannot take anything back. The complete, parsed
+ * arguments are still what the return value carries: streaming is for the
+ * reader, and nothing downstream is built from a fragment.
+ *
+ * A provider with no streaming support is not an error. The answer arrives
+ * whole, `onDelta` is called once with all of it, and `streamed: false` in the
+ * result says which of the two happened — a deployment on Google should be
+ * able to tell "this model does not stream" from "streaming is broken".
+ */
+export async function streamModelTool({
+  system,
+  prompt,
+  tool,
+  maxTokens,
+  model,
+  hints = {},
+  streamField,
+  onDelta,
+  signal,
+}) {
+  const { vendor, status, options } = prepare({ system, prompt, tool, maxTokens, model })
+
+  if (!vendor.stream) {
+    const answer = await callModelTool({ system, prompt, tool, maxTokens, model, hints })
+    const whole = typeof answer.input?.[streamField] === 'string' ? answer.input[streamField] : ''
+    if (whole) onDelta?.(whole)
+    return { ...answer, streamed: false }
+  }
+
+  const response = await send(vendor.stream.request(options), hints)
+  if (!response.ok) throw await refused(response)
+
+  const parser = createEventStreamParser()
+  const decoder = new TextDecoder()
+  const reader = response.body.getReader()
+
+  let raw = ''
+  let sent = 0
+  let stopReason = null
+  let answeredBy = null
+  let usage = { inputTokens: null, outputTokens: null }
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      // Someone closed the browser tab. Nothing downstream is waiting for
+      // this, and the provider is charging for every token still coming.
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => {})
+        throw upstream('The request was cancelled.', 'ai_cancelled')
+      }
+
+      for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
+        if (frame.data === '[DONE]') continue
+
+        let data
+        try {
+          data = JSON.parse(frame.data)
+        } catch {
+          // A frame that is not JSON is a frame this code does not understand,
+          // not a reason to throw away an answer that is otherwise arriving.
+          continue
+        }
+
+        const seen = vendor.stream.event({ event: frame.event, data })
+        if (!seen) continue
+
+        if (seen.error) {
+          throw upstream('The model stopped part way through the answer.', 'ai_failed')
+        }
+        if (seen.model) answeredBy = seen.model
+        if (seen.stopReason) stopReason = seen.stopReason
+        if (seen.usage) usage = { ...usage, ...seen.usage }
+
+        if (typeof seen.partial === 'string' && seen.partial) {
+          raw += seen.partial
+
+          const field = partialString(raw, streamField)
+          if (field.found && field.value.length > sent) {
+            onDelta?.(field.value.slice(sent))
+            sent = field.value.length
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock?.()
+  }
+
+  let input = null
+  try {
+    input = raw ? JSON.parse(raw) : null
+  } catch {
+    input = null
+  }
+
+  if (!input) {
+    throw malformed({ provider: vendor.name, stopReason, tool: tool.name, hints })
+  }
+
+  return {
+    input,
+    model: answeredBy ?? model ?? status.model,
+    provider: vendor.name,
+    usage,
+    streamed: true,
   }
 }
 

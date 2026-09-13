@@ -1324,6 +1324,227 @@ export const openapiDocument = {
       },
     },
 
+    '/api/v1/rooms/{roomId}/copilot': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['AI'],
+        summary: 'What the copilot can do here',
+        description:
+          'The catalogue: the five contexts, every action in each, and whether this deployment ' +
+          'can reach a model at all. `allowed` says whether the caller may ask — the copilot ' +
+          'needs an account and copilot:use, which every role from editor up holds. Asked before ' +
+          'anything is offered, so an interface can explain a switched-off feature rather than ' +
+          'presenting buttons that fail. Each action lists the room data it reads (`sources`), ' +
+          'the parts its answer is made of (`produces`), what it needs from the caller (`needs`) ' +
+          'and what its answer can be turned into (`apply`).',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The catalogue',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CopilotCatalogue' } },
+            },
+          },
+          ...error(403, 'Not a room you can open', 'room_forbidden', 'You do not have access to this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/copilot/runs': {
+      parameters: [{ $ref: '#/components/parameters/roomId' }],
+      get: {
+        tags: ['AI'],
+        summary: 'The room’s copilot history',
+        description:
+          'Every question put to the copilot in this room, newest first, each with the room data ' +
+          'it read. Follows access to the room: what the copilot was asked about a room is part ' +
+          'of that room’s record.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Newest first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    runs: { type: 'array', items: { $ref: '#/components/schemas/CopilotRunSummary' } },
+                  },
+                },
+              },
+            },
+          },
+          ...error(403, 'Not a room you can open', 'room_forbidden', 'You do not have access to this room'),
+        },
+      },
+      post: {
+        tags: ['AI'],
+        summary: 'Run a copilot action, streaming the answer',
+        description:
+          'Answers `text/event-stream`, not JSON. Frames arrive in this order: `sources` — the ' +
+          'room data being read, sent before the model is called so it can be shown while the ' +
+          'answer is produced; `delta` — pieces of the prose as it is written; `result` — the ' +
+          'complete recorded run; `done`. A failure after the stream opens arrives as an `error` ' +
+          'frame, because the status line has already gone out as 200 — treat a stream that ends ' +
+          'without `result` as a failure whether or not an `error` frame was seen.\n\n' +
+          'The body carries coordinates, never material: a line range, a point in the history, a ' +
+          'run id. The server resolves each against its own copy of the room, so an answer ' +
+          'describes the room rather than whatever a client claimed was in it. `note` is the one ' +
+          'piece of free text.\n\n' +
+          'Needs an account and copilot:use. Rate limited per address by ' +
+          'COPILOT_RATE_LIMIT_MAX, and capped at COPILOT_MAX_CONCURRENT answers in flight per ' +
+          'person. Nothing this returns changes the room: files and buffer changes are proposals, ' +
+          'applied through the two routes below.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CopilotRunInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'The event stream',
+            content: {
+              'text/event-stream': {
+                example:
+                  'event: sources\ndata: {"action":"code.review","sources":[{"key":"code","label":"Shared code buffer","detail":"84 lines","present":true}]}\n\n' +
+                  'event: delta\ndata: {"text":"The parser does not "}\n\n' +
+                  'event: result\ndata: {"run":{"id":"6640...","status":"succeeded"}}\n\n' +
+                  'event: done\ndata: {}\n\n',
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(403, 'Your role does not include the copilot', 'copilot_forbidden', 'Your role in this room does not include the copilot'),
+          ...error(429, 'Too many at once', 'copilot_busy', 'You already have 2 copilot answers in progress. Wait for one to finish.'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/copilot/runs/{runId}': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        {
+          name: 'runId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+          description: 'A copilot run id',
+        },
+      ],
+      get: {
+        tags: ['AI'],
+        summary: 'One copilot answer in full',
+        description:
+          'The whole answer: its prose, its structured parts, the room data it read, and any ' +
+          'proposal still awaiting a decision. Scoped to the room, so an id from another room is ' +
+          'not found rather than refused.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'The run',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CopilotRunEnvelope' } } },
+          },
+          ...error(404, 'No such run in this room', 'run_not_found', 'No such copilot run in this room'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/copilot/runs/{runId}/apply': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { name: 'runId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      post: {
+        tags: ['AI'],
+        summary: 'Accept part of a proposed change set',
+        description:
+          '`accept` names the files being taken; everything else in the answer is recorded as ' +
+          'rejected, so an empty array is a real decision rather than a no-op. Needs ' +
+          'files:upload — asking the copilot and acting on it are separate permissions. A file ' +
+          'landing on a name the room already has was reconciled into a modification when the ' +
+          'answer was produced, and arrived carrying the contents it would replace, so nothing ' +
+          'is overwritten that was not shown first.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['accept'],
+                properties: {
+                  accept: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'What was applied, rejected and failed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    run: { $ref: '#/components/schemas/CopilotRun' },
+                    applied: { type: 'integer' },
+                    rejected: { type: 'integer' },
+                    failed: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(400, 'Nothing to apply', 'nothing_to_apply', 'That copilot answer did not propose any files'),
+          ...error(403, 'Your role cannot add files', 'apply_forbidden', 'Your role in this room does not include adding files'),
+        },
+      },
+    },
+
+    '/api/v1/rooms/{roomId}/copilot/runs/{runId}/patch': {
+      parameters: [
+        { $ref: '#/components/parameters/roomId' },
+        { name: 'runId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      post: {
+        tags: ['AI'],
+        summary: 'Record what became of a proposed code change',
+        description:
+          'The server does not write the shared buffer, and will not: it is a Yjs document, and ' +
+          'the client applies the change inside one transaction tagged with its own origin so ' +
+          'that undo works and everyone else receives it as an ordinary edit. This records the ' +
+          'outcome. `stale` is not a failure — it means the buffer no longer matched what the ' +
+          'model was shown, so the change was refused rather than applied over somebody’s ' +
+          'editing. `applied` needs code:edit.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['outcome'],
+                properties: { outcome: { type: 'string', enum: ['applied', 'rejected', 'stale'] } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'The run, with the change decided',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CopilotRunEnvelope' } } },
+          },
+          ...validationError(),
+          ...authRequired(),
+          ...error(409, 'Already decided', 'already_decided', 'That change has already been applied'),
+        },
+      },
+    },
+
     '/api/v1/rooms/{roomId}/architecture': {
       get: {
         tags: ['AI'],
@@ -2401,6 +2622,196 @@ export const openapiDocument = {
               'The caller’s own id for the thread while it was being written. Echoed in the `comment:thread` announcement so the author’s client can replace its placeholder; never stored.',
           },
         },
+      },
+
+      CopilotAction: {
+        type: 'object',
+        description:
+          'One thing the copilot can be asked. Actions are declarative: the room data an action ' +
+          'reads, the parts its answer is made of, and what may be done with it are all data, ' +
+          'which is what lets a new capability be an entry in a registry rather than a new ' +
+          'endpoint.',
+        properties: {
+          id: { type: 'string', example: 'code.review' },
+          context: { type: 'string', enum: ['whiteboard', 'code', 'execution', 'replay', 'room'] },
+          title: { type: 'string', example: 'Review' },
+          detail: { type: 'string', example: 'The review a colleague would give' },
+          icon: { type: 'string' },
+          sources: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The room data this action reads, and the whole of it.',
+            example: ['code', 'selection'],
+          },
+          produces: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The blocks its answer is made of. `answer` is the prose, and is streamed.',
+            example: ['answer', 'findings', 'questions'],
+          },
+          needs: {
+            type: ['string', 'null'],
+            enum: ['selection', 'seq', 'range', null],
+            description: 'What the caller must supply: a selection, a point in the history, or a range.',
+          },
+          apply: {
+            type: ['string', 'null'],
+            enum: ['files', 'code', null],
+            description:
+              'What its answer may be turned into, after review. Null means advice, which cannot ' +
+              'change anything by construction rather than by remembering to check.',
+          },
+        },
+      },
+
+      CopilotCatalogue: {
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean', description: 'Whether this server can reach a model at all.' },
+          allowed: { type: 'boolean', description: 'Whether this caller may ask.' },
+          runs: {
+            type: 'integer',
+            description:
+              'How many runs this room has recorded, so an interface can tell "nothing has ever ' +
+              'run here" from "nothing has run since you opened the tab".',
+          },
+          reason: { type: ['string', 'null'], description: 'Why not, when either is false.' },
+          provider: { type: ['string', 'null'], enum: ['anthropic', 'google', null] },
+          model: { type: ['string', 'null'] },
+          contexts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                label: { type: 'string' },
+                icon: { type: 'string' },
+                detail: { type: 'string' },
+              },
+            },
+          },
+          actions: { type: 'array', items: { $ref: '#/components/schemas/CopilotAction' } },
+        },
+      },
+
+      CopilotRunInput: {
+        type: 'object',
+        required: ['action'],
+        description:
+          'Coordinates, never material. Everything except `note` names a place in the room for ' +
+          'the server to resolve against its own copy.',
+        properties: {
+          action: { type: 'string', maxLength: 60, example: 'code.review' },
+          startLine: { type: 'integer', minimum: 1, description: 'First line of the selection.' },
+          endLine: { type: 'integer', minimum: 1, description: 'Last line of the selection.' },
+          seq: { type: 'integer', minimum: 1, description: 'A position in the update log.' },
+          fromSeq: { type: 'integer', minimum: 1 },
+          toSeq: { type: 'integer', minimum: 1 },
+          executionId: { type: 'string', maxLength: 64, description: 'Which run to read. Defaults to the most recent failure.' },
+          note: {
+            type: 'string',
+            maxLength: 2000,
+            description: 'Anything the person wants to add. The only free text in the request.',
+          },
+        },
+      },
+
+      CopilotSource: {
+        type: 'object',
+        description:
+          'One piece of room data an answer was built from, exactly as the person was shown it.',
+        properties: {
+          key: { type: 'string', example: 'code' },
+          label: { type: 'string', example: 'Shared code buffer' },
+          detail: { type: 'string', example: '84 lines' },
+          present: {
+            type: 'boolean',
+            description: 'False when the source was consulted and there was nothing in it.',
+          },
+          meta: { type: 'object', additionalProperties: true },
+        },
+      },
+
+      CopilotRunSummary: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          roomId: { type: 'string' },
+          actionId: { type: 'string' },
+          context: { type: 'string' },
+          status: { type: 'string', enum: ['succeeded', 'failed'] },
+          requestedBy: { type: ['string', 'null'] },
+          requestedByName: { type: ['string', 'null'] },
+          answer: { type: ['string', 'null'] },
+          sources: { type: 'array', items: { $ref: '#/components/schemas/CopilotSource' } },
+          throughSeq: {
+            type: 'integer',
+            description:
+              'Where the room’s update log stood when this was answered. A run is what was said ' +
+              'at a point in the history, and is never rewritten as the room moves on.',
+          },
+          error: { type: ['string', 'null'] },
+          model: { type: ['string', 'null'] },
+          durationMs: { type: ['integer', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      CopilotRun: {
+        allOf: [
+          { $ref: '#/components/schemas/CopilotRunSummary' },
+          {
+            type: 'object',
+            properties: {
+              result: {
+                type: 'object',
+                additionalProperties: true,
+                description:
+                  'The structured blocks the action produces — findings, steps, tasks, ' +
+                  'comparison, questions, assumptions, citations. Which keys are present is the ' +
+                  'action’s `produces`.',
+              },
+              rejected: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'What the server refused to keep out of the answer, and why.',
+              },
+              discarded: {
+                type: 'integer',
+                description: 'Citations dropped for naming events that do not exist.',
+              },
+              streamed: {
+                type: 'boolean',
+                description:
+                  'False when the provider delivered the answer whole rather than as it was ' +
+                  'written. Google’s function calls are not incremental; Anthropic’s are.',
+              },
+              files: { type: 'array', items: { $ref: '#/components/schemas/ProposedFile' } },
+              patch: {
+                type: ['object', 'null'],
+                description: 'A proposed replacement for the shared code buffer.',
+                properties: {
+                  contents: { type: 'string' },
+                  rationale: { type: ['string', 'null'] },
+                  baseText: {
+                    type: 'string',
+                    description:
+                      'The buffer as the model was shown it. The change is refused unless the ' +
+                      'buffer still reads exactly like this, which is what stops it landing on ' +
+                      'top of editing done while the model was thinking.',
+                  },
+                  status: { type: 'string', enum: ['proposed', 'applied', 'rejected', 'stale'] },
+                  appliedAt: { type: ['string', 'null'], format: 'date-time' },
+                },
+              },
+            },
+          },
+        ],
+      },
+
+      CopilotRunEnvelope: {
+        type: 'object',
+        properties: { run: { $ref: '#/components/schemas/CopilotRun' } },
       },
 
       RoomPreferenceInput: {

@@ -89,6 +89,22 @@ const ICONS = {
   sort: { d: 'M4 6.5 H20 M6.6 12 H17.4 M9.6 17.5 H14.4' },
 
   checkCircle: { d: 'M12 3.5 A8.5 8.5 0 1 1 12 20.5 A8.5 8.5 0 1 1 12 3.5 Z M8 12.2 L11 15.2 L16.2 9.4' },
+
+  list: { d: 'M9 6.5 H20 M9 12 H20 M9 17.5 H20 M4.6 6.5 H4.61 M4.6 12 H4.61 M4.6 17.5 H4.61' },
+  file: { d: 'M6 3.2 H14 L18.8 8 V20.8 H6 Z M14 3.2 V8 H18.8 M9 12.4 H15.6 M9 16.4 H15.6' },
+  wrench: {
+    d: 'M16.4 2.6 A5.8 5.8 0 0 0 11.5 11.4 L3.3 19.6 A2 2 0 0 0 6.1 22.4 L14.3 14.2 A5.8 5.8 0 0 0 21.4 7.6 L18 11 L13 6 Z',
+    filled: true,
+  },
+  /**
+   * The copilot. Deliberately not `zap`, which belongs to generating from the
+   * whiteboard — two AI features sharing a glyph in the same toolbar is how
+   * somebody presses the wrong one.
+   */
+  sparkle: {
+    d: 'M10 2.5 L11.9 8.1 L17.5 10 L11.9 11.9 L10 17.5 L8.1 11.9 L2.5 10 L8.1 8.1 Z M17.9 14.8 L18.8 17.4 L21.4 18.3 L18.8 19.2 L17.9 21.8 L17 19.2 L14.4 18.3 L17 17.4 Z',
+    filled: true,
+  },
 }
 
 export function Icon({ name, size = 16, className, title }) {

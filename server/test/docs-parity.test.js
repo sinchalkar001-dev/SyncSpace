@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createRoomsRouter } from '../src/routes/rooms.routes.js'
 import { createCommentsRouter } from '../src/routes/comments.routes.js'
+import { createCopilotRouter } from '../src/routes/copilot.routes.js'
 import { openapiDocument } from '../src/docs/openapi.js'
 
 /**
@@ -10,12 +11,13 @@ import { openapiDocument } from '../src/docs/openapi.js'
  * added, removed, re-authed or renamed without updating the docs (or vice
  * versa), this file fails.
  *
- * Comments have a router of their own, mounted under a room, so both are
- * walked — each with the prefix app.js mounts it at.
+ * Comments and the copilot have routers of their own, mounted under a room, so
+ * all three are walked — each with the prefix app.js mounts it at.
  */
 
 const ROOMS_PREFIX = '/api/v1/rooms'
 const COMMENTS_PREFIX = ROOMS_PREFIX + '/{roomId}/comments'
+const COPILOT_PREFIX = ROOMS_PREFIX + '/{roomId}/copilot'
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options'])
 
 /** Flattens an Express router into [{ method, path, requireAuth, optionalAuth }]. */
@@ -44,6 +46,7 @@ describe('room routes ↔ OpenAPI parity', () => {
   const routes = [
     ...actualRoutes(createRoomsRouter(), ROOMS_PREFIX),
     ...actualRoutes(createCommentsRouter(), COMMENTS_PREFIX),
+    ...actualRoutes(createCopilotRouter(), COPILOT_PREFIX),
   ].sort((a, b) => (a.path + a.method).localeCompare(b.path + b.method))
 
   it('the router actually mounts room routes to compare against', () => {

@@ -31,6 +31,10 @@ export const ACTIVITY = Object.freeze({
   // A comment on the work itself. Chat keeps `comment.added`, which it has
   // always had; relabelling rows already written would change their meaning.
   COMMENT_POSTED: 'comment.posted',
+  // The copilot answered a question about this room. Recorded because it read
+  // the room on somebody's behalf, which is worth a line in the feed whether
+  // or not anything came of the answer.
+  COPILOT_ANSWERED: 'copilot.answered',
 })
 
 export const ACTIVITY_KINDS = Object.freeze(Object.values(ACTIVITY))

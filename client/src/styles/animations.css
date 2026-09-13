@@ -166,6 +166,42 @@
   }
 }
 
+/* A panel arriving from the right edge, for the copilot drawer. */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* The caret at the end of an answer that is still being written. */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Three dots, while the copilot is reading the room and has nothing to say yet. */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* ---------- utilities ---------- */
 
 /* Applied to a page's root element. Mounting is the trigger, so a route change

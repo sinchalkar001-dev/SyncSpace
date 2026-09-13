@@ -11,6 +11,7 @@ const GROUPS = [
     title: 'Workspace',
     items: [
       ['Ctrl K', 'Command palette'],
+      ['Ctrl Shift I', 'Engineering copilot'],
       ['?', 'This panel'],
       ['Ctrl Enter', 'Run the code'],
       ['Ctrl F', 'Find in code'],

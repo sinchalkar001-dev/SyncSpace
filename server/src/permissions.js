@@ -79,6 +79,16 @@ export const CAPABILITIES = Object.freeze({
   CHAT_SEND: 'chat:send',
   CODE_EXECUTE: 'code:execute',
   AI_GENERATE: 'ai:generate',
+  /**
+   * Asking the copilot anything at all.
+   *
+   * Separate from `ai:generate` because they are different questions: that one
+   * is "may you turn the board into code", this one is "may you spend a model
+   * request reading this room". They happen to be granted to the same roles
+   * today, and keeping them apart is what lets a deployment give a reviewer
+   * the copilot without giving them the change sets.
+   */
+  COPILOT_USE: 'copilot:use',
   REPLAY_VIEW: 'replay:view',
 
   /** Opening, replying to, resolving and reopening comment threads. */
@@ -116,6 +126,7 @@ const EDITOR = [
   C.FILES_DELETE,
   C.CODE_EXECUTE,
   C.AI_GENERATE,
+  C.COPILOT_USE,
   C.COMMENT_MODERATE,
 ]
 
@@ -223,6 +234,10 @@ const ACCOUNT_ONLY = Object.freeze(
     C.FILES_UPLOAD,
     C.FILES_DELETE,
     C.AI_GENERATE,
+    // Every answer is recorded against whoever asked for it, and each one
+    // spends a real request on this server's key. Neither is something to hang
+    // on a display name typed into a box.
+    C.COPILOT_USE,
   ])
 )
 
@@ -298,6 +313,7 @@ export const CAPABILITY_LABELS = Object.freeze({
   [C.CHAT_SEND]: 'send messages',
   [C.CODE_EXECUTE]: 'run code',
   [C.AI_GENERATE]: 'generate code from the whiteboard',
+  [C.COPILOT_USE]: 'use the copilot in this room',
   [C.REPLAY_VIEW]: 'watch this room’s history',
   [C.COMMENT_WRITE]: 'comment on this room',
   [C.COMMENT_MODERATE]: 'delete other people’s comments',
