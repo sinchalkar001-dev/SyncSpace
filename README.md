@@ -58,7 +58,7 @@ Six of them. Each grants everything the one below it does, plus more:
 | **Viewer** | Read the room and its history |
 | **Commenter** | Chat |
 | **Runner** | Run the code, without being able to change it |
-| **Editor** | Draw, edit code, upload and delete files, generate from the whiteboard |
+| **Editor** | Draw, edit code, upload and delete files, use the copilot |
 | **Admin** | Room settings, invite and remove people, assign roles below their own |
 | **Owner** | Delete the room, transfer it, appoint admins |
 
@@ -756,73 +756,6 @@ completely static — an animated gradient or a fading canvas hint inside that r
 tests flake. Both rules are commented where they apply, in
 [layout.css](client/src/styles/layout.css).
 
-## Whiteboard to code
-
-Draw a system on the board — boxes with labels, arrows between them — and ask for an
-implementation. The **⚡ button** in the room header opens it.
-
-**It reads the diagram, not a screenshot.** That distinction is the feature. The whiteboard stores
-drawings, not diagrams: an arrow is four numbers, and a label is an unrelated `text` shape that
-happens to sit on top of a box. Nothing records that the arrow between "API" and "Database" *means*
-anything. So the graph is recovered geometrically — arrows resolve to the nearest box at each end,
-text inside a box becomes its label, text on a line becomes that connection's relationship — and the
-result is an explicit list of components, connections and notes.
-
-```
-[Client]  ->  [API]  ->  [Auth Service]  ->  [Database]
-```
-
-becomes
-
-| | |
-| --- | --- |
-| **nodes** | `client` (client), `api` (api), `auth-service` (auth), `database` (datastore) |
-| **edges** | `client → api`, `api → auth-service`, `auth-service → database` |
-
-Component types are inferred from the label and the shape (`database`/`store` → data store,
-`queue`/`kafka` → queue, a diamond → decision), which is a hint for the model and something for you
-to correct — not a rule anything depends on.
-
-**The reading is shown before anything is generated.** It is inference and it is sometimes wrong,
-and the right answer to a misread diagram is fixing the diagram. The panel also lists what the
-diagram *could not* say — an arrow that reaches nothing, a box nobody labelled, two boxes with the
-same name — and those go to the model as gaps rather than being guessed at. `GET /api/rooms/:id/architecture`
-returns exactly this, and involves no model at all.
-
-**What comes back is a proposal, never a write.** The model returns a plan, a set of whole files,
-the assumptions it had to make, and the questions the diagram left open. Then:
-
-- **`create` and `modify` are decided by the server**, not taken from the answer. The model has
-  never seen the room's files, so its "create" means "I wrote a new file" — not "this path is free",
-  which it is in no position to claim. Anything landing on a name the room already has becomes a
-  modification, and arrives carrying the current contents so the change can be read. That is the
-  whole of *do not blindly overwrite*: nothing is replaced that was not first shown.
-- **Every path is checked.** Absolute paths, `..`, backslashes, null bytes and oversized files are
-  refused and reported rather than repaired — silently rewriting `../../etc/passwd` into something
-  harmless would hide that it was proposed.
-- **Nothing is applied until you tick it.** Accept some, reject the rest; what you leave unticked is
-  recorded as rejected rather than left undecided. Accepted files are written into the room's files
-  through the same upload path as any other, so the same permissions apply.
-
-Generation needs an account (it spends a real request and is recorded against whoever asked) and
-room access. Every run — including failures — is kept as the room's **AI timeline**, and both
-generating and applying are announced to everyone in the room over the socket.
-
-**Switching it on.** Set one key in `server/.env` — `ANTHROPIC_API_KEY=sk-ant-…`
-([console](https://console.anthropic.com/settings/keys)) or `GOOGLE_API_KEY=AIza…`
-([AI Studio](https://aistudio.google.com/apikey)). Which service gets called is worked out from the
-shape of the key, so there is no second setting to keep in step with it; `AI_PROVIDER` overrides the
-guess for a gateway whose keys look like neither. Both are driven through their function-calling
-APIs so the answer arrives as structured arguments rather than prose that has to be dug out of a
-paragraph — one code path, either vendor.
-
-Model defaults to `claude-sonnet-5` or `gemini-3.6-flash`. Note that Google's older `2.5` names are
-still listed by its models endpoint but are closed to new keys, and answer a 404 that reads like the
-model does not exist.
-
-Without a key the panel says so and the architecture reading still works, because that needs no
-model at all.
-
 ## Comments
 
 Conversations attached to the thing they are about: a shape, a spot or area on the board, a
@@ -989,12 +922,7 @@ one entry in `blocks.js` and one renderer.
 | `DELETE` | `/api/rooms/:roomId/comments/:threadId/messages/:messageId` | Soft-deletes a message; the author, or `comments:moderate` |
 | `POST` | `/api/rooms/:roomId/run` | Runs the buffer and returns its output; result is broadcast to the room |
 | `GET` | `/api/runners` | Which languages this machine can run, and whether running is enabled |
-| `GET` | `/api/ai` | Whether this server can generate code, why not if it cannot, and what it can be asked for |
-| `GET` | `/api/rooms/:roomId/architecture` | The system design read off the whiteboard: nodes, edges, notes, and what could not be read. No model involved |
-| `POST` | `/api/rooms/:roomId/generate` | Turns the diagram into a proposed change set. Writes nothing |
-| `GET` | `/api/rooms/:roomId/generations` | The room's AI timeline, newest first, failures included |
-| `GET` | `/api/rooms/:roomId/generations/:id` | One change set in full, with every proposed file |
-| `POST` | `/api/rooms/:roomId/generations/:id/apply` | Accepts the named files and records the rest as rejected |
+| `GET` | `/api/ai` | Whether this server can reach a model, and why not if it cannot. Deployment-wide; never reports the key |
 | `GET` | `/api/rooms/:roomId/copilot` | The catalogue: the five contexts, every action in each with the room data it reads, whether this server can reach a model, and whether the caller may ask |
 | `POST` | `/api/rooms/:roomId/copilot/runs` | Runs an action. Answers `text/event-stream`: `sources` before the model is called, `delta` as the prose is written, `result`, `done`. A failure after the stream opens arrives as an `error` frame, so treat a stream ending without `result` as a failure. Needs `copilot:use`. Writes nothing |
 | `GET` | `/api/rooms/:roomId/copilot/runs` | Every question put to the copilot here, newest first, each with the room data it read |

@@ -193,7 +193,7 @@ export const BLOCKS = Object.freeze({
   /**
    * Whole files, for a change set that goes through review before anything is
    * written. Sanitised by ai.service.js, which owns the path rules — the same
-   * check that guards "generate from whiteboard".
+   * one place that decides what a model is allowed to propose writing.
    */
   files: {
     property: {

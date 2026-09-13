@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Execution } from '../models/Execution.js'
 import { Activity, ACTIVITY } from '../models/Activity.js'
-import { Generation } from '../models/Generation.js'
+import { CopilotRun } from '../models/CopilotRun.js'
 import { CommentThread } from '../models/Comment.js'
 import { User } from '../models/User.js'
 import { extractArchitecture } from './architecture.service.js'
@@ -379,28 +379,58 @@ function activityEvent(row) {
   return { at: row.at, ...who, kind: 'people.chatted', text: 'talked in chat', detail: null }
 }
 
-function generationEvents(generation) {
+/**
+ * What the copilot did here, as timeline events.
+ *
+ * Two kinds, and they are separate on purpose: being asked something is not
+ * the same as somebody acting on the answer, and a room where every proposal
+ * was turned down is a different room from one where they were all taken.
+ * Only what was applied counts as the second.
+ */
+function copilotEvents(run) {
+  const who = {
+    actorId: run.requestedBy ? String(run.requestedBy) : null,
+    actorName: run.requestedByName ?? null,
+  }
+
   const events = [
     {
-      at: generation.createdAt,
-      actorId: generation.requestedBy ? String(generation.requestedBy) : null,
-      actorName: generation.requestedByName ?? null,
-      kind: 'ai.proposed',
-      text: 'AI proposed ' + (generation.files?.length ?? 0) + ' file(s) from the whiteboard',
-      detail: generation.summary ? clamp(generation.summary) : null,
+      at: run.createdAt,
+      ...who,
+      kind: 'ai.asked',
+      text: 'asked the copilot: ' + run.actionId,
+      detail: run.answer ? clamp(run.answer) : null,
     },
   ]
 
-  const applied = (generation.files ?? []).filter((file) => file.appliedAt)
+  const applied = (run.files ?? []).filter((file) => file.appliedAt)
+
   if (applied.length) {
-    const last = applied.reduce((latest, file) => (file.appliedAt > latest ? file.appliedAt : latest), applied[0].appliedAt)
+    const last = applied.reduce(
+      (latest, file) => (file.appliedAt > latest ? file.appliedAt : latest),
+      applied[0].appliedAt
+    )
     events.push({
       at: last,
-      actorId: generation.requestedBy ? String(generation.requestedBy) : null,
-      actorName: generation.requestedByName ?? null,
+      ...who,
       kind: 'ai.applied',
-      text: 'Applied ' + applied.length + ' AI-generated file(s)',
-      detail: clamp(applied.map((file) => file.path).slice(0, 4).join(', ')),
+      text: 'applied ' + applied.length + ' file(s) the copilot proposed',
+      detail: clamp(
+        applied
+          .map((file) => file.path)
+          .slice(0, 4)
+          .join(', ')
+      ),
+    })
+  }
+
+  if (run.patch?.status === 'applied' && run.patch.appliedAt) {
+    events.push({
+      at: run.patch.appliedAt,
+      ...who,
+      kind: 'ai.applied',
+      text: 'applied a copilot change to the code',
+      detail: run.patch.rationale ? clamp(run.patch.rationale) : null,
     })
   }
 
@@ -457,14 +487,14 @@ function commentEvents(thread) {
 
 /** Everything a timeline is built from, cheaply, so a cache can be trusted. */
 export async function timelineSignature(roomId) {
-  const [last, runs, activity, generations, comments] = await Promise.all([
+  const [last, runs, activity, copilot, comments] = await Promise.all([
     DocUpdate.findOne({ roomId }).sort({ seq: -1 }).select({ seq: 1 }).lean(),
     Execution.countDocuments({ roomId, state: { $in: TERMINAL } }),
     Activity.countDocuments({
       roomId,
       kind: { $in: [ACTIVITY.COLLABORATOR_JOINED, ACTIVITY.COMMENT_ADDED] },
     }),
-    Generation.countDocuments({ roomId }),
+    CopilotRun.countDocuments({ roomId }),
     // Replies and resolves change a thread without adding one, so the newest
     // change is what moves the signature, not the count.
     CommentThread.findOne({ roomId }).sort({ updatedAt: -1 }).select({ updatedAt: 1 }).lean(),
@@ -474,7 +504,7 @@ export async function timelineSignature(roomId) {
   const commented = comments?.updatedAt ? new Date(comments.updatedAt).getTime() : 0
   return {
     throughSeq,
-    signature: [throughSeq, runs, activity, generations, commented].join(':'),
+    signature: [throughSeq, runs, activity, copilot, commented].join(':'),
   }
 }
 
@@ -521,7 +551,7 @@ export async function buildSessionTimeline(roomId) {
   const cached = cache.get(roomId)
   if (cached?.signature === signature) return cached.timeline
 
-  const [log, runs, activity, generations, threads] = await Promise.all([
+  const [log, runs, activity, copilot, threads] = await Promise.all([
     walkLog(roomId),
     Execution.find({ roomId, state: { $in: TERMINAL } })
       .select({ state: 1, language: 1, stderr: 1, user: 1, userName: 1, finishedAt: 1, createdAt: 1 })
@@ -532,8 +562,8 @@ export async function buildSessionTimeline(roomId) {
       .sort({ at: 1 })
       .limit(MAX_RUNS)
       .lean(),
-    Generation.find({ roomId })
-      .select({ requestedBy: 1, requestedByName: 1, summary: 1, files: 1, createdAt: 1 })
+    CopilotRun.find({ roomId, status: 'succeeded' })
+      .select({ requestedBy: 1, requestedByName: 1, actionId: 1, answer: 1, files: 1, patch: 1, createdAt: 1 })
       .sort({ createdAt: 1 })
       .limit(50)
       .lean(),
@@ -548,7 +578,7 @@ export async function buildSessionTimeline(roomId) {
     ...log.events,
     ...runs.map(runEvent),
     ...activity.map(activityEvent),
-    ...generations.flatMap(generationEvents),
+    ...copilot.flatMap(copilotEvents),
     ...threads.flatMap(commentEvents),
   ]
     .filter((event) => event.at)

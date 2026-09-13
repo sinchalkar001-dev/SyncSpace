@@ -313,11 +313,11 @@ const schema = z
     SANDBOX_CANCEL_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
 
     /**
-     * Turning a whiteboard into code calls a model, which costs money per
-     * request and is the only thing here that reaches outside this machine.
-     * With no key the feature reports itself unavailable and explains why,
-     * exactly as a missing compiler does on /runners — the UI never offers a
-     * button that cannot work.
+     * The copilot and the session summaries call a model, which costs money
+     * per request and is the only thing here that reaches outside this
+     * machine. With no key they report themselves unavailable and explain
+     * why, exactly as a missing compiler does on /runners — the interface
+     * never offers a button that cannot work.
      */
     AI_ENABLED: booleanish.default('true'),
 

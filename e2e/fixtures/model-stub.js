@@ -4,17 +4,16 @@ import http from 'node:http'
  * A stand-in for the Anthropic Messages API, for the end-to-end suite.
  *
  * The point is not to pretend to be a model. It is to exercise everything on
- * *our* side of the request — the architecture read off the board, the prompt
- * built from it, the tool-use answer parsed back, the paths refused, the
- * create-versus-modify decision, the review screen and the apply — against a
- * real browser and a real server, deterministically and for free.
+ * *our* side of the request — the prompt built from the room, the tool-use
+ * answer parsed back, the paths refused, the create-versus-modify decision,
+ * the review screen and the apply — against a real browser and a real server,
+ * deterministically and for free.
  *
- * So the answer is derived from the request rather than canned: the files it
- * proposes are named after the components it was actually sent, and a copilot
- * answer is shaped from the tool schema it was handed. A test that sees
- * `client.js` come back has proved the graph travelled the whole way, and one
- * that sees a `findings` list has proved the block registry built a schema and
- * the sanitiser read it back — neither of which a fixed reply could show.
+ * So the answer is derived from the request rather than canned: it is shaped
+ * from the tool schema it was handed, so the blocks that come back are exactly
+ * the ones the action declared it produces. A test that sees a `findings` list
+ * has proved the block registry built a schema, the model was asked with it,
+ * and the sanitiser read it back — none of which a fixed reply could show.
  *
  * It deliberately also returns one path the server must refuse, so the
  * "nothing dangerous gets through" guarantee is exercised end to end rather
@@ -22,51 +21,6 @@ import http from 'node:http'
  */
 
 const PORT = Number(process.env.MODEL_STUB_PORT ?? 4100)
-
-/** Pulls the component keys out of the prompt the server built. */
-function componentsIn(prompt) {
-  const section = prompt.split('COMPONENTS')[1]?.split('CONNECTIONS')[0] ?? ''
-  return [...section.matchAll(/^\s+- ([a-z0-9-]+) \[/gm)].map((match) => match[1])
-}
-
-function proposalFor(prompt) {
-  const components = componentsIn(prompt)
-  const connections = (prompt.match(/->/g) ?? []).length
-
-  const files = components.map((key) => ({
-    path: 'src/' + key + '.js',
-    action: 'create',
-    language: 'javascript',
-    contents:
-      '// Generated for the "' + key + '" component.\n' +
-      'export function ' + key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + '() {\n' +
-      '  throw new Error("not implemented")\n' +
-      '}\n',
-    rationale: 'Stands for the ' + key + ' box on the whiteboard.',
-  }))
-
-  // One the server has to refuse. If it ever appears in the change set, the
-  // path check has stopped working.
-  files.push({
-    path: '../escaped.js',
-    action: 'create',
-    contents: 'module.exports = "this must never be offered"\n',
-  })
-
-  return {
-    summary:
-      'A ' + components.length + '-component system with ' + connections + ' directed connections.',
-    plan: [
-      { step: 'Model the data', detail: 'Start from the store at the end of the diagram.' },
-      { step: 'Wire the components', detail: 'One module per box, joined as the arrows show.' },
-    ],
-    assumptions: ['Node with ES modules, because the diagram does not say otherwise.'],
-    questions: components.length > 0 ? ['Which database should the store use?'] : [],
-    files,
-  }
-}
-
-/* ---------- the copilot ---------- */
 
 /**
  * The room's code buffer, recovered from the prompt.
@@ -182,11 +136,8 @@ function copilotAnswer(tool, prompt) {
 
 /* ---------- delivery ---------- */
 
-const isCopilot = (tool) => String(tool?.name ?? '').startsWith('answer_')
-
 function answerFor(parsed, prompt) {
-  const tool = parsed?.tools?.[0]
-  return isCopilot(tool) ? copilotAnswer(tool, prompt) : proposalFor(prompt)
+  return copilotAnswer(parsed?.tools?.[0], prompt)
 }
 
 /**
@@ -274,7 +225,7 @@ const server = http.createServer((req, res) => {
           {
             type: 'tool_use',
             id: 'toolu_stub',
-            name: parsed?.tools?.[0]?.name ?? 'propose_implementation',
+            name: parsed?.tools?.[0]?.name ?? 'answer',
             input: answerFor(parsed, prompt),
           },
         ],

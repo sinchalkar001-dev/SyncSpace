@@ -1,0 +1,221 @@
+/**
+ * A change set: whole files proposed for review, one row each.
+ *
+ * Its own layer rather than more of components.css because it is one dense,
+ * self-contained surface — a list of files with a decision attached to each —
+ * and keeping it together makes the whole thing reviewable in one place.
+ *
+ * Written for "generate from whiteboard", which is gone. The copilot proposes
+ * files the same way and reviews them the same way, so the rules outlived the
+ * feature that introduced them; the file is named after what they style rather
+ * than after who first used them.
+ */
+
+/* Accepting, or not ------------------------------------------------------- */
+
+.changeset__apply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+.changeset__apply p {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* The list, and its controls ---------------------------------------------- */
+
+.changeset__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.changeset__toolbar h5 {
+  margin: 0;
+}
+
+.changeset__bulk {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.changeset__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changeset__file {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+/*
+ * What a file does is carried by the left edge as well as by the badge. The
+ * distinction between creating and replacing is the one that matters most
+ * here, and colour alone would be the only signal for anyone who cannot
+ * separate these three hues.
+ */
+.changeset__file.is-create {
+  border-left: 3px solid var(--ok);
+}
+
+.changeset__file.is-modify {
+  border-left: 3px solid var(--warn);
+}
+
+.changeset__file.is-delete {
+  border-left: 3px solid var(--danger);
+}
+
+.changeset__file.is-decided {
+  opacity: 0.7;
+}
+
+.changeset__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.changeset__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.changeset__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+}
+
+.changeset__action--create {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.changeset__action--modify {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.changeset__action--delete {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.changeset__path {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.changeset__meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+}
+
+.changeset__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-faint);
+}
+
+.changeset__status.is-applied {
+  color: var(--ok);
+}
+
+.changeset__why {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+}
+
+.changeset__error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.changeset__body {
+  margin-top: var(--space-3);
+}
+
+.changeset__side {
+  margin: var(--space-2) 0 4px;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-faint);
+}
+
+.changeset__code {
+  max-height: 320px;
+  margin: 0;
+  padding: var(--space-3);
+  /* Code is wide. It scrolls in its own box rather than widening the dialog
+     and putting the whole page into a horizontal scroll. */
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--glass-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  white-space: pre;
+}
+
+.changeset__code--old {
+  max-height: 200px;
+  border-left: 2px solid var(--danger);
+  opacity: 0.75;
+}
+
+
+.changeset__buttons {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .changeset__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .generate__go,
+  .changeset__apply {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

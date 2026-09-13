@@ -331,22 +331,23 @@ export const openapiDocument = {
     '/api/v1/ai': {
       get: {
         tags: ['AI'],
-        summary: 'Whether this server can generate code from a whiteboard',
+        summary: 'Whether this server can reach a model',
         description:
           'A sibling of `/runners`: reachability of a model is a property of the deployment, not ' +
           'of a room. `enabled` is false with a readable `reason` when no key is configured or the ' +
-          'feature is switched off. Never reports the key itself.',
+          'feature is switched off. Never reports the key itself. What the copilot can do in a ' +
+          'particular room, for a particular caller, is `/rooms/{roomId}/copilot`.',
         security: [],
         responses: {
           200: {
-            description: 'Generation availability and the targets that can be asked for',
+            description: 'Model availability',
             content: {
               'application/json': {
                 example: {
                   enabled: true,
+                  provider: 'anthropic',
                   model: 'claude-sonnet-5',
                   reason: null,
-                  targets: [{ key: 'backend', description: 'Server-side services and business logic' }],
                 },
               },
             },
@@ -1545,170 +1546,6 @@ export const openapiDocument = {
       },
     },
 
-    '/api/v1/rooms/{roomId}/architecture': {
-      get: {
-        tags: ['AI'],
-        summary: 'The system design read off the whiteboard',
-        description:
-          'The whiteboard stores drawings, not diagrams: an arrow is four numbers and a label is ' +
-          'an unrelated text shape sitting on a box. This recovers the graph geometrically — ' +
-          'components, connections, notes — and reports in `warnings` what the diagram could not ' +
-          'express. No model is involved. Read it before generating: the answer to a misread ' +
-          'diagram is fixing the diagram.',
-        parameters: [{ $ref: '#/components/parameters/roomId' }],
-        security: [{ bearerAuth: [] }],
-        responses: {
-          200: {
-            description: 'The architecture graph',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: { architecture: { $ref: '#/components/schemas/Architecture' } },
-                },
-              },
-            },
-          },
-          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
-        },
-      },
-    },
-
-    '/api/v1/rooms/{roomId}/generate': {
-      post: {
-        tags: ['AI'],
-        summary: 'Turn the whiteboard into a proposed change set',
-        description:
-          'Reads the architecture from the server\'s own copy of the document, asks a model for an ' +
-          'implementation, and records the result. Nothing is written to the room: the answer is a ' +
-          'proposal to be reviewed and applied. `create` and `modify` are decided here by comparing ' +
-          'each path against the room\'s existing files, not taken from the model, so an answer ' +
-          'cannot claim a path is free when it is not. Broadcast to the room as `ai:generation`.',
-        parameters: [{ $ref: '#/components/parameters/roomId' }],
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateInput' } } },
-        },
-        responses: {
-          201: {
-            description: 'A change set, proposed and unapplied',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: { generation: { $ref: '#/components/schemas/Generation' } },
-                },
-              },
-            },
-          },
-          ...validationError(),
-          ...authRequired(),
-          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
-          ...rateLimited('Too many generations from this address, try again later'),
-          ...error(502, 'The model failed, timed out, or answered in the wrong shape', 'ai_failed', 'The model did not answer in the expected shape.'),
-          ...error(503, 'No model is configured on this server', 'ai_disabled', 'No ANTHROPIC_API_KEY is configured, so this server cannot reach a model.'),
-        },
-      },
-    },
-
-    '/api/v1/rooms/{roomId}/generations': {
-      get: {
-        tags: ['AI'],
-        summary: "The room's AI history",
-        description: 'Summaries, newest first. Failures are recorded too. `limit` caps at 50.',
-        parameters: [{ $ref: '#/components/parameters/roomId' }],
-        responses: {
-          200: {
-            description: 'Past generations',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    generations: {
-                      type: 'array',
-                      items: { $ref: '#/components/schemas/GenerationSummary' },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          ...authRequired(),
-          ...error(403, 'Not a member of a private room', 'room_forbidden', 'You do not have access to this room'),
-        },
-      },
-    },
-
-    '/api/v1/rooms/{roomId}/generations/{generationId}': {
-      get: {
-        tags: ['AI'],
-        summary: 'One change set in full',
-        description: 'Includes every proposed file and its contents, for review.',
-        parameters: [
-          { $ref: '#/components/parameters/roomId' },
-          { $ref: '#/components/parameters/generationId' },
-        ],
-        responses: {
-          200: {
-            description: 'The change set',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: { generation: { $ref: '#/components/schemas/Generation' } },
-                },
-              },
-            },
-          },
-          ...authRequired(),
-          ...error(404, 'No such generation in this room', 'generation_not_found', 'No such generation in this room'),
-        },
-      },
-    },
-
-    '/api/v1/rooms/{roomId}/generations/{generationId}/apply': {
-      post: {
-        tags: ['AI'],
-        summary: 'Accept part of a change set',
-        description:
-          'Writes the accepted files into the room\'s files and records everything else as ' +
-          'rejected, so the change set always says what was decided rather than leaving it open. ' +
-          'Partial by construction — `accept` names what is wanted and an empty array means none ' +
-          'of it. A file that cannot be applied stays proposed with an error against it rather ' +
-          'than failing the rest. Broadcast as `ai:applied`.',
-        parameters: [
-          { $ref: '#/components/parameters/roomId' },
-          { $ref: '#/components/parameters/generationId' },
-        ],
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/ApplyInput' } } },
-        },
-        responses: {
-          200: {
-            description: 'What was applied, rejected and failed',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    generation: { $ref: '#/components/schemas/Generation' },
-                    applied: { type: 'integer' },
-                    rejected: { type: 'integer' },
-                    failed: { type: 'integer' },
-                  },
-                },
-              },
-            },
-          },
-          ...validationError(),
-          ...authRequired(),
-          ...error(404, 'No such generation in this room', 'generation_not_found', 'No such generation in this room'),
-        },
-      },
-    },
-
     '/api/v1/rooms/{roomId}/run': {
       parameters: [{ $ref: '#/components/parameters/roomId' }],
       post: {
@@ -2226,85 +2063,6 @@ export const openapiDocument = {
         },
       },
 
-      Architecture: {
-        type: 'object',
-        required: ['nodes', 'edges', 'notes', 'warnings'],
-        properties: {
-          nodes: { type: 'array', items: { $ref: '#/components/schemas/ArchitectureNode' } },
-          edges: { type: 'array', items: { $ref: '#/components/schemas/ArchitectureEdge' } },
-          notes: {
-            type: 'array',
-            description: 'Text on the board that belongs to no shape and no connector',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                text: { type: 'string' },
-                author: { type: ['string', 'null'] },
-              },
-            },
-          },
-          warnings: {
-            type: 'array',
-            description:
-              'What the diagram could not express: an arrow reaching nothing, a box nobody labelled, two boxes with one name. Shown to the user and repeated to the model, so a gap is reported rather than invented.',
-            items: {
-              type: 'object',
-              properties: {
-                code: {
-                  type: 'string',
-                  enum: [
-                    'dangling_connector',
-                    'self_connector',
-                    'unlabelled_node',
-                    'isolated_node',
-                    'duplicate_label',
-                    'no_components',
-                  ],
-                },
-                message: { type: 'string' },
-                shapeId: { type: ['string', 'null'] },
-              },
-            },
-          },
-          source: {
-            type: 'string',
-            enum: ['live', 'snapshot', 'log'],
-            description: 'Where the shapes were read from. `live` is the in-memory document.',
-          },
-          stats: { type: 'object' },
-        },
-      },
-
-      GenerateInput: {
-        type: 'object',
-        required: ['targets'],
-        properties: {
-          targets: {
-            type: 'array',
-            minItems: 1,
-            items: { type: 'string', enum: ['backend', 'api', 'database', 'frontend'] },
-          },
-          intent: {
-            type: 'string',
-            maxLength: 2000,
-            description: 'Anything the diagram cannot say — stack, conventions, constraints.',
-          },
-        },
-      },
-
-      ApplyInput: {
-        type: 'object',
-        required: ['accept'],
-        properties: {
-          accept: {
-            type: 'array',
-            description: 'Ids of the files being accepted. Everything else is recorded as rejected.',
-            items: { type: 'string', pattern: '^[0-9a-f]{24}$' },
-          },
-        },
-      },
-
       ProposedFile: {
         type: 'object',
         required: ['id', 'path', 'action', 'status'],
@@ -2329,65 +2087,6 @@ export const openapiDocument = {
             description: 'Current contents of the file being modified, so the change can be read. Only on the generate response.',
           },
         },
-      },
-
-      GenerationSummary: {
-        type: 'object',
-        required: ['id', 'status', 'createdAt'],
-        properties: {
-          id: { type: 'string' },
-          roomId: { type: 'string' },
-          status: { type: 'string', enum: ['succeeded', 'failed'] },
-          requestedBy: { type: ['string', 'null'] },
-          requestedByName: { type: ['string', 'null'] },
-          targets: { type: 'array', items: { type: 'string' } },
-          summary: { type: ['string', 'null'] },
-          counts: { type: 'object' },
-          nodes: { type: 'integer' },
-          edges: { type: 'integer' },
-          questions: { type: 'integer' },
-          model: { type: ['string', 'null'] },
-          durationMs: { type: ['integer', 'null'] },
-          error: { type: ['string', 'null'] },
-          createdAt: { type: 'string', format: 'date-time' },
-        },
-      },
-
-      Generation: {
-        allOf: [
-          { $ref: '#/components/schemas/GenerationSummary' },
-          {
-            type: 'object',
-            properties: {
-              intent: { type: ['string', 'null'] },
-              architecture: { $ref: '#/components/schemas/Architecture' },
-              plan: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: { step: { type: 'string' }, detail: { type: ['string', 'null'] } },
-                },
-              },
-              assumptions: {
-                type: 'array',
-                description: 'Decisions the model made that the diagram did not specify.',
-                items: { type: 'string' },
-              },
-              questions: {
-                type: 'array',
-                description: 'What the diagram is missing that a person needs to answer.',
-                items: { type: 'string' },
-              },
-              rejected: {
-                type: 'array',
-                description: 'What the server refused or corrected in the answer, and why.',
-                items: { type: 'string' },
-              },
-              usage: { type: 'object' },
-              files: { type: 'array', items: { $ref: '#/components/schemas/ProposedFile' } },
-            },
-          },
-        ],
       },
 
       Session: {
@@ -3027,7 +2726,7 @@ export const openapiDocument = {
           '- `viewer` — read the room and its history, nothing else',
           '- `commenter` — a viewer who may also send chat messages',
           '- `runner` — a commenter who may also run code, without being able to change it',
-          '- `editor` — draw, edit code, upload and delete files, run code, generate from the whiteboard',
+          '- `editor` — draw, edit code, upload and delete files, run code, use the copilot',
           '- `admin` — an editor who may also change room settings, invite and remove people, and assign roles below their own',
           '- `owner` — everything, including deleting the room, transferring it, and appointing admins',
         ].join('\n'),

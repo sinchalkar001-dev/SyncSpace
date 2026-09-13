@@ -1,36 +1,25 @@
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { unavailable, upstream } from '../errors.js'
-import { architectureToPrompt } from './architecture.service.js'
 import { providerNamed, resolveProvider } from './ai.providers.js'
 import { createEventStreamParser, partialString } from '../utils/partial-json.js'
 
 /**
- * Turning an architecture graph into a proposed implementation.
+ * Talking to a model, and not believing what comes back.
  *
- * Two things are deliberate here.
+ * Everything here is shared by the features that ask a model something — the
+ * copilot and the session summaries. Two things are deliberate.
  *
- * The model never sees the whiteboard. It sees the graph that
- * architecture.service.js recovered from it — components, connections, and an
- * explicit list of what the diagram failed to say. A screenshot would make
- * this a vision problem with no way to tell "there is no arrow here" from "I
- * did not notice the arrow", and no way for the user to correct the reading
- * before spending a request on it.
+ * Every answer is a forced tool call rather than prose asked politely for
+ * JSON. A model that wraps its answer in a code fence once a day is a failed
+ * request somebody paid for, and `ai.providers.js` makes both vendors answer
+ * the same structured way so nothing downstream has to know which one replied.
  *
- * And nothing it returns is trusted. Everything below `askForImplementation`
- * exists to make sure a confident answer cannot write outside the room, blow
- * up the database, or claim to modify a file it was never shown.
+ * And nothing an answer contains is trusted. `sanitiseFiles` is the sharpest
+ * edge of that: a list of paths and contents produced by something that has
+ * never seen this codebase is a list of instructions, and it is displayed,
+ * stored, compared against real filenames and eventually written.
  */
-
-/** What can be asked for. Each is a section of the prompt, not a mode. */
-export const TARGETS = {
-  backend: 'Server-side services and business logic',
-  api: 'HTTP route handlers, request validation and error handling',
-  database: 'Data models, schemas, indexes and migrations',
-  frontend: 'Client scaffolding: pages, components and data fetching',
-}
-
-export const TARGET_KEYS = Object.keys(TARGETS)
 
 /** Caps on what will be accepted back, whatever the model produces. */
 const MAX_FILES = 40
@@ -41,9 +30,9 @@ const MAX_LIST_ITEMS = 30
 const MAX_TEXT = 2_000
 
 /**
- * Whether this deployment can generate at all, and why not when it cannot.
+ * Whether this deployment can reach a model at all, and why not when it cannot.
  *
- * Shaped like `/runners`: the UI asks first and explains, rather than
+ * Shaped like `/runners`: the interface asks first and explains, rather than
  * offering a button that fails. A missing key is a deployment choice, not an
  * error, so it is reported the same way a missing compiler is.
  */
@@ -53,7 +42,7 @@ export function aiStatus() {
       enabled: false,
       model: null,
       provider: null,
-      reason: 'Code generation is switched off on this server.',
+      reason: 'AI features are switched off on this server.',
     }
   }
 
@@ -90,106 +79,6 @@ export function aiStatus() {
     model: env.AI_MODEL ?? vendor.defaultModel,
     reason: null,
   }
-}
-
-const SYSTEM_PROMPT = [
-  'You are a staff engineer turning a hand-drawn architecture diagram into a first implementation.',
-  '',
-  'You are given a graph that was recovered from a collaborative whiteboard: the components',
-  'someone drew, the connections between them, any notes, and — importantly — a list of things',
-  'the diagram could not express. You are NOT given the existing codebase.',
-  '',
-  'Rules:',
-  '- Propose whole files. Someone will review each one before anything is written.',
-  '- Use relative paths only. Never an absolute path, a parent reference, or a path outside the',
-  '  project.',
-  '- Only propose deleting a file if the diagram makes it genuinely redundant, and say why.',
-  '- Where the diagram is silent, choose a sensible default and RECORD IT as an assumption.',
-  '  Do not present a guess as though the diagram said it.',
-  '- Where a choice would materially change the design and you cannot make it safely, ask a',
-  '  question instead of guessing. Missing information is a real answer.',
-  '- Prefer a small, coherent, runnable skeleton over breadth. Working stubs beat forty empty files.',
-  '- Write code that would pass review: real error handling, no placeholder secrets, no TODO that',
-  '  hides a decision you should have surfaced as a question.',
-].join('\n')
-
-/**
- * The JSON shape the answer must take.
- *
- * Sent as a tool definition and forced with `tool_choice`, rather than asking
- * for JSON in prose and parsing whatever comes back. A model asked politely
- * for JSON will occasionally wrap it in commentary or a code fence, and every
- * one of those is a failed generation the user paid for.
- */
-const PROPOSAL_TOOL = {
-  name: 'propose_implementation',
-  description: 'Return the implementation plan and the files that make it up.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      summary: {
-        type: 'string',
-        description: 'One paragraph: what this system is and what is being built.',
-      },
-      plan: {
-        type: 'array',
-        description: 'Ordered steps a person would follow to build this.',
-        items: {
-          type: 'object',
-          properties: {
-            step: { type: 'string' },
-            detail: { type: 'string' },
-          },
-          required: ['step'],
-        },
-      },
-      files: {
-        type: 'array',
-        description: 'The proposed change set.',
-        items: {
-          type: 'object',
-          properties: {
-            path: { type: 'string', description: 'Relative path, e.g. src/services/auth.js' },
-            action: { type: 'string', enum: ['create', 'modify', 'delete'] },
-            language: { type: 'string' },
-            contents: { type: 'string', description: 'The whole file. Omit for a delete.' },
-            rationale: { type: 'string', description: 'Why this file exists, in one sentence.' },
-          },
-          required: ['path', 'action'],
-        },
-      },
-      assumptions: {
-        type: 'array',
-        description: 'Decisions you made that the diagram did not specify.',
-        items: { type: 'string' },
-      },
-      questions: {
-        type: 'array',
-        description: 'What is missing from the diagram that a person needs to answer.',
-        items: { type: 'string' },
-      },
-    },
-    required: ['summary', 'plan', 'files', 'assumptions', 'questions'],
-  },
-}
-
-function buildUserPrompt({ architecture, targets, intent }) {
-  const wanted = targets.map((key) => '- ' + key + ': ' + TARGETS[key]).join('\n')
-
-  return [
-    'Here is the architecture recovered from the whiteboard.',
-    '',
-    architectureToPrompt(architecture),
-    '',
-    'GENERATE',
-    wanted,
-    '',
-    intent ? 'ADDITIONAL INSTRUCTIONS FROM THE PERSON WHO DREW IT\n' + intent : '',
-    '',
-    'Return your answer with the propose_implementation tool.',
-  ]
-    .filter(Boolean)
-    .join('\n')
 }
 
 export const clampText = (value, limit = MAX_TEXT) =>
@@ -232,10 +121,10 @@ export function isSafePath(path) {
 /**
  * Keeps the proposed files that are usable, and says why the rest went.
  *
- * Split out from `sanitiseProposal` so the copilot's change sets go through
- * exactly these checks rather than a second copy of them. A file list produced
- * by a model is a list of paths and contents about to be written somewhere —
- * there should be one place that decides what is allowed, not one per feature.
+ * A file list produced by a model is a list of paths and contents about to be
+ * written somewhere, which is to say a list of instructions. There is one
+ * place that decides what is allowed, and this is it — a second copy for the
+ * next feature is how one of them ends up with the weaker rules.
  *
  * Refusals are collected rather than thrown: one bad path out of thirty files
  * should cost that file and a line explaining it, not the whole answer the
@@ -300,46 +189,6 @@ export function sanitiseFiles(raw) {
 
   return { files, rejected }
 }
-
-/**
- * Takes what the model returned and keeps only what is usable.
- */
-export function sanitiseProposal(raw) {
-  const { files, rejected } = sanitiseFiles(raw?.files)
-
-  const plan = (Array.isArray(raw?.plan) ? raw.plan : [])
-    .map((item) => ({
-      step: clampText(item?.step, 200),
-      detail: clampText(item?.detail, 800) || null,
-    }))
-    .filter((item) => item.step)
-    .slice(0, MAX_LIST_ITEMS)
-
-  return {
-    summary: clampText(raw?.summary, 4000),
-    plan,
-    files,
-    assumptions: clampList(raw?.assumptions),
-    questions: clampList(raw?.questions),
-    rejected,
-  }
-}
-
-/**
- * One forced tool call to whichever model this deployment is configured for.
- *
- * Shared by everything here that asks a model a question - the change set drawn
- * from a diagram, and the summaries of a session's history - so the timeout,
- * the wording of every failure, and the rule that nothing of a provider's error
- * reaches the client all live in one place rather than drifting between copies.
- *
- * The timeout is enforced here rather than left to the platform: a request
- * that never settles is worse than one that fails, because somebody is left
- * watching a spinner with nothing to press.
- *
- * `hints` is what to suggest when the answer times out or is cut short, because
- * "try a smaller diagram" is advice that only makes sense for one feature.
- */
 
 /**
  * The one place a model request is prepared, so the streaming path and the
@@ -576,26 +425,5 @@ export async function streamModelTool({
     provider: vendor.name,
     usage,
     streamed: true,
-  }
-}
-
-/** Calls the model and returns a sanitised proposal. */
-export async function askForImplementation({ architecture, targets, intent, model }) {
-  const answer = await callModelTool({
-    system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt({ architecture, targets, intent }),
-    tool: PROPOSAL_TOOL,
-    model,
-    hints: {
-      timeout: 'The model did not answer in time. Try a smaller diagram.',
-      cutoff: 'The answer was cut off before it was complete. Try fewer targets at once.',
-    },
-  })
-
-  return {
-    proposal: sanitiseProposal(answer.input),
-    model: answer.model,
-    provider: answer.provider,
-    usage: answer.usage,
   }
 }

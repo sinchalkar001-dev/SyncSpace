@@ -16,8 +16,6 @@ import { SplitPane } from '../components/SplitPane.jsx'
 import { PresenceMenu } from '../components/PresenceMenu.jsx'
 import { ChatPanel } from '../components/ChatPanel.jsx'
 import { FilesPanel } from '../components/FilesPanel.jsx'
-import { GeneratePanel } from '../components/Generate/GeneratePanel.jsx'
-import { useGeneration } from '../hooks/useGeneration.js'
 import { useRoomChat } from '../hooks/useRoomChat.js'
 import { ConnectionStatus } from '../components/ConnectionStatus.jsx'
 import { Segmented } from '../components/ui/Segmented.jsx'
@@ -92,7 +90,6 @@ export default function Room() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [replayOpen, setReplayOpen] = useState(false)
-  const [generateOpen, setGenerateOpen] = useState(false)
   const copyTimer = useRef(null)
 
   const { session, status, synced, authError } = useCollabSession(roomId, identity, token)
@@ -200,13 +197,6 @@ export default function Room() {
   )
 
   /**
-   * Only asked for once the panel is opened. Reading the board is a request
-   * and checking availability is another, and a room nobody generates in
-   * should not pay for either.
-   */
-  const generationState = useGeneration(roomId, { enabled: generateOpen && isAuthenticated })
-
-  /**
    * The copilot: one panel, every AI action, driven by what is on screen.
    *
    * It is only asked what it can do once the panel opens — the catalogue is a
@@ -234,45 +224,6 @@ export default function Room() {
   useEffect(
     () => presence.navigator.on('surface', (surface) => setFocusedSurface(surface)),
     [presence.navigator]
-  )
-
-  /**
-   * Somebody else in the room generated or applied something.
-   *
-   * The diagram was drawn together, so what it produced belongs to everyone
-   * looking at it — and an applied change set has just changed the room's
-   * files under everybody. Announced rather than opened: interrupting someone
-   * mid-drawing with a dialog they did not ask for would be worse than not
-   * telling them.
-   */
-  const onRemoteGeneration = useCallback(
-    (payload) => {
-      if (payload?.generation?.requestedByName === user?.name) return
-      toast.info(
-        (payload?.generation?.requestedByName ?? 'Someone') +
-          ' generated code from this whiteboard'
-      )
-      generationState.noteRemote()
-    },
-    // The refresh callback, not the whole state: that object is rebuilt every
-    // render, and depending on it would rebuild this handler every render too.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [toast, user?.name, generationState.noteRemote]
-  )
-
-  const onRemoteApplied = useCallback(
-    (payload) => {
-      if (!payload?.applied) return
-      if (payload?.by?.id === user?.id) return
-      toast.info(
-        (payload?.by?.name ?? 'Someone') +
-          ' added ' +
-          payload.applied +
-          (payload.applied === 1 ? ' generated file' : ' generated files') +
-          ' to this room'
-      )
-    },
-    [toast, user?.id]
   )
 
   /**
@@ -445,8 +396,6 @@ export default function Room() {
       'room:kicked': onKicked,
       'room:chat': chat.receive,
       'session:ended': onSessionEnded,
-      'ai:generation': onRemoteGeneration,
-      'ai:applied': onRemoteApplied,
       // That somebody asked, not what they were told.
       'copilot:run': onRemoteCopilot,
       'copilot:applied': onRemoteCopilotApplied,
@@ -459,8 +408,6 @@ export default function Room() {
       onKicked,
       chat.receive,
       onSessionEnded,
-      onRemoteGeneration,
-      onRemoteApplied,
       onRemoteCopilot,
       onRemoteCopilotApplied,
       comments.receive,
@@ -864,23 +811,6 @@ export default function Room() {
             focusedSurface={focusedSurface}
             buffer={session?.code}
           />
-          {/* Turning the board into code. Generating needs an account — it
-              spends a real request and is recorded against whoever asked —
-              so a guest is told that rather than shown a button that fails. */}
-          <button
-            type="button"
-            className="presence-menu__trigger"
-            aria-label="Generate from whiteboard"
-            title={
-              isAuthenticated
-                ? 'Generate code from the whiteboard'
-                : 'Sign in to generate code from the whiteboard'
-            }
-            onClick={() => setGenerateOpen(true)}
-            disabled={!isAuthenticated}
-          >
-            <Icon name="zap" size={16} />
-          </button>
           {/* Replay reads the update log, which is optionalAuth like the room
               itself — whoever can open the room can watch how it was built. */}
           <button
@@ -975,12 +905,6 @@ export default function Room() {
           }
         />
       )}
-
-      <GeneratePanel
-        open={generateOpen}
-        onClose={() => setGenerateOpen(false)}
-        generation={generationState}
-      />
     </div>
   )
 }

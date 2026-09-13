@@ -83,14 +83,15 @@ export function createRateLimiters() {
     }),
 
     /**
-     * Each generation is a paid call to a model and the slowest request this
-     * server serves. Capped well below everything else, because the cost of
-     * abuse here is a bill rather than load.
+     * Session summaries: a paid call to a model, and among the slowest
+     * requests this server serves. Capped well below everything else, because
+     * the cost of abuse here is a bill rather than load. The copilot has its
+     * own budget below — the two are reached for at very different rates.
      */
-    generateLimiter: build({
+    aiLimiter: build({
       windowMs: env.RATE_LIMIT_WINDOW_MS,
       max: env.AI_RATE_LIMIT_MAX,
-      message: 'Too many generations from this address, try again later',
+      message: 'Too many AI requests from this address, try again later',
     }),
 
     /**

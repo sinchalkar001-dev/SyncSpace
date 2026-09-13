@@ -83,10 +83,10 @@ export const CAPABILITIES = Object.freeze({
    * Asking the copilot anything at all.
    *
    * Separate from `ai:generate` because they are different questions: that one
-   * is "may you turn the board into code", this one is "may you spend a model
-   * request reading this room". They happen to be granted to the same roles
-   * today, and keeping them apart is what lets a deployment give a reviewer
-   * the copilot without giving them the change sets.
+   * is "may you have the session summarised", this one is "may you spend a
+   * model request reading this room and asking about it". They happen to be
+   * granted to the same roles today, and keeping them apart is what lets a
+   * deployment give a reviewer one without the other.
    */
   COPILOT_USE: 'copilot:use',
   REPLAY_VIEW: 'replay:view',
@@ -312,7 +312,7 @@ export const CAPABILITY_LABELS = Object.freeze({
   [C.FILES_DELETE]: 'delete files',
   [C.CHAT_SEND]: 'send messages',
   [C.CODE_EXECUTE]: 'run code',
-  [C.AI_GENERATE]: 'generate code from the whiteboard',
+  [C.AI_GENERATE]: 'use AI summaries of this room',
   [C.COPILOT_USE]: 'use the copilot in this room',
   [C.REPLAY_VIEW]: 'watch this room’s history',
   [C.COMMENT_WRITE]: 'comment on this room',

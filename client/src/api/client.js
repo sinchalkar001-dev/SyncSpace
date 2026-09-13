@@ -386,55 +386,13 @@ export const api = {
       { method: 'DELETE' }
     ),
 
-  /** Whether this server can generate code, and what it can be asked for. */
-  ai: (signal) => apiFetch('/ai', { signal, retry: 2 }),
-
   /**
-   * The system design the server reads on the whiteboard. No model involved,
-   * so it is cheap enough to fetch whenever the panel opens.
-   */
-  architecture: (roomId, signal) =>
-    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/architecture', { signal, retry: 2 }),
-
-  /**
-   * Turns the diagram into a proposed change set.
+   * Whether this server can reach a model at all, and why not if it cannot.
    *
-   * Never retried, and slow enough to want its own signal: each call is a paid
-   * request to a model, so repeating one that may well have worked would cost
-   * twice and record two change sets for one press of the button.
+   * Deployment-wide, so it is asked before offering anything that costs a
+   * model call. The copilot has a per-room catalogue of its own.
    */
-  generate: (roomId, body, signal) =>
-    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/generate', {
-      method: 'POST',
-      body,
-      signal,
-    }),
-
-  /** The room's AI history, newest first. */
-  generations: (roomId, signal) =>
-    apiFetch('/rooms/' + encodeURIComponent(roomId) + '/generations', { signal, retry: 2 }),
-
-  /** One change set in full, including every proposed file. */
-  generation: (roomId, generationId, signal) =>
-    apiFetch(
-      '/rooms/' + encodeURIComponent(roomId) + '/generations/' + encodeURIComponent(generationId),
-      { signal, retry: 2 }
-    ),
-
-  /**
-   * Accepts part of a change set. `accept` is the ids being taken; everything
-   * else in the set is recorded as rejected, so an empty array is a real
-   * answer rather than a no-op.
-   */
-  applyGeneration: (roomId, generationId, accept) =>
-    apiFetch(
-      '/rooms/' +
-        encodeURIComponent(roomId) +
-        '/generations/' +
-        encodeURIComponent(generationId) +
-        '/apply',
-      { method: 'POST', body: { accept } }
-    ),
+  ai: (signal) => apiFetch('/ai', { signal, retry: 2 }),
 
   /** Runs a program and resolves with its output; a crash is a result, not a throw. */
   run: (roomId, body, signal) =>

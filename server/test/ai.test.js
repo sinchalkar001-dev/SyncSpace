@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   aiStatus,
-  askForImplementation,
+  callModelTool,
   isSafePath,
-  sanitiseProposal,
-  TARGET_KEYS,
+  sanitiseFiles,
 } from '../src/services/ai.service.js'
 import { providerNamed, toGeminiSchema } from '../src/services/ai.providers.js'
 import { env } from '../src/config/env.js'
@@ -79,7 +78,7 @@ describe('isSafePath', () => {
   })
 })
 
-describe('sanitiseProposal', () => {
+describe('sanitiseFiles', () => {
   const file = (extra = {}) => ({
     path: 'src/index.js',
     action: 'create',
@@ -88,7 +87,7 @@ describe('sanitiseProposal', () => {
   })
 
   it('keeps a well-formed file', () => {
-    const result = sanitiseProposal({ files: [file()] })
+    const result = sanitiseFiles([file()])
 
     expect(result.files).toHaveLength(1)
     expect(result.files[0]).toMatchObject({ path: 'src/index.js', action: 'create' })
@@ -98,12 +97,10 @@ describe('sanitiseProposal', () => {
 
   /**
    * One bad entry costs that entry and a line saying so — not the whole
-   * generation, which the person has already waited a minute for.
+   * answer, which the person has already waited for.
    */
   it('drops a dangerous path and keeps the rest', () => {
-    const result = sanitiseProposal({
-      files: [file({ path: '../../etc/passwd' }), file({ path: 'src/ok.js' })],
-    })
+    const result = sanitiseFiles([file({ path: '../../etc/passwd' }), file({ path: 'src/ok.js' })])
 
     expect(result.files.map((f) => f.path)).toEqual(['src/ok.js'])
     expect(result.rejected).toHaveLength(1)
@@ -111,16 +108,14 @@ describe('sanitiseProposal', () => {
   })
 
   it('drops an unknown action', () => {
-    const result = sanitiseProposal({ files: [file({ action: 'rename' })] })
+    const result = sanitiseFiles([file({ action: 'rename' })])
 
     expect(result.files).toEqual([])
     expect(result.rejected[0]).toMatch(/unknown action/i)
   })
 
   it('drops a second entry for the same path', () => {
-    const result = sanitiseProposal({
-      files: [file({ contents: 'first' }), file({ contents: 'second' })],
-    })
+    const result = sanitiseFiles([file({ contents: 'first' }), file({ contents: 'second' })])
 
     expect(result.files).toHaveLength(1)
     expect(result.files[0].contents).toBe('first')
@@ -128,7 +123,7 @@ describe('sanitiseProposal', () => {
   })
 
   it('drops a create with nothing in it', () => {
-    const result = sanitiseProposal({ files: [file({ contents: '   ' })] })
+    const result = sanitiseFiles([file({ contents: '   ' })])
 
     expect(result.files).toEqual([])
     expect(result.rejected[0]).toMatch(/no contents/i)
@@ -136,9 +131,7 @@ describe('sanitiseProposal', () => {
 
   /** A delete proposes removal; contents would be meaningless. */
   it('keeps a delete without contents', () => {
-    const result = sanitiseProposal({
-      files: [{ path: 'src/old.js', action: 'delete' }],
-    })
+    const result = sanitiseFiles([{ path: 'src/old.js', action: 'delete' }])
 
     expect(result.files).toHaveLength(1)
     expect(result.files[0].action).toBe('delete')
@@ -146,7 +139,7 @@ describe('sanitiseProposal', () => {
   })
 
   it('refuses a single file larger than the cap', () => {
-    const result = sanitiseProposal({ files: [file({ contents: 'x'.repeat(200_000) })] })
+    const result = sanitiseFiles([file({ contents: 'x'.repeat(200_000) })])
 
     expect(result.files).toEqual([])
     expect(result.rejected[0]).toMatch(/larger than one file may be/i)
@@ -156,7 +149,7 @@ describe('sanitiseProposal', () => {
     const files = Array.from({ length: 12 }, (_, index) =>
       file({ path: 'src/f' + index + '.js', contents: 'x'.repeat(100_000) })
     )
-    const result = sanitiseProposal({ files })
+    const result = sanitiseFiles(files)
 
     expect(result.files.length).toBeLessThan(files.length)
     expect(result.rejected.some((line) => /size limit/i.test(line))).toBe(true)
@@ -166,31 +159,16 @@ describe('sanitiseProposal', () => {
     const files = Array.from({ length: 60 }, (_, index) =>
       file({ path: 'src/f' + index + '.js' })
     )
-    const result = sanitiseProposal({ files })
+    const result = sanitiseFiles(files)
 
     expect(result.files).toHaveLength(40)
     expect(result.rejected.some((line) => /More than 40 files/i.test(line))).toBe(true)
   })
 
-  it('keeps the plan, assumptions and questions as text', () => {
-    const result = sanitiseProposal({
-      summary: 'A thing.',
-      plan: [{ step: 'Do it', detail: 'carefully' }, { step: '' }],
-      assumptions: ['Postgres', '', '   '],
-      questions: ['Which auth?'],
-      files: [],
-    })
-
-    expect(result.summary).toBe('A thing.')
-    expect(result.plan).toEqual([{ step: 'Do it', detail: 'carefully' }])
-    expect(result.assumptions).toEqual(['Postgres'])
-    expect(result.questions).toEqual(['Which auth?'])
-  })
-
   it('survives an answer with nothing in it at all', () => {
-    expect(() => sanitiseProposal(null)).not.toThrow()
-    expect(() => sanitiseProposal({})).not.toThrow()
-    expect(sanitiseProposal({}).files).toEqual([])
+    expect(() => sanitiseFiles(null)).not.toThrow()
+    expect(() => sanitiseFiles(undefined)).not.toThrow()
+    expect(sanitiseFiles(undefined).files).toEqual([])
   })
 })
 
@@ -377,8 +355,22 @@ describe('provider wiring', () => {
   })
 })
 
-describe('askForImplementation', () => {
-  const architecture = { nodes: [], edges: [], notes: [], warnings: [] }
+/**
+ * The shared model call, which every AI feature goes through.
+ *
+ * These were written against "generate from whiteboard" and outlived it: what
+ * they actually check is the boundary between this server and a provider —
+ * that a refusal is named correctly, and that nothing of a provider's reply or
+ * of the key ever reaches a caller.
+ */
+describe('callModelTool', () => {
+  const TOOL = {
+    name: 'answer_test',
+    description: 'A tool, for testing.',
+    input_schema: { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] },
+  }
+
+  const ask = () => callModelTool({ system: 'be brief', prompt: 'a prompt', tool: TOOL })
 
   const answer = (body, ok = true, status = 200) =>
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -390,7 +382,7 @@ describe('askForImplementation', () => {
 
   const toolUse = (input) => ({
     model: 'claude-sonnet-5',
-    content: [{ type: 'tool_use', name: 'propose_implementation', input }],
+    content: [{ type: 'tool_use', name: TOOL.name, input }],
     usage: { input_tokens: 10, output_tokens: 20 },
   })
 
@@ -403,22 +395,14 @@ describe('askForImplementation', () => {
     env.ANTHROPIC_API_KEY = undefined
     const fetchSpy = answer({})
 
-    await expect(
-      askForImplementation({ architecture, targets: ['backend'] })
-    ).rejects.toMatchObject({ code: 'ai_disabled', status: 503 })
-
+    await expect(ask()).rejects.toMatchObject({ code: 'ai_disabled', status: 503 })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('sends the graph, the targets and the key, and returns the proposal', async () => {
-    const fetchSpy = answer(
-      toolUse({ summary: 'ok', plan: [], files: [], assumptions: [], questions: [] })
-    )
+  it('sends the prompt and the key, and forces the tool', async () => {
+    const fetchSpy = answer(toolUse({ answer: 'ok' }))
 
-    const result = await askForImplementation({
-      architecture: { nodes: [{ key: 'api', type: 'api', label: 'API' }], edges: [], notes: [], warnings: [] },
-      targets: ['backend', 'api'],
-    })
+    const result = await ask()
 
     const [url, init] = fetchSpy.mock.calls[0]
     expect(String(url)).toContain('/v1/messages')
@@ -426,42 +410,19 @@ describe('askForImplementation', () => {
     expect(init.headers['anthropic-version']).toBe('2023-06-01')
 
     const body = JSON.parse(init.body)
-    expect(body.messages[0].content).toContain('api [api] "API"')
-    expect(body.messages[0].content).toContain('backend:')
+    expect(body.messages[0].content).toBe('a prompt')
     // Forced, so the answer cannot come back as prose that has to be parsed.
-    expect(body.tool_choice).toEqual({ type: 'tool', name: 'propose_implementation' })
+    expect(body.tool_choice).toEqual({ type: 'tool', name: TOOL.name })
 
-    expect(result.proposal.summary).toBe('ok')
+    expect(result.input).toEqual({ answer: 'ok' })
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 })
   })
 
-  it('sanitises what comes back rather than trusting it', async () => {
-    answer(
-      toolUse({
-        summary: 's',
-        plan: [],
-        assumptions: [],
-        questions: [],
-        files: [
-          { path: '../escape.js', action: 'create', contents: 'x' },
-          { path: 'src/fine.js', action: 'create', contents: 'x' },
-        ],
-      })
-    )
-
-    const result = await askForImplementation({ architecture, targets: ['backend'] })
-
-    expect(result.proposal.files.map((f) => f.path)).toEqual(['src/fine.js'])
-    expect(result.proposal.rejected).toHaveLength(1)
-  })
-
   /**
-   * "Refused" sends somebody looking for a fault in their diagram. A busy
+   * "Refused" sends somebody looking for a fault in their own input. A busy
    * provider and a bad key are neither refusals nor each other.
    */
   it('tells a busy provider, a rate limit, a bad key and a refusal apart', async () => {
-    const ask = () => askForImplementation({ architecture, targets: ['backend'] })
-
     answer({ error: 'slow down' }, false, 429)
     await expect(ask()).rejects.toMatchObject({ code: 'ai_unavailable' })
 
@@ -484,13 +445,14 @@ describe('askForImplementation', () => {
     await expect(ask()).rejects.toMatchObject({ code: 'ai_failed' })
   })
 
-  /** An answer cut off mid-file is the most likely real failure. */
+  /** An answer cut off mid-sentence is the most likely real failure. */
   it('says the answer was cut off rather than "malformed"', async () => {
-    answer({ content: [{ type: 'text', text: 'half a file' }], stop_reason: 'max_tokens' })
+    answer({ content: [{ type: 'text', text: 'half an answer' }], stop_reason: 'max_tokens' })
 
-    await expect(
-      askForImplementation({ architecture, targets: ['backend'] })
-    ).rejects.toMatchObject({ code: 'ai_malformed', message: expect.stringMatching(/cut off/i) })
+    await expect(ask()).rejects.toMatchObject({
+      code: 'ai_malformed',
+      message: expect.stringMatching(/cut off/i),
+    })
   })
 
   it('reports a network failure without echoing the request', async () => {
@@ -498,7 +460,7 @@ describe('askForImplementation', () => {
       Object.assign(new Error('connect ECONNREFUSED sk-test@host'), { code: 'ECONNREFUSED' })
     )
 
-    const error = await askForImplementation({ architecture, targets: ['backend'] }).catch((e) => e)
+    const error = await ask().catch((e) => e)
 
     expect(error.code).toBe('ai_unreachable')
     expect(error.message).not.toContain('sk-ant-test')
@@ -507,15 +469,9 @@ describe('askForImplementation', () => {
   it('never puts the provider body in the message it shows a caller', async () => {
     answer({ error: { message: 'your key sk-ant-leak is invalid' } }, false, 401)
 
-    const error = await askForImplementation({ architecture, targets: ['backend'] }).catch((e) => e)
+    const error = await ask().catch((e) => e)
 
     expect(error.message).not.toContain('sk-ant-leak')
     expect(error.message).toContain('401')
-  })
-})
-
-describe('targets', () => {
-  it('offers the four the brief asks for', () => {
-    expect(TARGET_KEYS).toEqual(['backend', 'api', 'database', 'frontend'])
   })
 })
