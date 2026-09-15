@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom'
 import { Icon } from '../components/ui/Icon.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 export default function NotFound() {
+  usePageMeta({ title: 'Page not found' })
   return (
     <main className="gate" id="main">
       <div className="gate__card">

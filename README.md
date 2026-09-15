@@ -756,6 +756,27 @@ completely static — an animated gradient or a fading canvas hint inside that r
 tests flake. Both rules are commented where they apply, in
 [layout.css](client/src/styles/layout.css).
 
+### Search engines
+
+The client is a single-page app, so every address is served the same `index.html`, and that file is
+all a crawler or a link preview reads without running scripts: the title, the description, Open
+Graph tags, and a `WebApplication` description in JSON-LD. Each page then sets its own title and
+description as it renders.
+
+Indexing is opt-in, by path, in [client/src/lib/seo.js](client/src/lib/seo.js). The landing page,
+sign-in and sign-up are listed; every other page is `noindex`, including any added later. A room
+code in a search result is somebody's room, so rooms, the dashboard, invitations and one-time email
+links are also kept out of crawling altogether. The build writes `robots.txt` from the same list,
+and `sitemap.xml` when it is told where the site lives:
+
+```bash
+SITE_URL=https://syncspace.example.com npm run build
+```
+
+`SITE_URL` is the public origin, with no path. Without it the build writes no sitemap, since a
+sitemap needs absolute addresses, and a malformed value fails the build rather than publishing links
+that go nowhere.
+
 ## Comments
 
 Conversations attached to the thing they are about: a shape, a spot or area on the board, a
@@ -999,10 +1020,10 @@ client/src
 server/src
 ├── config/       env.js (zod-validated), cors.js (shared origin policy), logger.js
 ├── models/       User, Session (one per signed-in device), Room, Snapshot,
-│                 DocUpdate (append-only), Generation (one change set)
+│                 DocUpdate (append-only), CopilotRun (one answer and its review)
 ├── services/     auth, room, replay, verification, password-reset, session,
-│                 architecture (whiteboard -> graph), ai (graph -> proposal),
-│                 generation (orchestration + apply) · email
+│                 architecture (whiteboard -> graph), ai (model calls),
+│                 copilot/ (actions, sources, streaming, apply) · email
 ├── utils/        token.js — hashed single-use email secrets, and session ids
 ├── routes/       auth.routes.js, rooms.routes.js
 ├── middleware/   auth, validate, error
@@ -1014,10 +1035,14 @@ server/src
 ## Tests
 
 ```bash
-npm test                      # server, 158 tests
-npm test --workspace client   # client, 42 tests
-npm run test:e2e              # browser, two real tabs, 3 tests
+npm test                      # server
+npm test --workspace client   # client
+npm run test:e2e              # browser, against the real stack
 ```
+
+Run the two unit suites one after the other rather than at once: the server suite forks real
+toolchains and in-process MongoDB instances, and under contention a compile can stall past its
+timeout and report a failure that is not one.
 
 The server suite runs against a real in-memory MongoDB, not mocks: env validation, the REST API and
 its access control, replay reconstruction, append-only enforcement, Socket.io room lifecycle, and —

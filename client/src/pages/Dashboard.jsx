@@ -29,6 +29,7 @@ import { Icon } from '../components/ui/Icon.jsx'
 import { Sparkline } from '../components/ui/Sparkline.jsx'
 import { EmptyState } from '../components/ui/EmptyState.jsx'
 import { RoomListSkeleton } from '../components/ui/Skeleton.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 const NAV = [{ to: '/dashboard', label: 'Rooms', icon: 'grid' }]
 
@@ -48,6 +49,7 @@ const NAV = [{ to: '/dashboard', label: 'Rooms', icon: 'grid' }]
  * round trip, which is what keeps forty rooms as quick as four.
  */
 export default function Dashboard() {
+  usePageMeta({ title: 'Your rooms' })
   const { user } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()

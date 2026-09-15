@@ -6,8 +6,13 @@ import { AuthCard } from '../components/AuthCard.jsx'
 import { Field } from '../components/ui/Field.jsx'
 import { Button } from '../components/ui/Button.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 export default function Login() {
+  usePageMeta({
+    title: 'Sign in',
+    description: 'Sign in to SyncSpace to get back to your rooms, invite teammates and replay past sessions.',
+  })
   const { login, isAuthenticated, isLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()

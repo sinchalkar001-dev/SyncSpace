@@ -8,8 +8,13 @@ import { Button } from '../components/ui/Button.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
 import { PasswordStrength } from '../components/ui/PasswordStrength.jsx'
 import { validateRegistration } from '../lib/validation.js'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 export default function Register() {
+  usePageMeta({
+    title: 'Create an account',
+    description: 'Create a SyncSpace account to keep your rooms, invite teammates and replay past sessions.',
+  })
   const { register, isAuthenticated, isLoading } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()

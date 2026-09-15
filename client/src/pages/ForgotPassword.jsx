@@ -5,6 +5,7 @@ import { AuthCard } from '../components/AuthCard.jsx'
 import { Field } from '../components/ui/Field.jsx'
 import { Button } from '../components/ui/Button.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 /**
  * Asking for a reset link.
@@ -18,6 +19,7 @@ import { Icon } from '../components/ui/Icon.jsx'
  * than implying an email is definitely on its way.
  */
 export default function ForgotPassword() {
+  usePageMeta({ title: 'Reset your password' })
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState(null)

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/useAuth.js'
 import { Icon } from '../components/ui/Icon.jsx'
 import { Button } from '../components/ui/Button.jsx'
 import { Spinner } from '../components/ui/Spinner.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 /**
  * Redeeming a room invitation.
@@ -21,6 +22,7 @@ import { Spinner } from '../components/ui/Spinner.jsx'
  * in it.
  */
 export default function AcceptInvitation() {
+  usePageMeta({ title: 'Room invitation' })
   const [params] = useSearchParams()
   const token = params.get('token')
 

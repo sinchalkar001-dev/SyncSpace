@@ -4,6 +4,7 @@ import { api } from '../api/client.js'
 import { colorFor } from '../lib/identity.js'
 import { useUIStore } from '../store/uiStore.js'
 import { useAuth } from '../auth/useAuth.js'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 import { useCollabSession } from '../hooks/useCollabSession.js'
 import { useCodeRunner } from '../hooks/useCodeRunner.js'
 import { CAP, useRoomAccess } from '../hooks/useRoomAccess.js'
@@ -77,6 +78,7 @@ export default function Room() {
 
   const [copied, setCopied] = useState(false)
   const [room, setRoom] = useState(null)
+  usePageMeta({ title: room?.name || 'Room' })
   const access = useRoomAccess()
   const paneMode = useUIStore((state) => state.paneMode)
   const setPaneMode = useUIStore((state) => state.setPaneMode)
@@ -468,6 +470,9 @@ export default function Room() {
     try {
       await navigator.clipboard.writeText(window.location.href)
       setCopied(true)
+      // A second copy restarts the confirmation rather than letting the first
+      // copy's timer hide it early.
+      clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 1600)
     } catch {
       toast.info('Copy failed — the room code is in the address bar')

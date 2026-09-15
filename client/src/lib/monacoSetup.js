@@ -1,4 +1,25 @@
-import * as monaco from 'monaco-editor'
+/**
+ * Monaco, with only what the room's editor uses.
+ *
+ * `import 'monaco-editor'` is the whole distribution: all of its ~80 syntax
+ * grammars plus the CSS, HTML and JSON language services, 3.3 MB before
+ * compression. The editor offers seven languages (see languages.js), so this
+ * loads the editor core with its standard features — find, folding, hovers,
+ * the context menu — and those seven grammars. JavaScript and TypeScript keep
+ * their language service, which completions and "Format document" run on.
+ *
+ * A language added to LANGUAGES needs its contribution imported here as well,
+ * or the editor shows it as plain text.
+ */
+import * as monaco from 'monaco-editor/esm/vs/editor/edcore.main.js'
+import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/python/python.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/java/java.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/go/go.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/rust/rust.contribution.js'
+import 'monaco-editor/esm/vs/language/typescript/monaco.contribution.js'
 import { loader } from '@monaco-editor/react'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'

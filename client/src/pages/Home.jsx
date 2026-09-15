@@ -8,6 +8,7 @@ import { Icon } from '../components/ui/Icon.jsx'
 import { LoadingBlock } from '../components/ui/Spinner.jsx'
 import { TopBar, Brand } from '../components/TopBar.jsx'
 import { ProductPreview } from '../components/ProductPreview.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 const FEATURES = [
   {
@@ -40,6 +41,7 @@ const FEATURES = [
  * fold — the marketing below them must never push the actual product away.
  */
 export default function Home() {
+  usePageMeta()
   const { isAuthenticated, isLoading, identity, renameGuest } = useAuth()
   const navigate = useNavigate()
 

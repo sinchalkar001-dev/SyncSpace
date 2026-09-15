@@ -5,6 +5,7 @@ import { useAuth } from '../auth/useAuth.js'
 import { Icon } from '../components/ui/Icon.jsx'
 import { Button } from '../components/ui/Button.jsx'
 import { Spinner } from '../components/ui/Spinner.jsx'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 /**
  * Proving an address, whichever way the person came at it.
@@ -27,6 +28,7 @@ import { Spinner } from '../components/ui/Spinner.jsx'
 const CODE_LENGTH = 6
 
 export default function VerifyEmail() {
+  usePageMeta({ title: 'Verify your email' })
   const [params] = useSearchParams()
   const token = params.get('token')
   const redirected = params.get('status')

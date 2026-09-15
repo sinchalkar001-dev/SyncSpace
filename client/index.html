@@ -3,9 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="SyncSpace — real-time collaborative whiteboard and code editor." />
+    <title>SyncSpace — Real-time collaborative whiteboard and code editor</title>
+    <meta
+      name="description"
+      content="A shared whiteboard beside a shared code editor. Sketch the architecture, write the code, run it and replay the session together, in real time."
+    />
     <meta name="theme-color" content="#0d1211" />
-    <title>SyncSpace</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Link previews. Scrapers read this file as served and run no scripts,
+         so these cannot be set from the app. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SyncSpace" />
+    <meta property="og:title" content="SyncSpace — Draw and code in the same room" />
+    <meta
+      property="og:description"
+      content="A shared whiteboard beside a shared code editor. Sketch the architecture, write the code, run it and replay the session together, in real time."
+    />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "SyncSpace",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript",
+        "description": "A shared whiteboard beside a shared code editor. Sketch the architecture, write the code, run it and replay the session together, in real time."
+      }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -15,6 +42,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>SyncSpace</h1>
+      <p>
+        A shared whiteboard beside a shared code editor, where everyone's changes land as they
+        happen. It runs in the browser, so it needs JavaScript switched on.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

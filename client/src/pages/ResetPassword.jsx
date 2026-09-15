@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
 import { PasswordStrength } from '../components/ui/PasswordStrength.jsx'
 import { MIN_PASSWORD } from '../lib/validation.js'
+import { usePageMeta } from '../hooks/usePageMeta.js'
 
 /**
  * Where every reset email points.
@@ -23,6 +24,7 @@ import { MIN_PASSWORD } from '../lib/validation.js'
  * useful rather than just apologising.
  */
 export default function ResetPassword() {
+  usePageMeta({ title: 'Choose a new password' })
   const [params] = useSearchParams()
   const token = params.get('token')
 

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { createLogger } from 'vite'
 import react from '@vitejs/plugin-react'
+import { robotsTxt, siteUrlFrom, sitemapXml } from './src/lib/seo.js'
 
 // The backend (Express + Hocuspocus + Socket.io) is expected on one HTTP server.
 // Dev requests are proxied so the client can use same-origin relative paths.
@@ -58,8 +59,46 @@ function quietProxyLogger() {
   return logger
 }
 
+/**
+ * robots.txt, and sitemap.xml when the build knows its public address.
+ *
+ * Generated rather than kept in public/ because the sitemap needs absolute
+ * URLs, which only the deployment knows, and both files read the same list of
+ * pages the app itself uses to decide what is indexed (src/lib/seo.js).
+ */
+function crawlerFiles() {
+  const site = siteUrlFrom(process.env.SITE_URL)
+  const files = { 'robots.txt': robotsTxt(site), ...(site && { 'sitemap.xml': sitemapXml(site) }) }
+
+  return {
+    name: 'syncspace-crawler-files',
+    generateBundle() {
+      for (const [fileName, source] of Object.entries(files)) {
+        this.emitFile({ type: 'asset', fileName, source })
+      }
+    },
+  }
+}
+
+/**
+ * Vendor code in chunks of its own, which change only when a dependency does:
+ * a deploy of the app then costs a returning visitor the app's code, not React
+ * and the editor over again.
+ *
+ * Matched by path, not by package name. Naming 'monaco-editor' as an entry
+ * would pull in the full distribution that monacoSetup.js exists to avoid, and
+ * grammars and language services stay out of the chunk so each is still
+ * fetched only when its language is first opened.
+ */
+const VENDOR_CHUNKS = [
+  ['monaco', /\/node_modules\/monaco-editor\/(?!esm\/vs\/(basic-languages|language)\/)/],
+  ['konva', /\/node_modules\/(konva|react-konva)\//],
+  ['yjs', /\/node_modules\/(yjs|y-monaco|y-protocols|lib0|@hocuspocus)\//],
+  ['react', /\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run)\//],
+]
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), crawlerFiles()],
   customLogger: quietProxyLogger(),
   server: {
     port: 5173,
@@ -81,14 +120,9 @@ export default defineConfig({
     },
   },
   build: {
-    // Monaco ships a lot of code; keep it in its own chunk instead of one huge bundle.
     rollupOptions: {
       output: {
-        manualChunks: {
-          monaco: ['monaco-editor'],
-          konva: ['konva', 'react-konva'],
-          yjs: ['yjs', '@hocuspocus/provider', 'y-monaco'],
-        },
+        manualChunks: (id) => VENDOR_CHUNKS.find(([, pattern]) => pattern.test(id))?.[0],
       },
     },
     chunkSizeWarningLimit: 1200,
