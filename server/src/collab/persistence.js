@@ -55,12 +55,18 @@ export class MongoPersistence {
 
     tail.forEach((entry) => Y.applyUpdate(document, toUint8(entry.update)))
 
-    const last = await DocUpdate.findOne({ roomId: documentName })
-      .sort({ seq: -1 })
-      .select({ seq: 1 })
-      .lean()
-
-    this.sequences.set(documentName, (last?.seq ?? 0) + 1)
+    /**
+     * Numbering resumes past both the log and the snapshot.
+     *
+     * They usually agree, but a snapshot records the counter as it stood, and
+     * the counter moves before the insert it numbers — so an insert that failed
+     * leaves a snapshot claiming a seq the log never received. Resuming from
+     * the log alone put new edits at or below the snapshot, which is exactly
+     * where every later load stops reading. The tail already holds every entry
+     * past the snapshot, so its last seq is the end of the log whenever the log
+     * is ahead, and no second query is needed to find it.
+     */
+    this.sequences.set(documentName, Math.max(from, tail.at(-1)?.seq ?? 0) + 1)
 
     logger.debug(
       { room: documentName, snapshot: Boolean(snapshot), replayed: tail.length },

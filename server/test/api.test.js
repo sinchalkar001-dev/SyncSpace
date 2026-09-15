@@ -1,5 +1,6 @@
+import bcrypt from 'bcryptjs'
 import request from 'supertest'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { createApp } from '../src/app.js'
 
@@ -73,6 +74,27 @@ describe('auth', () => {
       .send({ email: 'nobody@syncspace.test', password: 'whatever-long-enough' })
     expect(res.status).toBe(401)
     expect(res.body.error.code).toBe('bad_credentials')
+  })
+
+  /**
+   * The same error is half of it; the same time is the other half. bcrypt
+   * answers `false` for a malformed hash without hashing anything, so the
+   * stand-in for a missing account must be a real hash, or an unknown address
+   * is refused a hundred milliseconds sooner than a registered one.
+   */
+  it('spends a full password check on an unknown email, so timing does not reveal it', async () => {
+    const compare = vi.spyOn(bcrypt, 'compare')
+    try {
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: 'nobody@syncspace.test', password: 'whatever-long-enough' })
+      expect(res.status).toBe(401)
+
+      const [, hash] = compare.mock.calls.at(-1)
+      expect(hash).toMatch(/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/)
+    } finally {
+      compare.mockRestore()
+    }
   })
 
   it('guards /me behind a token', async () => {

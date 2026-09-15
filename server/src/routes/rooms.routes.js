@@ -7,6 +7,7 @@ import {
   createRoom,
   deleteRoom,
   ensureRoom,
+  findRoom,
   getRoom,
   inviteMember,
   listPeople,
@@ -570,6 +571,23 @@ export function createRoomsRouter() {
   )
 
   /**
+   * The room for reading or stopping its runs, without creating it.
+   *
+   * `ensureRoom` writes: it creates the record and marks the room active, and
+   * only starting a run needs that. A GET for a made-up id must not leave a
+   * room behind, and looking at a room's runs must not move it to the top of
+   * its members' dashboards. A room with no record has had no runs, so the
+   * callers answer it as empty or not found.
+   */
+  async function runsRoom(req) {
+    const room = await findRoom(req.params.roomId)
+    if (room && !can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
+      throw forbidden('You do not have access to this room', 'room_forbidden')
+    }
+    return room
+  }
+
+  /**
    * A room's recent runs.
    *
    * The console is emptied by a page reload, which is a poor property for the
@@ -578,9 +596,9 @@ export function createRoomsRouter() {
    */
   roomsRouter.get('/:roomId/executions', optionalAuth, runLimiter, async (req, res, next) => {
     try {
-      const room = await ensureRoom(req.params.roomId)
-      if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
-        throw forbidden('You do not have access to this room', 'room_forbidden')
+      if (!(await runsRoom(req))) {
+        res.json({ executions: [] })
+        return
       }
 
       res.json({ executions: await listExecutions(req.params.roomId, { limit: req.query.limit }) })
@@ -592,10 +610,7 @@ export function createRoomsRouter() {
   /** One run, by the id every broadcast about it carried. */
   roomsRouter.get('/:roomId/executions/:executionId', optionalAuth, async (req, res, next) => {
     try {
-      const room = await ensureRoom(req.params.roomId)
-      if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
-        throw forbidden('You do not have access to this room', 'room_forbidden')
-      }
+      if (!(await runsRoom(req))) throw notFound('No such execution', 'execution_not_found')
 
       const execution = await getExecution(req.params.executionId)
       // An id from another room is not this room's to read, and saying "not
@@ -624,12 +639,8 @@ export function createRoomsRouter() {
     cancelLimiter,
     async (req, res, next) => {
       try {
-        const room = await ensureRoom(req.params.roomId)
-        if (!can(room, req.user?.id, CAPABILITIES.ROOM_VIEW)) {
-          throw forbidden('You do not have access to this room', 'room_forbidden')
-        }
-
-        const execution = await getExecution(req.params.executionId).catch(() => null)
+        const room = await runsRoom(req)
+        const execution = room && (await getExecution(req.params.executionId).catch(() => null))
         if (!execution || execution.roomId !== req.params.roomId) {
           throw notFound('No such execution', 'execution_not_found')
         }

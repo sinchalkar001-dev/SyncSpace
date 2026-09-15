@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { User } from '../models/User.js'
@@ -12,6 +13,19 @@ const ROUNDS = 10
 
 export const hashPassword = (plain) => bcrypt.hash(plain, ROUNDS)
 export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash)
+
+/**
+ * A real hash of a secret nobody holds, so signing in to an address with no
+ * account costs the same bcrypt work as a wrong password.
+ *
+ * It has to be well formed. The placeholder this replaced was 65 characters,
+ * and bcrypt answers `false` for anything that is not 60 without hashing at
+ * all — so an unknown address was refused instantly and a registered one after
+ * a full comparison, and timing the response told anyone which addresses have
+ * accounts. Made on first use rather than at import, so startup does not pay.
+ */
+let absentAccountHash = null
+const hashForAbsentAccount = () => (absentAccountHash ??= hashPassword(randomUUID()))
 
 /**
  * Every token belongs to a session row, so minting one is opening a session —
@@ -120,7 +134,7 @@ export async function register({ email, password, name }, context) {
 export async function login({ email, password }, context) {
   const user = await User.findOne({ email: email.toLowerCase() })
   // Compare regardless of whether the user exists so timing does not leak it.
-  const hash = user ? user.passwordHash : '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin'
+  const hash = user ? user.passwordHash : await hashForAbsentAccount()
   const ok = await verifyPassword(password, hash)
 
   if (!user || !ok) throw unauthorized('Incorrect email or password', 'bad_credentials')

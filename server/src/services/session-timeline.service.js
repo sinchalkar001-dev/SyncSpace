@@ -22,11 +22,12 @@ import { toUint8 } from '../utils/binary.js'
  * Every event is derived from something recorded, never inferred:
  *
  *   architecture   the whiteboard's components and connections, read with the
- *                  same parser the code generator uses, diffed between points
+ *                  same parser the copilot reads the board with, diffed between
+ *                  points
  *   code           declared functions and classes, and lines added or removed
  *   runs           the execution records, with how each one ended
  *   people         joins and conversations from the activity feed
- *   AI             proposals generated from the board, and what was applied
+ *   AI             what the copilot was asked, and which answers were applied
  *
  * This is the only thing the summaries are allowed to talk about. A model given
  * this list, and made to cite an event for every statement, has nothing to
@@ -494,17 +495,20 @@ export async function timelineSignature(roomId) {
       roomId,
       kind: { $in: [ACTIVITY.COLLABORATOR_JOINED, ACTIVITY.COMMENT_ADDED] },
     }),
-    CopilotRun.countDocuments({ roomId }),
+    // The newest change, not the count, for the same reason as comments below:
+    // an answer finishing, or somebody applying one, changes a run without
+    // adding one — and both are things the timeline shows.
+    CopilotRun.findOne({ roomId }).sort({ updatedAt: -1 }).select({ updatedAt: 1 }).lean(),
     // Replies and resolves change a thread without adding one, so the newest
     // change is what moves the signature, not the count.
     CommentThread.findOne({ roomId }).sort({ updatedAt: -1 }).select({ updatedAt: 1 }).lean(),
   ])
 
   const throughSeq = last?.seq ?? 0
-  const commented = comments?.updatedAt ? new Date(comments.updatedAt).getTime() : 0
+  const newest = (row) => (row?.updatedAt ? new Date(row.updatedAt).getTime() : 0)
   return {
     throughSeq,
-    signature: [throughSeq, runs, activity, copilot, commented].join(':'),
+    signature: [throughSeq, runs, activity, newest(copilot), newest(comments)].join(':'),
   }
 }
 

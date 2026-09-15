@@ -42,6 +42,9 @@ export function generateCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
+const tooManyAttempts = () =>
+  new AppError(429, 'Too many incorrect codes. Ask for a new verification email.', 'too_many_attempts')
+
 /** Same one-way treatment as the token; the digits are never stored. */
 const hashCode = (code) => createHash('sha256').update(String(code)).digest('hex')
 
@@ -274,13 +277,7 @@ export async function verifyEmailCode({ userId, email, code }) {
    * that it no longer works, and it sends them to wait rather than to the
    * resend button that is actually their way out.
    */
-  if (user.verificationAttempts >= env.EMAIL_VERIFICATION_MAX_ATTEMPTS) {
-    throw new AppError(
-      429,
-      'Too many incorrect codes. Ask for a new verification email.',
-      'too_many_attempts'
-    )
-  }
+  if (user.verificationAttempts >= env.EMAIL_VERIFICATION_MAX_ATTEMPTS) throw tooManyAttempts()
 
   const expired =
     !user.verificationCodeHash ||
@@ -292,41 +289,51 @@ export async function verifyEmailCode({ userId, email, code }) {
     throw badRequest('That verification code has expired — ask for a new one', 'code_expired')
   }
 
-  if (!sameHash(hashCode(String(code).trim()), user.verificationCodeHash)) {
-    user.verificationAttempts += 1
+  /**
+   * The attempt is spent before the code is compared, in one conditional update.
+   *
+   * Reading the count, comparing, then saving let concurrent guesses all read
+   * the same count: a script sending a hundred requests at once had a hundred
+   * guesses against a limit of five, which on six digits is no limit at all.
+   * Taking the attempt first, only while any are left, lets the database refuse
+   * the one past the limit however the requests arrive.
+   */
+  const counted = await User.findOneAndUpdate(
+    { _id: user._id, verificationAttempts: { $lt: env.EMAIL_VERIFICATION_MAX_ATTEMPTS } },
+    { $inc: { verificationAttempts: 1 } },
+    { new: true }
+  )
 
-    // The last allowed guess burns the code rather than leaving it live for
-    // whoever resets the counter next.
-    const spent = user.verificationAttempts >= env.EMAIL_VERIFICATION_MAX_ATTEMPTS
-    if (spent) {
-      user.verificationCodeHash = null
-      user.verificationCodeExpiresAt = null
-    }
-    await user.save()
+  if (!counted) throw tooManyAttempts()
 
-    logger.info(
-      { user: String(user._id), attempts: user.verificationAttempts, spent },
-      'email verification failed: wrong code'
-    )
+  if (sameHash(hashCode(String(code).trim()), counted.verificationCodeHash)) {
+    await markVerified(counted)
+    logger.info({ user: String(user._id), method: 'code' }, 'email verification succeeded')
+    return counted
+  }
 
-    if (spent) {
-      throw new AppError(
-        429,
-        'Too many incorrect codes. Ask for a new verification email.',
-        'too_many_attempts'
-      )
-    }
-
-    const left = env.EMAIL_VERIFICATION_MAX_ATTEMPTS - user.verificationAttempts
-    throw badRequest(
-      'That code is not right — ' + left + (left === 1 ? ' attempt' : ' attempts') + ' left',
-      'invalid_code'
+  // The last allowed guess burns the code rather than leaving it live for
+  // whoever resets the counter next.
+  const spent = counted.verificationAttempts >= env.EMAIL_VERIFICATION_MAX_ATTEMPTS
+  if (spent) {
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { verificationCodeHash: null, verificationCodeExpiresAt: null } }
     )
   }
 
-  await markVerified(user)
-  logger.info({ user: String(user._id), method: 'code' }, 'email verification succeeded')
-  return user
+  logger.info(
+    { user: String(user._id), attempts: counted.verificationAttempts, spent },
+    'email verification failed: wrong code'
+  )
+
+  if (spent) throw tooManyAttempts()
+
+  const left = env.EMAIL_VERIFICATION_MAX_ATTEMPTS - counted.verificationAttempts
+  throw badRequest(
+    'That code is not right — ' + left + (left === 1 ? ' attempt' : ' attempts') + ' left',
+    'invalid_code'
+  )
 }
 
 /** What the "check your email" screen needs to render itself. */

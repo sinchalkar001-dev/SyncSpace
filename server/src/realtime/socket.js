@@ -36,6 +36,26 @@ const chatSchema = z.object({
  */
 const actorOf = (socket) => (socket.data.user?.anonymous ? null : socket.data.user?.id ?? null)
 
+/**
+ * A listener that cannot take the process down.
+ *
+ * Socket.io does not await what a listener returns, so a handler that throws —
+ * a payload of an unexpected shape, a database that did not answer — is a
+ * rejected promise nobody holds, and Node ends the process for that. One
+ * malformed message from one tab would disconnect every room on the server.
+ */
+function guarded(event, handler) {
+  return async (...args) => {
+    try {
+      await handler(...args)
+    } catch (error) {
+      logger.error({ err: error, event }, 'socket handler failed')
+      const ack = args[args.length - 1]
+      if (typeof ack === 'function') ack({ ok: false, error: 'server_error' })
+    }
+  }
+}
+
 /** Everyone currently in a Socket.io room, as plain objects. */
 async function roster(io, roomId) {
   const sockets = await io.in(roomId).fetchSockets()
@@ -106,7 +126,9 @@ export function createSocketServer(httpServer) {
   })
 
   io.on('connection', (socket) => {
-    socket.on('room:join', async (payload, ack) => {
+    const on = (event, handler) => socket.on(event, guarded(event, handler))
+
+    on('room:join', async (payload, ack) => {
       const parsed = joinSchema.safeParse(payload)
       if (!parsed.success) {
         ack?.({ ok: false, error: 'invalid_payload' })
@@ -153,15 +175,20 @@ export function createSocketServer(httpServer) {
       logger.debug({ room: roomId, socket: socket.id }, 'socket joined room')
     })
 
-    socket.on('room:leave', async ({ roomId } = {}) => {
-      const target = roomId || socket.data.roomId
-      if (!target) return
+    on('room:leave', async (payload) => {
+      const target = typeof payload?.roomId === 'string' ? payload.roomId : socket.data.roomId
+
+      // Only a room this socket is in. Leaving anywhere else changes nothing,
+      // and must neither cut it off from chat in the room it is still in nor
+      // send another room a roster nobody there asked for.
+      if (!target || !socket.rooms.has(target)) return
+
       await socket.leave(target)
-      socket.data.roomId = null
+      if (target === socket.data.roomId) socket.data.roomId = null
       io.to(target).emit('room:presence', { roomId: target, members: await roster(io, target) })
     })
 
-    socket.on('room:chat', async (payload, ack) => {
+    on('room:chat', async (payload, ack) => {
       const parsed = chatSchema.safeParse(payload)
       if (!parsed.success) {
         ack?.({ ok: false, error: 'invalid_payload' })
@@ -213,7 +240,7 @@ export function createSocketServer(httpServer) {
       ack?.({ ok: true })
     })
 
-    socket.on('disconnect', async () => {
+    on('disconnect', async () => {
       const roomId = socket.data.roomId
       if (!roomId) return
       io.to(roomId).emit('room:presence', { roomId, members: await roster(io, roomId) })

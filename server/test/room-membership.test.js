@@ -260,3 +260,38 @@ describe('letting a removed person back in', () => {
     expect(res.body.error.code).toBe('not_owner')
   })
 })
+
+/**
+ * "Only an owner deals in admins, in either direction" — and removing one is a
+ * direction. Without this an admin could put out every other admin the owner
+ * appointed, and keep them out.
+ */
+describe('removing somebody at your own level', () => {
+  it('does not let one admin remove another', async () => {
+    const owner = (await register(OWNER)).body
+    const first = (await register(GUEST)).body
+    const second = (await register(OTHER)).body
+    const room = await makeRoom(owner.token)
+
+    await invite(owner.token, room.roomId, { email: GUEST.email, role: 'admin' }).expect(200)
+    await invite(owner.token, room.roomId, { email: OTHER.email, role: 'admin' }).expect(200)
+
+    const res = await remove(first.token, room.roomId, second.user.id)
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('role_forbidden')
+    expect((await openRoom(second.token, room.roomId)).status).toBe(200)
+  })
+
+  it('still lets an admin remove an editor', async () => {
+    const owner = (await register(OWNER)).body
+    const admin = (await register(GUEST)).body
+    const editor = (await register(OTHER)).body
+    const room = await makeRoom(owner.token)
+
+    await invite(owner.token, room.roomId, { email: GUEST.email, role: 'admin' }).expect(200)
+    await invite(owner.token, room.roomId, { email: OTHER.email, role: 'editor' }).expect(200)
+
+    await remove(admin.token, room.roomId, editor.user.id).expect(200)
+    expect((await openRoom(editor.token, room.roomId)).status).toBe(403)
+  })
+})

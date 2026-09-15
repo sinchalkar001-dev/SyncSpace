@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { User } from '../src/models/User.js'
 import { clearOutbox, lastMessage } from '../src/services/email.service.js'
+import { verifyEmailCode } from '../src/services/verification.service.js'
 
 /**
  * The six-digit half of proving an address.
@@ -380,5 +381,40 @@ describe('signing in before the address is proven', () => {
     } finally {
       env.REQUIRE_EMAIL_VERIFICATION = before
     }
+  })
+})
+
+/**
+ * The attempt count was read, compared and then saved, so guesses that arrived
+ * together all read the same count and none of them was refused. Called on the
+ * service directly: the route's rate limiter would otherwise hide how many
+ * guesses the count itself lets through.
+ */
+describe('guesses sent all at once', () => {
+  it('still get no more tries than the limit', async () => {
+    const { body } = await register()
+    const real = codeFromEmail()
+    const wrong = real === '000000' ? '111111' : '000000'
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        verifyEmailCode({ userId: body.user.id, code: wrong }).then(
+          () => 'verified',
+          (error) => error.code
+        )
+      )
+    )
+
+    // Every guess but the last allowed one is told it was wrong; the rest are refused.
+    const compared = outcomes.filter((code) => code === 'invalid_code').length
+    expect(compared).toBe(env.EMAIL_VERIFICATION_MAX_ATTEMPTS - 1)
+    expect((await User.findById(body.user.id)).verificationAttempts).toBe(
+      env.EMAIL_VERIFICATION_MAX_ATTEMPTS
+    )
+
+    // And the code is spent, so even the right one no longer works.
+    await expect(verifyEmailCode({ userId: body.user.id, code: real })).rejects.toMatchObject({
+      code: 'too_many_attempts',
+    })
   })
 })

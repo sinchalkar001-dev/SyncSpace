@@ -45,8 +45,10 @@ export function createFilesRouter() {
    */
   filesRouter.get('/', requireAuth, async (req, res, next) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100)
-      const offset = parseInt(req.query.offset, 10) || 0
+      // Clamped at both ends: a negative skip is an error from the database,
+      // which would otherwise reach the caller as a 500.
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100)
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0)
       const result = await listFiles(req.params.roomId, {
         userId: req.user.id,
         limit,

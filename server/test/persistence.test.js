@@ -1,8 +1,10 @@
 import mongoose from 'mongoose'
+import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { MongoPersistence } from '../src/collab/persistence.js'
 import { DocUpdate } from '../src/models/DocUpdate.js'
+import { Snapshot } from '../src/models/Snapshot.js'
 
 let rooms = 0
 const nextRoom = () => 'persist-' + Date.now() + '-' + (rooms += 1)
@@ -75,6 +77,28 @@ describe('the update log', () => {
     await expect(
       store.onChange({ documentName: null, update: new Uint8Array([1]), context: {} })
     ).resolves.toBeUndefined()
+  })
+
+  /**
+   * A snapshot records the counter as it stood, and the counter moves before
+   * the insert it numbers — so an insert that failed leaves a snapshot claiming
+   * a seq the log never received. Numbering from the log alone then put the
+   * next edits at or below the snapshot, which is exactly where every later
+   * load stops reading.
+   */
+  it('numbers past a snapshot that claims more than the log holds', async () => {
+    const store = new MongoPersistence()
+    const room = nextRoom()
+    await change(store, room, 1)
+
+    const state = Buffer.from(Y.encodeStateAsUpdate(new Y.Doc()))
+    await Snapshot.create({ roomId: room, state, seq: 5, size: state.byteLength })
+
+    const reloaded = new MongoPersistence()
+    await reloaded.onLoadDocument({ documentName: room, document: new Y.Doc() })
+    await change(reloaded, room, 2)
+
+    expect((await seqs(room)).map((entry) => entry.seq)).toEqual([1, 6])
   })
 
   it('forgets a room only once its document leaves memory', async () => {

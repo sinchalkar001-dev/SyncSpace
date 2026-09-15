@@ -8,21 +8,24 @@ import { sanitizeFilename, generateStoredName } from '../utils/filename.js'
 import { badRequest, forbidden, notFound } from '../errors.js'
 
 /**
- * Ensures the upload directory exists. Called once per upload operation.
- * No-op if already present.
+ * A room's upload directory, which is always directly inside UPLOAD_DIR.
+ *
+ * A room id is whatever somebody typed into an address bar, and nothing about
+ * a room record stops it holding `..` or a slash. Joined onto a path as it
+ * was, `x/../../client/dist` walked an upload out of the directory and into
+ * any folder the server could write to, a web root included. Refused rather
+ * than rewritten, so every file a room already stored stays where it is.
  */
-async function ensureUploadDir(subdir) {
-  const dir = path.join(UPLOAD_DIR, subdir)
-  await fs.mkdir(dir, { recursive: true })
+function roomDir(roomId) {
+  const dir = path.resolve(UPLOAD_DIR, String(roomId))
+  if (path.dirname(dir) !== UPLOAD_DIR) {
+    throw badRequest('Files cannot be stored for this room', 'invalid_room_id')
+  }
   return dir
 }
 
-/**
- * Computes the on-disk relative path for a file document.
- */
-function storagePath(file) {
-  return file.roomId + '/' + file.storedName
-}
+/** Where a file document's bytes are on disk. */
+const storedPath = (file) => path.join(roomDir(file.roomId), file.storedName)
 
 /**
  * Uploads a file to a room. Validates room access, sanitises the filename,
@@ -58,9 +61,6 @@ export async function uploadFile({ roomId, userId, file }) {
   }
 
   const room = await getRoom(roomId)
-  if (!room) {
-    throw notFound('Room not found', 'room_not_found')
-  }
   requireInRoom(room, userId, CAPABILITIES.FILES_UPLOAD)
 
   const originalName = sanitizeFilename(file.originalname)
@@ -69,11 +69,9 @@ export async function uploadFile({ roomId, userId, file }) {
   }
 
   const storedName = generateStoredName(originalName)
-  const subdir = roomId
-  const dir = await ensureUploadDir(subdir)
-  const absolutePath = path.join(dir, storedName)
-
-  await fs.writeFile(absolutePath, file.buffer)
+  const dir = roomDir(roomId)
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(path.join(dir, storedName), file.buffer)
 
   const doc = await File.create({
     roomId,
@@ -92,9 +90,6 @@ export async function uploadFile({ roomId, userId, file }) {
  */
 export async function listFiles(roomId, { userId, limit = 50, offset = 0 } = {}) {
   const room = await getRoom(roomId)
-  if (!room) {
-    throw notFound('Room not found', 'room_not_found')
-  }
   requireInRoom(room, userId, CAPABILITIES.ROOM_VIEW)
 
   const [files, total] = await Promise.all([
@@ -154,7 +149,7 @@ export async function getFilePath(fileId, { userId }) {
   requireInRoom(room, userId, CAPABILITIES.ROOM_VIEW)
 
   return {
-    absolutePath: path.join(UPLOAD_DIR, storagePath(file)),
+    absolutePath: storedPath(file),
     mimeType: file.mimeType,
     originalName: file.originalName,
     size: file.size,
@@ -181,8 +176,7 @@ export async function deleteFile(fileId, { userId }) {
     throw forbidden('Only the uploader or room owner can delete files', 'forbidden')
   }
 
-  const absolutePath = path.join(UPLOAD_DIR, storagePath(file))
-  await fs.unlink(absolutePath).catch(() => {
+  await fs.unlink(storedPath(file)).catch(() => {
     // File may already be gone from disk — proceed with DB cleanup
   })
   await file.deleteOne()

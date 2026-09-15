@@ -140,6 +140,51 @@ describe('disconnect behavior', () => {
   })
 })
 
+/**
+ * Socket.io does not await a listener, so a handler that throws is a rejected
+ * promise nobody holds — and Node ends the process for that. One malformed
+ * message from one tab would disconnect every room on the server.
+ */
+describe('messages shaped in ways the handlers did not expect', () => {
+  it('survives a leave sent with null instead of an object', async () => {
+    const socket = connectSocket()
+    try {
+      await connected(socket)
+      await join(socket, nextRoom(), { name: 'Alice' })
+
+      socket.emit('room:leave', null)
+
+      // Still up, and still answering the same connection.
+      const ack = await join(socket, nextRoom(), { name: 'Alice' })
+      expect(ack.ok).toBe(true)
+    } finally {
+      socket.disconnect()
+    }
+  })
+
+  /** Leaving somewhere you never were must not stop you talking where you are. */
+  it('keeps chat working after leaving a room the socket was not in', async () => {
+    const room = nextRoom()
+    const socket = connectSocket()
+    try {
+      await connected(socket)
+      await join(socket, room, { name: 'Alice' })
+
+      socket.emit('room:leave', { roomId: nextRoom() })
+      // A round trip first, so the leave has been handled before the message
+      // below is sent rather than racing it.
+      await new Promise((resolve) => socket.emit('room:chat', {}, resolve))
+
+      const ack = await new Promise((resolve) =>
+        socket.emit('room:chat', { roomId: room, text: 'still here' }, resolve)
+      )
+      expect(ack).toEqual({ ok: true })
+    } finally {
+      socket.disconnect()
+    }
+  })
+})
+
 describe('ad-hoc room join', () => {
   it('creates the room automatically when joining a nonexistent room', async () => {
     const room = nextRoom()

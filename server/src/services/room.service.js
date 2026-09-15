@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { nanoid } from '../utils/id.js'
 import { Room } from '../models/Room.js'
 import { User } from '../models/User.js'
@@ -6,10 +8,17 @@ import { Checkpoint } from '../models/Checkpoint.js'
 import { DocUpdate } from '../models/DocUpdate.js'
 import { Participant } from '../models/Participant.js'
 import { RoomPreference } from '../models/RoomPreference.js'
+import { Activity } from '../models/Activity.js'
+import { CommentReadState, CommentThread } from '../models/Comment.js'
+import { CopilotRun } from '../models/CopilotRun.js'
+import { Execution } from '../models/Execution.js'
+import { File } from '../models/File.js'
+import { SessionInsight } from '../models/SessionInsight.js'
+import { UPLOAD_DIR } from '../config/upload.js'
 import { getHocuspocus } from '../collab/registry.js'
 import { getIo } from '../realtime/registry.js'
 import { sendRoomInviteEmail } from './email.service.js'
-import { CAPABILITIES, ROLES, can, canAssignRole, roleFor } from '../permissions.js'
+import { CAPABILITIES, ROLES, can, canAssignRole, rankOf, roleFor } from '../permissions.js'
 import {
   claimInvitesFor,
   invitationLink,
@@ -58,6 +67,9 @@ export async function createRoom({ name, ownerId, isPublic = false, description,
     members: ownerId ? [{ user: ownerId, role: 'owner' }] : [],
   })
 }
+
+/** The room, or null — for a read that must neither create it nor fail. */
+export const findRoom = (roomId) => Room.findOne({ roomId })
 
 export async function getRoom(roomId) {
   const room = await Room.findOne({ roomId })
@@ -319,8 +331,15 @@ export async function cancelPendingInvite({ roomId, actorId, email }) {
   const room = await roomForCapability(roomId, actorId, CAPABILITIES.MEMBERS_REMOVE, 'Only the room owner or an admin can remove people')
   const address = normaliseEmail(email)
 
-  if (!room.pendingInviteFor(address)) {
+  const invite = room.pendingInviteFor(address)
+  if (!invite) {
     throw notFound('No invitation is waiting for that address', 'invite_not_found')
+  }
+
+  // Bound like issuing one: an admin cannot withdraw the invitation an owner
+  // sent to make somebody an admin.
+  if (rankOf(invite.role) >= rankOf(roleFor(room, actorId))) {
+    throw forbidden('You cannot withdraw an invitation at that level', 'role_forbidden')
   }
 
   room.pendingInvites = room.pendingInvites.filter((entry) => entry.email !== address)
@@ -347,6 +366,13 @@ export async function removeMember({ roomId, actorId, userId }) {
 
   if (String(room.owner) === targetId) {
     throw badRequest('The room owner cannot be removed', 'cannot_remove_owner')
+  }
+
+  // The rule that governs changing a role governs removal too: nobody at or
+  // above your own rank. An admin who could remove another admin could clear
+  // out every peer the owner appointed — "only an owner deals in admins".
+  if (rankOf(roleFor(room, targetId)) >= rankOf(roleFor(room, actorId))) {
+    throw forbidden('You cannot remove somebody at or above your own level', 'role_forbidden')
   }
 
   room.members = room.members.filter((member) => String(member.user) !== targetId)
@@ -703,13 +729,38 @@ export async function deleteRoom({ roomId, actorId }) {
   // Hang up everyone still in the room so they stop writing to it.
   await hangUp({ roomId, reason: 'room_deleted', matches: () => true })
 
+  /**
+   * Everything keyed by the room's id goes with it, not only the document.
+   *
+   * A room id is a code anybody can type, and typing one with no record opens
+   * a fresh public room under it. Whatever is left behind here is inherited by
+   * whoever opens that code next: the deleted room's comments, shared files,
+   * runs and every copilot answer about its code, readable by a stranger in
+   * what looks like an empty room. Through the driver, like the update log, so
+   * no model's guard on rewriting history stands in the way of discarding it.
+   */
+  const ROOM_DATA = [
+    Snapshot,
+    Checkpoint,
+    Participant,
+    RoomPreference,
+    Activity,
+    CommentThread,
+    CommentReadState,
+    CopilotRun,
+    Execution,
+    File,
+    SessionInsight,
+  ]
+
+  const uploads = path.resolve(UPLOAD_DIR, roomId)
+
   const [updates] = await Promise.all([
     DocUpdate.collection.deleteMany({ roomId }),
-    Snapshot.deleteOne({ roomId }),
-    // The replay checkpoints go with the log they summarise; leaving them
-    // would let a later room reusing this id read somebody else's history.
-    Checkpoint.deleteMany({ roomId }),
-    Participant.deleteMany({ roomId }),
+    ...ROOM_DATA.map((Model) => Model.collection.deleteMany({ roomId })),
+    // Only ever a directory directly inside UPLOAD_DIR: a recursive delete is
+    // the last place to trust a room id to be a plain name.
+    path.dirname(uploads) === UPLOAD_DIR ? fs.rm(uploads, { recursive: true, force: true }) : null,
   ])
   await Room.deleteOne({ roomId })
 

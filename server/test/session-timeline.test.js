@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { clearDatabase, startMemoryMongo, stopMemoryMongo } from './helpers/db.js'
 import { DocUpdate } from '../src/models/DocUpdate.js'
 import { Execution } from '../src/models/Execution.js'
+import { CopilotRun } from '../src/models/CopilotRun.js'
 import {
   SEGMENT_GAP_MS,
   buildSessionTimeline,
@@ -229,6 +230,45 @@ describe('building it cheaply', () => {
 
     expect(after).not.toBe(first)
     expect(after.events.some((event) => event.kind === 'execution.succeeded')).toBe(true)
+  })
+
+  /**
+   * Applying a copilot answer changes a run without adding one. Counting runs
+   * missed that, so the timeline kept answering from memory without the change
+   * somebody had just made to the code.
+   */
+  it('notices a copilot answer being applied, which adds no run', async () => {
+    await record([{ at: 0, apply: draw(box('API', 0, 0)) }])
+    await CopilotRun.collection.insertOne({
+      roomId: ROOM,
+      actionId: 'code.optimize',
+      status: 'succeeded',
+      requestedByName: 'Ada',
+      answer: 'Hoist the lookup out of the loop.',
+      files: [],
+      patch: { status: 'proposed', rationale: 'Hoist the lookup', appliedAt: null },
+      createdAt: new Date(T0 + MIN),
+      updatedAt: new Date(T0 + MIN),
+    })
+
+    const before = await buildSessionTimeline(ROOM)
+    expect(before.events.some((event) => event.kind === 'ai.applied')).toBe(false)
+
+    await CopilotRun.collection.updateOne(
+      { roomId: ROOM },
+      {
+        $set: {
+          'patch.status': 'applied',
+          'patch.appliedAt': new Date(T0 + 2 * MIN),
+          updatedAt: new Date(T0 + 2 * MIN),
+        },
+      }
+    )
+
+    const after = await buildSessionTimeline(ROOM)
+    expect(after.events.find((event) => event.kind === 'ai.applied')?.text).toBe(
+      'applied a copilot change to the code'
+    )
   })
 
   it('returns an empty timeline for a room with no history, rather than failing', async () => {
