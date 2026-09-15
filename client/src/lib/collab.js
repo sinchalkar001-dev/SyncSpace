@@ -59,10 +59,7 @@ export function pushShape(shapes, shape) {
   return yShape
 }
 
-/**
- * Finds a shape Y.Map by id using Yjs's built-in iterator.
- * Avoids O(N) manual scanning when the array is large.
- */
+/** Finds a shape Y.Map by id. */
 function findShapeById(shapes, id) {
   for (const item of shapes) {
     if (item instanceof Y.Map && item.get('id') === id) return item
@@ -79,14 +76,39 @@ export function updateShape(shapes, id, patch) {
   doc ? doc.transact(apply) : apply()
 }
 
-export function removeShape(shapes, id) {
-  for (let i = 0; i < shapes.length; i += 1) {
-    const item = shapes.get(i)
-    if (item instanceof Y.Map && item.get('id') === id) {
+/**
+ * Appends several shapes as one change: one update on the wire, one row in the
+ * room's log and one re-render, rather than one of each per shape — which is
+ * what a paste of twenty shapes used to cost.
+ */
+export function pushShapes(shapes, list) {
+  const apply = () => list.forEach((shape) => pushShape(shapes, shape))
+  shapes.doc ? shapes.doc.transact(apply) : apply()
+}
+
+/**
+ * Removes shapes by id as one change, and leaves locked ones where they are.
+ *
+ * A lock has to mean the same thing however a shape is being removed. The
+ * action bar never offered to delete a locked shape, but the Delete key and the
+ * eraser both removed one regardless. One pass from the end, so a deletion
+ * never shifts an index still to be visited. Answers the ids actually removed.
+ */
+export function removeShapes(shapes, ids) {
+  const wanted = new Set(ids)
+  const removed = []
+
+  const apply = () => {
+    for (let i = shapes.length - 1; i >= 0; i -= 1) {
+      const item = shapes.get(i)
+      if (!(item instanceof Y.Map) || !wanted.has(item.get('id')) || item.get('locked')) continue
+      removed.push(item.get('id'))
       shapes.delete(i, 1)
-      return
     }
   }
+
+  shapes.doc ? shapes.doc.transact(apply) : apply()
+  return removed
 }
 
 export function clearShapes(shapes) {

@@ -5,7 +5,8 @@ import {
   clearShapes,
   duplicateShapes,
   pushShape,
-  removeShape,
+  pushShapes,
+  removeShapes,
   reorderShape,
   updateShape,
 } from '../../lib/collab.js'
@@ -162,10 +163,12 @@ export function Whiteboard({
   const presenceRef = useRef(presence)
   const sizeRef = useRef(size)
   const listRef = useRef(list)
+  const selectedRef = useRef(selectedIds)
   useEffect(() => {
     presenceRef.current = presence
     sizeRef.current = size
     listRef.current = list
+    selectedRef.current = selectedIds
   })
 
   // What this person has selected, for everybody else's outline. Skipped on
@@ -351,8 +354,8 @@ export function Whiteboard({
       const hits = shapesHitBy(list, point.x, point.y, radius)
       if (hits.length === 0) return
 
-      hits.forEach((id) => removeShape(shapes, id))
-      setSelectedIds((current) => current.filter((id) => !hits.includes(id)))
+      const removed = removeShapes(shapes, hits)
+      if (removed.length) setSelectedIds((current) => current.filter((id) => !removed.includes(id)))
     },
     [shapes, list]
   )
@@ -589,20 +592,29 @@ export function Whiteboard({
 
   const handleHoverEnd = useCallback(() => setHovered(null), [])
 
+  /**
+   * Reads the list and the selection through refs rather than depending on
+   * them, so every shape is handed the same function for as long as the board
+   * is mounted. Depending on the list made a new one whenever any shape
+   * changed, and a new `onDragEnd` re-rendered every ShapeNode on the board —
+   * precisely what their `memo` is there to prevent.
+   */
   const handleShapeDragEnd = useCallback(
     (id, patch) => {
-      const moved = list.find((shape) => shape.id === id)
+      const current = listRef.current
+      const selected = selectedRef.current
+      const moved = current.find((shape) => shape.id === id)
       const dx = patch.x - (moved?.x || 0)
       const dy = patch.y - (moved?.y || 0)
 
       const apply = () => {
         updateShape(shapes, id, patch)
         // Drag one of several and the rest of the selection travels with it.
-        if (!selectedIds.includes(id)) return
-        selectedIds
+        if (!selected.includes(id)) return
+        selected
           .filter((other) => other !== id)
           .forEach((other) => {
-            const shape = list.find((candidate) => candidate.id === other)
+            const shape = current.find((candidate) => candidate.id === other)
             if (!shape || shape.locked) return
             updateShape(shapes, other, { x: (shape.x || 0) + dx, y: (shape.y || 0) + dy })
           })
@@ -610,7 +622,7 @@ export function Whiteboard({
 
       shapes.doc ? shapes.doc.transact(apply) : apply()
     },
-    [shapes, selectedIds, list]
+    [shapes]
   )
 
   const selection = useMemo(
@@ -651,8 +663,8 @@ export function Whiteboard({
       backward: () => runOnSelection((id) => reorderShape(shapes, id, 'backward')),
       toggleLock: () => runOnSelection((id) => updateShape(shapes, id, { locked: !allLocked })),
       remove: () => {
-        runOnSelection((id) => removeShape(shapes, id))
-        setSelectedIds([])
+        const removed = removeShapes(shapes, selectedIds)
+        setSelectedIds((current) => current.filter((id) => !removed.includes(id)))
       },
     }),
     [shapes, selectedIds, selection, runOnSelection, allLocked]
@@ -727,7 +739,7 @@ export function Whiteboard({
             x: (shape.x || 0) + PASTE_OFFSET,
             y: (shape.y || 0) + PASTE_OFFSET,
           }))
-          pasted.forEach((shape) => pushShape(shapes, shape))
+          pushShapes(shapes, pasted)
           // Paste again and the next copy lands further along, rather than
           // stacking invisibly on the last one.
           clipboardRef.current = pasted
@@ -756,8 +768,8 @@ export function Whiteboard({
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length && !readOnly) {
         event.preventDefault()
-        selectedIds.forEach((id) => removeShape(shapes, id))
-        setSelectedIds([])
+        const removed = removeShapes(shapes, selectedIds)
+        setSelectedIds((current) => current.filter((id) => !removed.includes(id)))
         return
       }
 

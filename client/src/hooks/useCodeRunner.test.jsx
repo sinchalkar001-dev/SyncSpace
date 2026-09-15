@@ -238,6 +238,29 @@ describe('a run still in flight', () => {
   })
 
   /**
+   * Stopping somebody else's program. Only the end of this person's own run
+   * used to put the flag down, so after stopping anyone else's it stayed up and
+   * every later Cancel in the room returned without asking the server.
+   */
+  it('lets go of a cancel once the run has ended, so the next one can be stopped', async () => {
+    const cancel = vi.spyOn(api, 'cancelRun').mockResolvedValue({ cancelled: true, state: 'cancelled' })
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    act(() => hook.current.receiveState(running()))
+    await act(() => hook.current.cancel())
+    expect(hook.current.cancelling).toBe(true)
+
+    act(() => hook.current.receiveState(running({ state: 'cancelled' })))
+    expect(hook.current.cancelling).toBe(false)
+
+    act(() => hook.current.receiveState(running({ executionId: 'exec-2' })))
+    await act(() => hook.current.cancel())
+
+    expect(cancel).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenLastCalledWith('room-1', 'exec-2', undefined)
+  })
+
+  /**
    * But a real refusal has to be visible. Swallowing everything is what let a
    * guest press a Cancel button that silently did nothing at all.
    */

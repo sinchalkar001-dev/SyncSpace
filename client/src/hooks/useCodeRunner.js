@@ -26,7 +26,14 @@ export function useCodeRunner(roomId, displayName) {
   const [support, setSupport] = useState(null)
   /** The run currently in flight anywhere in the room, or null. */
   const [live, setLive] = useState(null)
-  const [cancelling, setCancelling] = useState(false)
+  /**
+   * Which run a cancel was asked for, rather than a flag. A flag had only the
+   * end of this person's own run to put it down, so stopping somebody else's
+   * program left it up for good, and every later Cancel in the room returned
+   * without asking the server.
+   */
+  const [cancellingId, setCancellingId] = useState(null)
+  const cancelling = cancellingId !== null && cancellingId === live?.executionId
   // Bumped by anything that wants a run but does not hold the buffer — the
   // command palette, for one. The editor watches it and starts the run.
   const [requestId, setRequestId] = useState(0)
@@ -60,7 +67,6 @@ export function useCodeRunner(roomId, displayName) {
 
       setStatus('running')
       setError(null)
-      setCancelling(false)
       // Queued until the server says otherwise. Without this the panel shows
       // nothing at all for however long the queue is, which reads as a click
       // that did not register.
@@ -88,7 +94,6 @@ export function useCodeRunner(roomId, displayName) {
         // room, and blanking their indicator would take the Cancel button
         // away from the owner who might need it.
         setLive((current) => (current && current.mine === false ? current : null))
-        setCancelling(false)
         inFlight.current = null
       }
     },
@@ -146,11 +151,11 @@ export function useCodeRunner(roomId, displayName) {
     const target = live?.executionId
     if (!roomId || !target || cancelling) return
 
-    setCancelling(true)
+    setCancellingId(target)
     try {
       await api.cancelRun(roomId, target, displayName || undefined)
     } catch (cause) {
-      setCancelling(false)
+      setCancellingId(null)
       // Except the one genuine race: it is already gone, which is what was
       // wanted anyway.
       if (cause?.code === 'execution_not_found') return

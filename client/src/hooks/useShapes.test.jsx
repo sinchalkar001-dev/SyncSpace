@@ -138,6 +138,41 @@ describe('useShapes', () => {
     expect(result.current).toEqual([])
   })
 
+  /**
+   * Every shape on the board is a memoised node. A change to one shape has to
+   * leave the rest as the very same objects, or somebody nudging one rectangle
+   * re-renders every shape in the room.
+   */
+  it('keeps the same object for every shape that did not change', () => {
+    const { shapes } = board()
+    pushShape(shapes, rect('a'))
+    pushShape(shapes, rect('b'))
+    const { result } = renderHook(() => useShapes(shapes))
+    const [a, b] = result.current
+
+    act(() => {
+      updateShape(shapes, 'b', { x: 99 })
+    })
+
+    expect(result.current[0]).toBe(a)
+    expect(result.current[1]).not.toBe(b)
+    expect(result.current[1].x).toBe(99)
+  })
+
+  it('keeps the shapes already there when one is added', () => {
+    const { shapes } = board()
+    pushShape(shapes, rect('a'))
+    const { result } = renderHook(() => useShapes(shapes))
+    const [a] = result.current
+
+    act(() => {
+      pushShape(shapes, rect('b'))
+    })
+
+    expect(result.current[0]).toBe(a)
+    expect(result.current.map((s) => s.id)).toEqual(['a', 'b'])
+  })
+
   it('stops listening when it goes away', () => {
     const { shapes } = board()
     const { unmount } = renderHook(() => useShapes(shapes))
