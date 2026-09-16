@@ -198,8 +198,19 @@ describe('email failure isolation', () => {
     // the log useful for support without making it useful to an attacker.
     expect(context).toMatchObject({ code: 'EAUTH' })
     expect(context.message).toBeUndefined()
-    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('535')
-    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('auth failed')
+
+    /**
+     * Everything logged except the account id, which is deliberately there.
+     *
+     * The id is a random 24-character hex string, so it contains any given
+     * three digits often enough to matter: CI failed once because
+     * `6aaaa649cedbedf9d60535b3` happens to contain "535". Checking the whole
+     * call list for a three-character needle was a test that could fail on a
+     * coin flip rather than on a leak.
+     */
+    const { user: _account, ...logged } = context
+    expect(JSON.stringify(logged)).not.toContain('535')
+    expect(JSON.stringify(logged)).not.toContain('auth failed')
 
     process.off('unhandledRejection', escaped)
     throwing.mockRestore()
