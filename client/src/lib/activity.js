@@ -44,3 +44,34 @@ export function describeActivity(event) {
  * needs to carry weight in a feed being skimmed.
  */
 export const activityDetail = (event) => event?.detail?.trim() || null
+
+/** Two rows that say the same thing about the same room, one after the other. */
+const sameAgain = (a, b) =>
+  a.kind === b.kind &&
+  a.roomId === b.roomId &&
+  (a.actorName ?? null) === (b.actorName ?? null) &&
+  activityDetail(a) === activityDetail(b)
+
+/**
+ * Folds a run of identical events into one row carrying how many there were.
+ *
+ * Somebody pressing Run four times is one thing that happened, not four — and
+ * as four rows it pushed everything else in the feed off the bottom of the
+ * page. Only consecutive events fold, so the order still reads as a history
+ * rather than a tally, and the row keeps the newest time because the feed
+ * arrives newest first.
+ */
+export function collapseActivity(events = []) {
+  const rows = []
+
+  for (const event of events) {
+    const last = rows[rows.length - 1]
+    if (last && sameAgain(last, event)) {
+      last.count += 1
+      continue
+    }
+    rows.push({ ...event, count: 1 })
+  }
+
+  return rows
+}

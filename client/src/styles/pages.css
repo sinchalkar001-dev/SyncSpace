@@ -782,6 +782,34 @@
   white-space: nowrap;
 }
 
+/* How many times in a row the same thing happened, said quietly beside it. */
+.feed__count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rest of the feed, for anyone who wants it. Quiet by default: the panel
+   sits beside the rooms and must not compete with them for attention. */
+.feed__more {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.feed__more:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 /* ---------- room list toolbar ---------- */
 
 .roomtools {

@@ -1,5 +1,5 @@
-import { memo, useMemo } from 'react'
-import { activityDetail, activityIcon, describeActivity } from '../lib/activity.js'
+import { memo, useMemo, useState } from 'react'
+import { activityDetail, activityIcon, collapseActivity, describeActivity } from '../lib/activity.js'
 import { formatWhen, roomLabel } from '../lib/rooms.js'
 import { Icon } from './ui/Icon.jsx'
 import { Skeleton } from './ui/Skeleton.jsx'
@@ -21,6 +21,16 @@ import { Skeleton } from './ui/Skeleton.jsx'
  * dashboard being broken — so a failure here says so quietly and leaves the
  * rooms alone.
  */
+
+/**
+ * How many rows the panel shows before asking.
+ *
+ * It sits beside the room cards, and a column of twenty three-line rows ran
+ * most of a screen past them — the page then scrolls for a feed nobody asked
+ * to read in full. Six is about the height of the cards next to it.
+ */
+const PREVIEW = 6
+
 function ActivityFeedBase({ state, events = [], rooms = [], onOpenRoom }) {
   // Rooms arrive separately from their events, so the name is resolved here
   // rather than denormalised into every row on the server.
@@ -29,6 +39,12 @@ function ActivityFeedBase({ state, events = [], rooms = [], onOpenRoom }) {
     for (const room of rooms) map.set(room.roomId, roomLabel(room))
     return map
   }, [rooms])
+
+  const rows = useMemo(() => collapseActivity(events), [events])
+  const [showAll, setShowAll] = useState(false)
+
+  const shown = showAll ? rows : rows.slice(0, PREVIEW)
+  const hidden = rows.length - shown.length
 
   return (
     <section className="feed" aria-labelledby="feed-title">
@@ -59,42 +75,56 @@ function ActivityFeedBase({ state, events = [], rooms = [], onOpenRoom }) {
         </p>
       )}
 
-      {state === 'ready' && events.length === 0 && (
+      {state === 'ready' && rows.length === 0 && (
         <p className="feed__empty muted">
           Nothing yet. Edits, runs and people joining will show up here.
         </p>
       )}
 
-      {state === 'ready' && events.length > 0 && (
-        <ul className="feed__list">
-          {events.map((event) => {
-            const detail = activityDetail(event)
+      {state === 'ready' && rows.length > 0 && (
+        <>
+          <ul className="feed__list">
+            {shown.map((event) => {
+              const detail = activityDetail(event)
 
-            return (
-              <li className="feed__item" key={event.id}>
-                <button
-                  type="button"
-                  className="feed__link"
-                  onClick={() => onOpenRoom?.(event.roomId)}
-                >
-                  <span className="feed__icon" aria-hidden="true">
-                    <Icon name={activityIcon(event)} size={13} />
-                  </span>
-
-                  <span className="feed__text">
-                    <span className="feed__what">{describeActivity(event)}</span>
-                    <span className="feed__where">
-                      {names.get(event.roomId) ?? event.roomId}
-                      <span aria-hidden="true"> · </span>
-                      {formatWhen(event.at)}
+              return (
+                <li className="feed__item" key={event.id}>
+                  <button
+                    type="button"
+                    className="feed__link"
+                    onClick={() => onOpenRoom?.(event.roomId)}
+                  >
+                    <span className="feed__icon" aria-hidden="true">
+                      <Icon name={activityIcon(event)} size={13} />
                     </span>
-                    {detail && <span className="feed__detail">{detail}</span>}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+
+                    <span className="feed__text">
+                      <span className="feed__what">
+                        {describeActivity(event)}
+                        {/* Four runs in a row are one thing that happened. */}
+                        {event.count > 1 && (
+                          <span className="feed__count"> ×{event.count}</span>
+                        )}
+                      </span>
+                      <span className="feed__where">
+                        {names.get(event.roomId) ?? event.roomId}
+                        <span aria-hidden="true"> · </span>
+                        {formatWhen(event.at)}
+                      </span>
+                      {detail && <span className="feed__detail">{detail}</span>}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+
+          {(hidden > 0 || showAll) && (
+            <button type="button" className="feed__more" onClick={() => setShowAll(!showAll)}>
+              {showAll ? 'Show less' : 'Show ' + hidden + ' more'}
+            </button>
+          )}
+        </>
       )}
     </section>
   )
