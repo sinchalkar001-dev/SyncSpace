@@ -216,8 +216,8 @@ function prepare({ system, prompt, tool, maxTokens, model }) {
   }
 }
 
-/** Sends a prepared call, or explains why it could not be sent. */
-async function send(call, hints) {
+/** Sends a prepared call once, or explains why it could not be sent. */
+async function sendOnce(call, hints) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), env.AI_TIMEOUT_MS)
 
@@ -239,6 +239,86 @@ async function send(call, hints) {
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * The two answers that mean "not now" rather than "no".
+ *
+ * A 503 is the provider being busy and has nothing to do with the request; a
+ * 429 is this server being asked to slow down. Neither produced an answer, so
+ * asking again costs nothing but the wait.
+ */
+const RETRY_STATUS = new Set([429, 503])
+
+/** How long to wait before each further attempt. Two, then stop. */
+const RETRY_BACKOFF_MS = [700, 2100]
+
+/**
+ * A provider asking for longer than this is taken at its word and not waited
+ * out: somebody is standing in front of a button, and "try again shortly" is
+ * a better answer than a request that hangs for a minute first.
+ */
+const MAX_RETRY_WAIT_MS = 5000
+
+/** What `Retry-After` asks for, in milliseconds — seconds or a date. */
+function retryAfterMs(response) {
+  const header = response.headers?.get?.('retry-after')
+  if (!header) return null
+
+  const seconds = Number(header)
+  if (Number.isFinite(seconds)) return seconds * 1000
+
+  const at = Date.parse(header)
+  return Number.isFinite(at) ? at - Date.now() : null
+}
+
+/** Waits, and stops waiting if whoever asked has gone away. */
+function pauseFor(ms, signal) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
+
+/**
+ * Sends a prepared call, asking again when the provider says "not now".
+ *
+ * Without this, one busy moment at the provider became "The model is busy
+ * right now" in front of the person who had just pressed the button — for a
+ * request the provider never answered, on a model that would have answered a
+ * second later. Retrying here rather than in each caller means the copilot,
+ * the session summaries and the streaming path all get it.
+ *
+ * Only these two statuses, and only a refusal: a timeout means the model *is*
+ * working and asking again would both double the wait and pay twice.
+ */
+async function send(call, hints, signal) {
+  let response = await sendOnce(call, hints)
+
+  for (const backoff of RETRY_BACKOFF_MS) {
+    if (response.ok || !RETRY_STATUS.has(response.status) || signal?.aborted) return response
+
+    const asked = retryAfterMs(response)
+    if (asked !== null && asked > MAX_RETRY_WAIT_MS) return response
+
+    const pause = Math.max(asked ?? backoff, 0)
+    logger.warn({ status: response.status, pause }, 'the model was busy; asking again')
+
+    // Nothing has read this body and nothing will; let the connection go.
+    response.body?.cancel?.()?.catch?.(() => {})
+    await pauseFor(pause, signal)
+
+    response = await sendOnce(call, hints)
+  }
+
+  return response
 }
 
 /**
@@ -346,7 +426,7 @@ export async function streamModelTool({
     return { ...answer, streamed: false }
   }
 
-  const response = await send(vendor.stream.request(options), hints)
+  const response = await send(vendor.stream.request(options), hints, signal)
   if (!response.ok) throw await refused(response)
 
   const parser = createEventStreamParser()

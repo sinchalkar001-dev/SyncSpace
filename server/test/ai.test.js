@@ -445,6 +445,80 @@ describe('callModelTool', () => {
     await expect(ask()).rejects.toMatchObject({ code: 'ai_failed' })
   })
 
+  /**
+   * A busy provider is the most common failure in normal use, and the one the
+   * person can do least about: the request was never answered, so the server
+   * asks again rather than putting "the model is busy" in front of somebody
+   * who has just pressed a button.
+   */
+  describe('when the provider says "not now"', () => {
+    const replies = (...responses) => {
+      const spy = vi.spyOn(globalThis, 'fetch')
+      for (const [body, ok, status, headers] of responses) {
+        spy.mockResolvedValueOnce({
+          ok,
+          status,
+          headers: { get: (name) => headers?.[name.toLowerCase()] ?? null },
+          json: () => Promise.resolve(body),
+          text: () => Promise.resolve(JSON.stringify(body)),
+        })
+      }
+      return spy
+    }
+
+    it('asks again after a 503, and answers with what came back', async () => {
+      const fetchSpy = replies(
+        [{ error: 'high demand' }, false, 503],
+        [toolUse({ answer: 'second time lucky' }), true, 200]
+      )
+
+      const result = await ask()
+
+      expect(result.input).toEqual({ answer: 'second time lucky' })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it('asks again after a 429 as well', async () => {
+      const fetchSpy = replies(
+        [{ error: 'slow down' }, false, 429],
+        [toolUse({ answer: 'ok' }), true, 200]
+      )
+
+      await expect(ask()).resolves.toMatchObject({ input: { answer: 'ok' } })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    /** Nobody waits forever: two further tries, then say so. */
+    it('gives up rather than retrying without end', async () => {
+      const fetchSpy = replies(
+        [{ error: 'busy' }, false, 503],
+        [{ error: 'busy' }, false, 503],
+        [{ error: 'busy' }, false, 503]
+      )
+
+      await expect(ask()).rejects.toMatchObject({ code: 'ai_unavailable' })
+      expect(fetchSpy).toHaveBeenCalledTimes(3)
+    })
+
+    /**
+     * A provider that names a wait longer than somebody will stand in front of
+     * is believed rather than waited out.
+     */
+    it('does not sit on a request when told to come back much later', async () => {
+      const fetchSpy = replies([{ error: 'busy' }, false, 503, { 'retry-after': '120' }])
+
+      await expect(ask()).rejects.toMatchObject({ code: 'ai_unavailable' })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a refusal alone: a bad key is not worth asking twice', async () => {
+      const fetchSpy = replies([{ error: 'bad key' }, false, 401])
+
+      await expect(ask()).rejects.toMatchObject({ code: 'ai_bad_key' })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
   /** An answer cut off mid-sentence is the most likely real failure. */
   it('says the answer was cut off rather than "malformed"', async () => {
     answer({ content: [{ type: 'text', text: 'half an answer' }], stop_reason: 'max_tokens' })
