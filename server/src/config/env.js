@@ -226,9 +226,20 @@ const schema = z
     SWAGGER_ENABLED: booleanish.default('true'),
     SWAGGER_PATH: swaggerPath,
 
-    // Guests may open rooms without an account. Convenient in development,
-    // refused outright in production.
-    ALLOW_ANONYMOUS: booleanish.default('true'),
+    /**
+     * Whether somebody without an account may open a public room.
+     *
+     * On outside production, off inside it — but a choice either way rather
+     * than a refusal. Production used to reject this outright, which read as
+     * caution and behaved as a contradiction: the landing page offers every
+     * visitor "Start a public room", and a deployed server could only answer
+     * that offer with "Sign in to open this room".
+     *
+     * The default is resolved in `loadEnv`, because it depends on NODE_ENV.
+     * Letting strangers into a public room should be a decision somebody
+     * made, rather than a default nobody looked at.
+     */
+    ALLOW_ANONYMOUS: booleanish.optional(),
 
     // Append every Yjs update to an immutable log. Required by the replay
     // feature; costs one insert per update, so it can be switched off.
@@ -446,13 +457,6 @@ const schema = z
         message: 'JWT_SECRET is required in production (32+ characters)',
       })
     }
-    if (value.ALLOW_ANONYMOUS) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['ALLOW_ANONYMOUS'],
-        message: 'ALLOW_ANONYMOUS must be false in production',
-      })
-    }
     if (!value.CORS_ORIGIN?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -547,6 +551,8 @@ export function loadEnv(source = process.env) {
     ...parsed.data,
     JWT_SECRET: parsed.data.JWT_SECRET || DEV_SECRET,
     CORS_ORIGIN: corsOrigin,
+    // Guests stay out of production unless a deployment says otherwise.
+    ALLOW_ANONYMOUS: parsed.data.ALLOW_ANONYMOUS ?? parsed.data.NODE_ENV !== 'production',
     // Implicit TLS is port 465's whole distinction; everything else starts
     // plain and upgrades with STARTTLS.
     SMTP_SECURE: parsed.data.SMTP_SECURE ?? parsed.data.SMTP_PORT === 465,

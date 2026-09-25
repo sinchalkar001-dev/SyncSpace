@@ -36,15 +36,35 @@ describe('environment validation', () => {
     ).toThrow(/JWT_SECRET is required in production/)
   })
 
-  it('refuses anonymous access in production', () => {
-    expect(() =>
-      loadEnv({
-        NODE_ENV: 'production',
-        JWT_SECRET: PROD_SECRET,
-        ALLOW_ANONYMOUS: 'true',
-        CORS_ORIGIN: 'https://app.test',
-      })
-    ).toThrow(/ALLOW_ANONYMOUS must be false/)
+  /**
+   * Refusing to boot on ALLOW_ANONYMOUS=true read as caution and behaved as a
+   * contradiction: the landing page offers every visitor a public room, and a
+   * deployed server could only answer that with "Sign in to open this room".
+   * Closed by default, open when a deployment says so.
+   */
+  it('keeps guests out of production unless asked', () => {
+    const env = loadEnv({
+      NODE_ENV: 'production',
+      JWT_SECRET: PROD_SECRET,
+      CORS_ORIGIN: 'https://app.test',
+    })
+
+    expect(env.ALLOW_ANONYMOUS).toBe(false)
+  })
+
+  it('admits guests in production when a deployment sets ALLOW_ANONYMOUS', () => {
+    const env = loadEnv({
+      NODE_ENV: 'production',
+      JWT_SECRET: PROD_SECRET,
+      ALLOW_ANONYMOUS: 'true',
+      CORS_ORIGIN: 'https://app.test',
+    })
+
+    expect(env.ALLOW_ANONYMOUS).toBe(true)
+  })
+
+  it('lets guests in outside production without being asked', () => {
+    expect(loadEnv({}).ALLOW_ANONYMOUS).toBe(true)
   })
 
   it('requires an explicit origin allowlist in production', () => {

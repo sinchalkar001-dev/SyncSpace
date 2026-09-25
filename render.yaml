@@ -42,6 +42,14 @@ services:
       - key: CLIENT_URL
         sync: false
 
+      # Anyone holding the link to a public room may open it without an
+      # account, which is what the landing page's "Start a public room"
+      # offers. Production keeps guests out unless this says otherwise, and
+      # this deployment says otherwise on purpose. Commenting, files, the
+      # copilot and anything that changes who may enter still need an account.
+      - key: ALLOW_ANONYMOUS
+        value: true
+
       # Running other people's code needs a container runtime, which this
       # service does not have: `auto` would quietly fall back to running it as
       # an ordinary child process, which is not a sandbox. Off until there is

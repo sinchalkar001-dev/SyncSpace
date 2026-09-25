@@ -155,8 +155,10 @@ presence connections on the spot, and an invite lets them back. Guests have no a
 so the way to clear them out is **Make private**, offered in the same panel.
 
 Guest access is deliberate: the interview scenario in the brief needs a candidate to join from a
-link without signing up. The server enforces the same rule the UI shows, and refuses to boot in
-production with `ALLOW_ANONYMOUS=true`.
+link without signing up. The server enforces the same rule the UI shows. In production guests are
+off unless `ALLOW_ANONYMOUS=true` says otherwise — [render.yaml](render.yaml) sets it, so the
+deployed landing page's "Start a public room" leads somewhere. Everything that names a person or
+changes who may enter still needs an account, whatever this is set to.
 
 Sign out lives in the account menu at the top right of both the dashboard and any room. It clears
 the token, drops you back to a guest identity, and reconnects the room with the new credentials.
