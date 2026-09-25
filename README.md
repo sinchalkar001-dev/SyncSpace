@@ -41,6 +41,34 @@ exit — it is for trying things out, not for keeping work.
 
 Other scripts: `npm test`, `npm run lint`, `npm run build`, `npm run test:e2e`.
 
+## Deploying it
+
+The two halves deploy separately: the API to Render ([render.yaml](render.yaml)), the client to
+Vercel ([client/vercel.json](client/vercel.json), with the project's root directory set to `client`).
+
+**The setting everything hinges on is `VITE_BACKEND_ORIGIN`.** Locally the client uses relative
+addresses and Vite proxies them; a built client has no proxy, so without this it asks whatever host
+is serving the page for `/api/v1`, and a single-page host answers with the page itself. That is the
+usual reason a deployed app looks like it has no backend. Vite reads it **at build time**, so
+changing it means building again — setting it and redeploying is one step, not two.
+
+| Where | Variable | Value |
+| --- | --- | --- |
+| Vercel | `VITE_BACKEND_ORIGIN` | the API's origin, e.g. `https://syncspace-api.onrender.com` |
+| Vercel | `SITE_URL` | the client's own origin, which is what puts a `sitemap.xml` in the build |
+| Render | `CORS_ORIGIN` | the client's origin, exactly — scheme and host, no trailing slash |
+| Render | `CLIENT_URL` | the same origin; it is where emailed links point |
+| Render | `MONGODB_URI` | an Atlas connection string, including the database name |
+
+`CORS_ORIGIN` is checked on the WebSocket handshake as well as on REST, so a room that stays at
+"Connecting" while the rest of the app works usually means it is wrong.
+
+Two more things that bite on a first deploy. **MongoDB Atlas refuses connections from unknown
+addresses**, so allow the ones the API runs from — the service then fails its health check and the
+deploy is marked unhealthy, which is the honest signal. And **Render's free plan stops a service
+that nothing has called**, so the first request after an idle spell waits for it to start, which is
+slow rather than broken.
+
 ## Accounts and access
 
 Two ways in, both first-class:

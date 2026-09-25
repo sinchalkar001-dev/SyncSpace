@@ -25,6 +25,10 @@ export function onAuthExpired(handler) {
 const UNREACHABLE =
   'Could not reach the server. If it is restarting, give it a moment and try again.'
 
+const NOT_THE_API =
+  'The address answering requests is not the API — it replied with a page instead of data. ' +
+  'A deployed client needs VITE_BACKEND_ORIGIN set to the API’s address when it is built.'
+
 /**
  * Turns an error response into something worth reading, and says whether the
  * application ever saw the request.
@@ -110,6 +114,17 @@ export async function apiFetch(path, { method = 'GET', body, signal, retry = 0 }
     const { code, message } = describeFailure(response.status, payload)
     return again(new ApiError(response.status, code, message))
   }
+
+  /**
+   * A successful response that is not JSON did not come from this API.
+   *
+   * The cause is always the same: a client built without VITE_BACKEND_ORIGIN
+   * asks whatever host serves the page, and a host serving a single-page app
+   * answers every address with the page itself — HTML, with a 200. Passing
+   * that on as `null` sent nothing into code expecting an account or a room,
+   * and it failed somewhere far from the reason.
+   */
+  if (payload === null) throw new ApiError(response.status, 'not_the_api', NOT_THE_API)
 
   return payload
 }

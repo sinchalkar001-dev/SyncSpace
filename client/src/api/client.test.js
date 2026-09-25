@@ -45,6 +45,25 @@ describe('apiFetch', () => {
     expect(JSON.parse(init.body)).toEqual({ name: 'Design' })
   })
 
+  /**
+   * The signature of a client deployed without VITE_BACKEND_ORIGIN: the host
+   * serving the page answers every address with the page itself, and a 200
+   * full of HTML used to arrive as `null` far from anything naming the cause.
+   */
+  it('says so when the answer is a page rather than the API', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+    })
+
+    await expect(apiFetch('/rooms')).rejects.toMatchObject({
+      name: 'ApiError',
+      code: 'not_the_api',
+      message: expect.stringMatching(/VITE_BACKEND_ORIGIN/),
+    })
+  })
+
   it('turns an error payload into an ApiError', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ error: { code: 'email_taken', message: 'That email is already registered' } }, 409)
