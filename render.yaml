@@ -1,0 +1,82 @@
+# Render Blueprint for the SyncSpace API.
+#
+# The client is deployed separately (Vercel, see client/vercel.json); this is
+# the Express + Hocuspocus + Socket.io server, which is one process serving
+# /api/v1, /collab and /socket.io on one port.
+#
+# Values marked `sync: false` are filled in on Render rather than committed —
+# they are credentials or they name the deployment.
+services:
+  - type: web
+    name: syncspace-api
+    runtime: node
+    plan: free
+    region: singapore
+    # Workspaces install from the repository root, and the server is a
+    # workspace of it. There is no build step: the server runs from source.
+    buildCommand: npm ci
+    startCommand: npm start --workspace server
+    # The same endpoint the app uses to report whether the database is up.
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+
+      # Where the database is. A MongoDB Atlas connection string, including
+      # the database name.
+      - key: MONGODB_URI
+        sync: false
+
+      # Signs the session tokens. Generated once by Render and never seen.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # The deployed client's origin, e.g. https://syncspace.vercel.app.
+      # CORS_ORIGIN is what browsers are allowed to call this API from, and it
+      # is also checked on the WebSocket handshake; CLIENT_URL is where the
+      # links in verification, reset and invitation emails point.
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+
+      # Running other people's code needs a container runtime, which this
+      # service does not have: `auto` would quietly fall back to running it as
+      # an ordinary child process, which is not a sandbox. Off until there is
+      # somewhere safe to run it.
+      - key: ALLOW_CODE_EXECUTION
+        value: false
+      - key: SANDBOX_BACKEND
+        value: docker
+
+      # Email. Without a relay the server logs messages instead of sending
+      # them, which leaves verification links unreachable — so set these
+      # before turning verification on.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: false
+
+      # The copilot and the session summaries. One key decides the provider.
+      - key: AI_ENABLED
+        value: true
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false
+
+      # Uploaded files live on the service's own disk, which on the free plan
+      # is wiped on every deploy and restart. Attach a Render disk mounted at
+      # /var/data and point UPLOAD_DIR at it to keep them.
+      - key: UPLOAD_DIR
+        value: ./uploads
