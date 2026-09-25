@@ -163,8 +163,14 @@ export default function Home() {
 
       <footer className="landing__foot">
         <div className="landing__foot-inner">
-          <span>SyncSpace — a collaborative whiteboard and code editor.</span>
-          <Link to="/register">Create an account</Link>
+          <span>
+            © {new Date().getFullYear()} SyncSpace. Real-time collaborative whiteboard &amp; code
+            editor.
+          </span>
+          <span className="landing__foot-links">
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/register">Create an account</Link>
+          </span>
         </div>
       </footer>
     </div>

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { INDEXED_PATHS, isIndexed, robotsTxt, siteUrlFrom, sitemapXml } from './seo.js'
 
 describe('isIndexed', () => {
-  it('lists the landing page and the ways in', () => {
-    for (const path of ['/', '/login', '/register']) expect(isIndexed(path)).toBe(true)
+  it('lists the landing page, the ways in, and the privacy notice', () => {
+    for (const path of ['/', '/login', '/register', '/privacy']) expect(isIndexed(path)).toBe(true)
   })
 
   /** The reason it is opt-in: a room code in a search result is a leak. */

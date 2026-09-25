@@ -14,7 +14,7 @@
 
 export const SITE_NAME = 'SyncSpace'
 
-export const INDEXED_PATHS = ['/', '/login', '/register']
+export const INDEXED_PATHS = ['/', '/login', '/register', '/privacy']
 
 /** Not crawled at all. Prefixes, matched the way robots.txt matches them. */
 const PRIVATE_PATHS = [

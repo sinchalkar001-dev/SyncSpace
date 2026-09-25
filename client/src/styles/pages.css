@@ -324,6 +324,84 @@
   margin: 0 auto;
 }
 
+.landing__foot-links {
+  display: flex;
+  gap: var(--space-4);
+}
+
+/*
+  One quiet line at the foot of the pages somebody can reach without an
+  account. Centred, because those pages are centred cards rather than columns
+  of content, and pushed to the bottom so a short page still sits on it.
+*/
+.sitefoot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding: var(--space-5) var(--page-pad);
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* The 404 page is a centred card; this keeps its footer at the bottom. */
+.gate-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/*
+  A page of text rather than an interface: the privacy notice, and anything
+  like it. Measured for reading, not for filling the screen.
+*/
+.prose {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--page-pad) var(--space-7);
+  color: var(--text-dim);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+
+.prose h1 {
+  margin-bottom: var(--space-3);
+  color: var(--text);
+}
+
+.prose h2 {
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-3);
+  color: var(--text);
+  font-size: var(--text-lg);
+}
+
+.prose__lede {
+  color: var(--text-faint);
+  text-wrap: pretty;
+}
+
+.prose p,
+.prose ul {
+  margin-bottom: var(--space-3);
+}
+
+.prose ul {
+  padding-left: var(--space-5);
+}
+
+.prose li {
+  margin-bottom: var(--space-2);
+  text-wrap: pretty;
+}
+
+.prose strong {
+  color: var(--text);
+}
+
 /* ---------- auth ---------- */
 
 .auth {

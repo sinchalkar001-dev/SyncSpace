@@ -5,6 +5,7 @@ import { LoadingBlock } from './components/ui/Spinner.jsx'
 import Home from './pages/Home.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
+import Privacy from './pages/Privacy.jsx'
 import NotFound from './pages/NotFound.jsx'
 
 /**
@@ -30,6 +31,9 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        {/* Reachable without an account, and linked from the foot of every
+            page a stranger can land on. */}
+        <Route path="/privacy" element={<Privacy />} />
         {/* Where every confirmation email points. Open to signed-out visitors:
             the link is as likely to be opened on a phone that has never signed
             in as in the browser that registered. */}
