@@ -97,7 +97,11 @@ beforeEach(() => {
   resetRunnableCache()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // Before the handlers and the store go, or a builder still on its way would
+  // re-create its sandbox in the middle of the next test.
+  await settleToolchain()
+
   for (const key of KEYS) env[key] = saved[key]
   server.resetHandlers()
   resetQueue()
@@ -105,6 +109,26 @@ afterEach(() => {
   resetRunnableCache()
   vi.restoreAllMocks()
 })
+
+/**
+ * Waits for a build an earlier test left running.
+ *
+ * `readiness()` starts the toolchain build and deliberately does not wait for
+ * it: the first person to open a room should not be the one who waits for
+ * apt. That is right in a server and a trap in a suite, because resetting the
+ * toolchain makes `prepareToolchain()` forget the builder without stopping it
+ * — so the next test starts a second one, and both install. Joining it here
+ * is what keeps each test's world its own.
+ */
+async function settleToolchain() {
+  // Bounded, and it never starts anything: while a build is in flight
+  // `prepareToolchain()` hands back that same promise.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const { status } = toolchainState()
+    if (status !== 'checking' && status !== 'building') return
+    await prepareToolchain().catch(() => {})
+  }
+}
 
 /** The toolchains, built once through the real code path. */
 async function ready() {
