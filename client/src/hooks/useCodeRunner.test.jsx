@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useCodeRunner } from './useCodeRunner.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { PENDING_RECHECK_MS, useCodeRunner } from './useCodeRunner.js'
 import { api } from '../api/client.js'
 
 const SUPPORT = {
@@ -136,6 +136,131 @@ describe('useCodeRunner', () => {
 
       expect(hook.current.blocker('javascript')).toContain('switched off')
     })
+
+    it('uses the server\'s own reason when it has one', async () => {
+      vi.spyOn(api, 'runners').mockResolvedValue({
+        ...SUPPORT,
+        languages: [
+          {
+            language: 'java',
+            available: false,
+            toolchain: 'JDK 11+',
+            version: '',
+            reason: 'The sandbox toolchains could not be prepared: Vercel rejected VERCEL_TOKEN',
+          },
+        ],
+      })
+
+      const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+      await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+      expect(hook.current.blocker('java')).toBe(
+        'The sandbox toolchains could not be prepared: Vercel rejected VERCEL_TOKEN'
+      )
+      expect(hook.current.preparing('java')).toBe(false)
+    })
+  })
+})
+
+/**
+ * A server running code in Vercel sandboxes builds its toolchains after it
+ * starts. On a first deploy the languages are "on their way" for a few
+ * minutes, and the Run button has to come on by itself when they arrive —
+ * nobody should have to know to reload.
+ */
+describe('languages that are still being set up', () => {
+  const BUILDING = {
+    ...SUPPORT,
+    languages: [
+      {
+        language: 'java',
+        available: false,
+        pending: true,
+        toolchain: 'JDK 11+',
+        version: '',
+        reason: 'JDK 11+ is being installed in the sandbox. This happens once, on the first start, and takes a few minutes.',
+      },
+    ],
+  }
+
+  const READY = {
+    ...SUPPORT,
+    languages: [{ language: 'java', available: true, toolchain: 'JDK 11+', version: '25.0.4.1' }],
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('says so, and asks again until they are ready', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const runners = vi
+      .spyOn(api, 'runners')
+      .mockResolvedValueOnce(BUILDING)
+      .mockResolvedValueOnce(BUILDING)
+      .mockResolvedValue(READY)
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+    expect(hook.current.preparing('java')).toBe(true)
+    expect(hook.current.blocker('java')).toMatch(/being installed/)
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS))
+    expect(runners).toHaveBeenCalledTimes(2)
+    expect(hook.current.preparing('java')).toBe(true)
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS))
+    expect(runners).toHaveBeenCalledTimes(3)
+    expect(hook.current.blocker('java')).toBeNull()
+    expect(hook.current.preparing('java')).toBe(false)
+
+    // Settled: no more asking.
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS * 3))
+    expect(runners).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not ask again once everything is settled', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const runners = vi.spyOn(api, 'runners').mockResolvedValue(READY)
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS * 3))
+    expect(runners).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps waiting through a re-check that fails, instead of switching running off', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const runners = vi
+      .spyOn(api, 'runners')
+      .mockResolvedValueOnce(BUILDING)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(READY)
+
+    const { result: hook } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS))
+    expect(runners).toHaveBeenCalledTimes(2)
+    expect(hook.current.support.enabled).toBe(true)
+    expect(hook.current.preparing('java')).toBe(true)
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS))
+    expect(hook.current.blocker('java')).toBeNull()
+  })
+
+  it('stops asking when the room is left', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const runners = vi.spyOn(api, 'runners').mockResolvedValue(BUILDING)
+
+    const { result: hook, unmount } = renderHook(() => useCodeRunner('room-1'))
+    await waitFor(() => expect(hook.current.support).toBeTruthy())
+    unmount()
+
+    await act(() => vi.advanceTimersByTimeAsync(PENDING_RECHECK_MS * 3))
+    expect(runners).toHaveBeenCalledTimes(1)
   })
 })
 

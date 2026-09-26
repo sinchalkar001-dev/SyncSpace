@@ -261,16 +261,19 @@ const schema = z
      *
      *   docker   a container per run, and if there is no container runtime
      *            then nothing runs at all
+     *   vercel   a microVM per run on Vercel Sandbox, for hosts that have no
+     *            container runtime to offer; nothing runs without its three
+     *            VERCEL_* credentials below
      *   process  a child process on this machine, which is not a sandbox
      *   auto     containers when available, a child process otherwise
      *
      * `auto` is the default so the feature works on a laptop with nothing
-     * installed. Production wants `docker`, and the difference is not
-     * cosmetic: `auto` on a host where the daemon is down silently becomes
+     * installed. Production wants `docker` or `vercel`, and the difference is
+     * not cosmetic: `auto` on a host where the daemon is down silently becomes
      * `process`, which runs untrusted code with the server's own filesystem
-     * and network access. `docker` refuses instead.
+     * and network access. The other two refuse instead.
      */
-    SANDBOX_BACKEND: z.enum(['auto', 'docker', 'process']).default('auto'),
+    SANDBOX_BACKEND: z.enum(['auto', 'docker', 'vercel', 'process']).default('auto'),
     SANDBOX_DOCKER_BIN: z.string().trim().min(1).default('docker'),
 
     // Per run. A memory limit and a process limit are what turn "allocate
@@ -300,6 +303,30 @@ const schema = z
     // Whether a language counts as available before its image is local.
     SANDBOX_PULL: booleanish.default('false'),
     SANDBOX_IMAGES: jsonRecord,
+
+    /**
+     * The Vercel account the `vercel` backend starts its microVMs in.
+     *
+     * An access token and the two ids that say whose sandboxes they are. On
+     * Vercel itself the SDK finds its own credentials; this server runs
+     * somewhere else, so they are spelled out. The token is the only secret
+     * of the three, and it never reaches a sandbox — the VMs are started with
+     * it, not given it.
+     */
+    VERCEL_TOKEN: blankIsUnset(z.string().trim().min(1).optional()),
+    VERCEL_TEAM_ID: blankIsUnset(z.string().trim().min(1).optional()),
+    VERCEL_PROJECT_ID: blankIsUnset(z.string().trim().min(1).optional()),
+
+    /**
+     * Where those microVMs run. Next to the server, ideally: every run is a
+     * handful of round trips between the two, so an ocean in between is felt
+     * on every press of Run. Vercel's own default is iad1.
+     */
+    SANDBOX_REGION: z
+      .string()
+      .trim()
+      .regex(/^[a-z]{3}\d$/, 'must be a Vercel region id such as iad1, sin1 or bom1')
+      .default('iad1'),
 
     /**
      * Admission, not just capacity.

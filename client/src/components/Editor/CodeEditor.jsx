@@ -448,6 +448,9 @@ export function CodeEditor({
       ? runner.blocker(language)
       : 'Running code is unavailable'
   const running = runner?.status === 'running'
+  // A language the server is still installing: said on the button itself,
+  // because a disabled "Run" with the reason in a tooltip reads as broken.
+  const preparing = !running && canExecute && Boolean(runner?.preparing?.(language))
 
   const run = useCallback(() => {
     if (!runner || blocker || running) return
@@ -536,8 +539,8 @@ export function CodeEditor({
               disabled={Boolean(blocker) || running}
               title={blocker || 'Run this code (Ctrl+Enter)'}
             >
-              {running ? <Spinner /> : <Icon name="play" size={13} />}
-              {running ? 'Running' : 'Run'}
+              {running || preparing ? <Spinner /> : <Icon name="play" size={13} />}
+              {running ? 'Running' : preparing ? 'Setting up' : 'Run'}
             </button>
 
             {/* Labelled, not an icon alone: a program that reads input fails

@@ -250,4 +250,42 @@ describe('environment validation', () => {
   it('rejects a CLIENT_URL carrying a path', () => {
     expect(() => loadEnv({ CLIENT_URL: 'https://app.test/verify' })).toThrow(/without a path/)
   })
+
+  describe('running code on Vercel Sandbox', () => {
+    it('accepts the vercel backend with its account', () => {
+      const env = loadEnv({
+        SANDBOX_BACKEND: 'vercel',
+        VERCEL_TOKEN: 'token',
+        VERCEL_TEAM_ID: 'team_abc',
+        VERCEL_PROJECT_ID: 'prj_abc',
+        SANDBOX_REGION: 'sin1',
+      })
+
+      expect(env).toMatchObject({
+        SANDBOX_BACKEND: 'vercel',
+        VERCEL_TEAM_ID: 'team_abc',
+        VERCEL_PROJECT_ID: 'prj_abc',
+        SANDBOX_REGION: 'sin1',
+      })
+    })
+
+    it('runs next to Vercel\'s own default unless told otherwise', () => {
+      expect(loadEnv({}).SANDBOX_REGION).toBe('iad1')
+    })
+
+    it('refuses a region that is not one', () => {
+      expect(() => loadEnv({ SANDBOX_REGION: 'singapore' })).toThrow(/SANDBOX_REGION/)
+    })
+
+    /**
+     * A missing account is the backend's to report, not a reason to stop the
+     * whole API from booting: everything but the Run button still works, and
+     * /runners says what is missing.
+     */
+    it('boots without the credentials, and treats cleared ones as unset', () => {
+      const env = loadEnv({ SANDBOX_BACKEND: 'vercel', VERCEL_TOKEN: '  ' })
+      expect(env.VERCEL_TOKEN).toBeUndefined()
+      expect(env.VERCEL_TEAM_ID).toBeUndefined()
+    })
+  })
 })

@@ -50,14 +50,35 @@ services:
       - key: ALLOW_ANONYMOUS
         value: true
 
-      # Running other people's code needs a container runtime, which this
-      # service does not have: `auto` would quietly fall back to running it as
-      # an ordinary child process, which is not a sandbox. Off until there is
-      # somewhere safe to run it.
+      # Running other people's code, somewhere that is not this service. It has
+      # no container runtime, and `auto` would quietly fall back to running
+      # programs as ordinary child processes here, which is not a sandbox. So
+      # each run gets a microVM of its own on Vercel Sandbox instead: no
+      # network, nothing of this server inside it, deleted afterwards.
+      #
+      # Until the three VERCEL_* values below are set this refuses to run
+      # anything, and the Run button says which of them is missing.
       - key: ALLOW_CODE_EXECUTION
-        value: false
+        value: true
       - key: SANDBOX_BACKEND
-        value: docker
+        value: vercel
+      # Beside this service, which runs in Singapore: every run is a handful
+      # of round trips between the two.
+      - key: SANDBOX_REGION
+        value: sin1
+
+      # The Vercel account the microVMs run in: an access token with access
+      # to the team (the only secret of the three), the team id, and the id
+      # of any project in that team — the client's will do, and the sandboxes
+      # are listed under it. Free on the Hobby plan up to its monthly
+      # allowance, after which Vercel pauses sandbox creation rather than
+      # charging, and each run reports that in the console.
+      - key: VERCEL_TOKEN
+        sync: false
+      - key: VERCEL_TEAM_ID
+        sync: false
+      - key: VERCEL_PROJECT_ID
+        sync: false
 
       # Email. Without a relay the server logs messages instead of sending
       # them, which leaves verification links unreachable — so set these

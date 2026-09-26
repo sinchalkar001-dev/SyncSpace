@@ -100,7 +100,40 @@ export const ENFORCEMENT = Object.freeze({
     environment: 'enforced',
     cleanup: 'enforced',
   }),
+
+  /**
+   * A microVM per run, on somebody else's hardware.
+   *
+   * Filesystem, network and environment are enforced by there being nothing
+   * to reach: the program is on a machine that holds only toolchains and its
+   * own source, whose network policy denies everything, and which is deleted
+   * afterwards. Memory and CPU are the VM's size. Processes and file size are
+   * rlimits on the unprivileged user it runs as, inside that VM.
+   */
+  vercel: Object.freeze({
+    timeout: 'enforced',
+    output: 'enforced',
+    memory: 'enforced',
+    cpu: 'enforced',
+    processes: 'enforced',
+    filesystem: 'enforced',
+    network: 'enforced',
+    environment: 'enforced',
+    cleanup: 'enforced',
+  }),
 })
+
+/**
+ * vCPUs for a microVM: one, or an even number, never a fraction.
+ *
+ * Here rather than in the backend because the numbers a deployment reports
+ * have to be the numbers it enforces, and a VM cannot be given 0.5 of a CPU
+ * or 256 MB of memory — it comes in whole vCPUs with 2 GB each.
+ */
+export function vcpusFor(cpus) {
+  const wanted = Math.max(1, Math.ceil(Number(cpus) || 1))
+  return wanted === 1 ? 1 : wanted + (wanted % 2)
+}
 
 /** Human wording for each control, used by the API and the interface. */
 export const CONTROL_LABELS = Object.freeze({
@@ -121,9 +154,15 @@ export const CONTROL_LABELS = Object.freeze({
  * Read rather than captured, because the tests move these at runtime — the
  * existing runner tests already do exactly that with the timeout and the
  * output cap, and a module-level snapshot would quietly ignore them.
+ *
+ * Per backend, because not every backend can impose every number as asked.
+ * A microVM is sized in whole vCPUs with 2 GB of memory each, so under
+ * `vercel` the CPU and memory reported are the VM's — what is actually
+ * enforced — rather than SANDBOX_CPUS and SANDBOX_MEMORY_MB, which would be a
+ * promise the deployment does not keep.
  */
-export function resolveLimits() {
-  return {
+export function resolveLimits(backend) {
+  const limits = {
     timeoutMs: env.RUN_TIMEOUT_MS,
     // Compilers are slower than the programs they produce, and a build that
     // overran the run budget would look to the author like a hanging program.
@@ -135,6 +174,13 @@ export function resolveLimits() {
     fileSizeMb: env.SANDBOX_FILE_SIZE_MB,
     network: env.SANDBOX_NETWORK,
   }
+
+  if (backend === 'vercel') {
+    limits.cpus = vcpusFor(env.SANDBOX_CPUS)
+    limits.memoryMb = limits.cpus * 2048
+  }
+
+  return limits
 }
 
 /**
@@ -145,7 +191,7 @@ export function resolveLimits() {
  */
 export function describeIsolation(backend) {
   const enforcement = ENFORCEMENT[backend] ?? ENFORCEMENT.process
-  const limits = resolveLimits()
+  const limits = resolveLimits(backend)
 
   return {
     backend,

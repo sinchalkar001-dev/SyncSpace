@@ -11,6 +11,7 @@ import { env } from './config/env.js'
 import { isAllowedOrigin } from './config/cors.js'
 import { logger } from './config/logger.js'
 import { initRateLimitStore } from './middleware/rateLimit.js'
+import { warmUpBackend } from './services/execution/backend.js'
 
 const COLLAB_PATH = '/collab'
 
@@ -107,6 +108,12 @@ export async function startServer({ port = env.PORT, host = env.HOST, connectDb 
     { port: address.port, collab: COLLAB_PATH, anonymous: env.ALLOW_ANONYMOUS },
     'syncspace server listening'
   )
+
+  // After listening, and not awaited: a sandbox that takes minutes to prepare
+  // must not keep the health check waiting, or the deploy is marked failed.
+  warmUpBackend().catch((error) => {
+    logger.warn({ err: error }, 'could not warm up the execution backend')
+  })
 
   let closing = null
   const close = () => {

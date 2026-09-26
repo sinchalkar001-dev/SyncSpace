@@ -3,28 +3,46 @@ import { logger } from '../../config/logger.js'
 import { unavailable } from '../../errors.js'
 import * as dockerBackend from './backends/docker.backend.js'
 import * as processBackend from './backends/process.backend.js'
+import * as vercelBackend from './backends/vercel.backend.js'
 
 /**
- * Which of the two ways of running a program this deployment uses.
+ * Which of the ways of running a program this deployment uses.
  *
- * The setting has three values and the difference between two of them is the
+ * The setting has four values and the difference between some of them is the
  * whole point:
  *
  *   docker    containers, and if there is no container runtime then nothing
  *             runs at all
+ *   vercel    a microVM per run on Vercel Sandbox, and if there are no
+ *             credentials for it then nothing runs at all
  *   process   a child process on this machine, which is not a sandbox
  *   auto      containers when they are available, a child process otherwise
  *
  * `auto` is the default because it is what makes the feature work on a laptop.
- * `docker` exists so that a production deployment can say "isolated or not at
- * all" and mean it. A silent downgrade from container to bare process is
- * precisely the failure worth refusing: everything keeps working, the tests
- * keep passing, and the isolation is gone.
+ * `docker` and `vercel` exist so that a production deployment can say
+ * "isolated or not at all" and mean it. A silent downgrade from a sandbox to a
+ * bare process is precisely the failure worth refusing: everything keeps
+ * working, the tests keep passing, and the isolation is gone.
+ *
+ * `auto` never picks `vercel`. Sending code to somebody's cloud account is a
+ * decision, and it costs their allowance — it is not something to discover
+ * because three environment variables happened to be set.
  */
 
-const BACKENDS = { docker: dockerBackend, process: processBackend }
+const BACKENDS = { docker: dockerBackend, process: processBackend, vercel: vercelBackend }
 
 let resolved = null
+
+/**
+ * A backend that was asked for by name and cannot be had.
+ *
+ * Deliberately not falling back. Someone asked for isolation.
+ */
+function refuse(requested, reason) {
+  refusal = reason
+  logger.error({ reason }, 'SANDBOX_BACKEND=' + requested + ' cannot be honoured; execution is disabled')
+  return null
+}
 
 async function choose() {
   const requested = env.SANDBOX_BACKEND
@@ -36,19 +54,18 @@ async function choose() {
     return processBackend
   }
 
+  if (requested === 'vercel') {
+    const vercel = await vercelBackend.readiness()
+    return vercel.ok ? vercelBackend : refuse(requested, vercel.reason)
+  }
+
   // Readiness, not merely presence. A daemon with no images answers every
   // question correctly and still cannot run a program inside the time budget —
   // it turns each run into a silent image download that ends as a timeout.
   const docker = await dockerBackend.readiness()
 
   if (requested === 'docker') {
-    if (!docker.ok) {
-      // Deliberately not falling back. Someone asked for isolation.
-      dockerRefusal = docker.reason
-      logger.error({ reason: docker.reason }, 'SANDBOX_BACKEND=docker cannot be honoured; execution is disabled')
-      return null
-    }
-    return dockerBackend
+    return docker.ok ? dockerBackend : refuse(requested, docker.reason)
   }
 
   if (docker.ok) return dockerBackend
@@ -61,8 +78,8 @@ async function choose() {
   return processBackend
 }
 
-/** Kept so the refusal can say which of the two reasons it was. */
-let dockerRefusal = null
+/** Kept so the refusal can say which of the reasons it was. */
+let refusal = null
 
 /**
  * The backend, resolved once.
@@ -83,7 +100,7 @@ export async function requireBackend() {
   if (!backend) {
     throw unavailable(
       'Isolated execution is not available on this server, so running code is switched off' +
-        (dockerRefusal ? ' — ' + dockerRefusal : ''),
+        (refusal ? ' — ' + refusal : ''),
       'sandbox_unavailable'
     )
   }
@@ -96,11 +113,41 @@ export async function activeBackendName() {
   return (await activeBackend())?.name ?? null
 }
 
+/**
+ * Why there is no backend, once the choice has been made and there is not.
+ *
+ * For /runners, so a Run button can say "VERCEL_TOKEN is not set" rather than
+ * blaming a missing compiler that was never the problem.
+ */
+export async function refusalReason() {
+  return (await activeBackend()) ? null : refusal
+}
+
+/**
+ * Gets a slow backend going before anybody needs it.
+ *
+ * Only the Vercel one is slow to get going: on a first start it builds the
+ * snapshot every run boots from, which takes minutes. Started here, at boot,
+ * that is minutes nobody spends looking at a disabled Run button. Its
+ * leftovers from an earlier process are cleared at the same time.
+ */
+export async function warmUpBackend() {
+  if (!env.ALLOW_CODE_EXECUTION || env.SANDBOX_BACKEND !== 'vercel') return
+
+  const backend = await activeBackend()
+  if (backend !== vercelBackend) return
+
+  vercelBackend.reap().catch((error) => {
+    logger.warn({ err: error }, 'could not look for leftover run sandboxes')
+  })
+}
+
 /** Test seam, and the hook the pull script uses after changing the setting. */
 export function resetBackendCache() {
   resolved = null
-  dockerRefusal = null
+  refusal = null
   dockerBackend.resetAvailabilityCache()
+  vercelBackend.resetAvailabilityCache()
 }
 
 export { BACKENDS }

@@ -19,6 +19,16 @@ import { api } from '../api/client.js'
 /** The states in which there is still something to stop. */
 const LIVE = new Set(['queued', 'running'])
 
+/**
+ * How often to ask again while a language is still being set up.
+ *
+ * A server that runs code in Vercel sandboxes builds their toolchains after it
+ * starts, which on a first deploy takes a few minutes. Asking once would leave
+ * the Run button off until somebody reloaded; asking every few seconds would
+ * be noise for a wait measured in minutes.
+ */
+export const PENDING_RECHECK_MS = 15000
+
 export function useCodeRunner(roomId, displayName) {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
@@ -43,15 +53,42 @@ export function useCodeRunner(roomId, displayName) {
 
   useEffect(() => {
     const controller = new AbortController()
+    let timer = null
+    let last = null
 
-    api
-      .runners(controller.signal)
-      .then(setSupport)
-      // Not being able to ask is the same as not being able to run: the button
-      // says so rather than failing when someone presses it.
-      .catch(() => setSupport({ enabled: false, languages: [] }))
+    const pending = (answer) => Boolean(answer?.languages?.some((entry) => entry.pending))
 
-    return () => controller.abort()
+    const ask = () =>
+      api
+        .runners(controller.signal)
+        .then((answer) => {
+          last = answer
+          setSupport(answer)
+          // Asked again only while something is on its way, and never once
+          // everything is settled — this is not a heartbeat.
+          if (pending(answer)) timer = setTimeout(ask, PENDING_RECHECK_MS)
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return
+
+          // A re-check that fails keeps what the last answer said and tries
+          // again: one dropped request should not switch the feature off.
+          if (pending(last)) {
+            timer = setTimeout(ask, PENDING_RECHECK_MS)
+            return
+          }
+
+          // Not being able to ask is the same as not being able to run: the
+          // button says so rather than failing when someone presses it.
+          setSupport({ enabled: false, languages: [] })
+        })
+
+    ask()
+
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
   }, [])
 
   // A run in flight when the room closes should not land on a gone component.
@@ -176,10 +213,19 @@ export function useCodeRunner(roomId, displayName) {
 
       const entry = support.languages.find((item) => item.language === language)
       if (!entry) return language + ' can be written and shared here, but not run'
-      if (!entry.available) return entry.toolchain + ' is not installed on the server'
+      // The server's own words when it has them: "being installed" and "could
+      // not be installed, because…" are both more use than "not installed".
+      if (!entry.available) return entry.reason || entry.toolchain + ' is not installed on the server'
 
       return null
     },
+    [support]
+  )
+
+  /** Whether a language is on its way rather than missing — the button says "Setting up". */
+  const preparing = useCallback(
+    (language) =>
+      Boolean(support?.languages?.find((item) => item.language === language && !item.available)?.pending),
     [support]
   )
 
@@ -202,6 +248,7 @@ export function useCodeRunner(roomId, displayName) {
       receiveState,
       clear,
       blocker,
+      preparing,
       request,
       requestId,
     }),
@@ -218,6 +265,7 @@ export function useCodeRunner(roomId, displayName) {
       receiveState,
       clear,
       blocker,
+      preparing,
       request,
       requestId,
     ]

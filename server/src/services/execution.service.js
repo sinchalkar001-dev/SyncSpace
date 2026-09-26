@@ -83,7 +83,7 @@ function announce(job, extra = {}) {
 async function runJob(job, signal) {
   const backend = await requireBackend()
   const recipe = RECIPES[job.language]
-  const limits = resolveLimits()
+  const limits = resolveLimits(backend.name)
 
   const dir = await mkdtemp(path.join(os.tmpdir(), 'syncspace-run-'))
   // Built from the directory this run actually got, so the rewriting is exact
@@ -99,6 +99,9 @@ async function runJob(job, signal) {
       recipe,
       language: job.language,
       workDir: dir,
+      // For a backend whose program runs on another machine, where the
+      // directory above means nothing and the source has to be sent instead.
+      source: job.payload.code,
       stdin: job.payload.stdin ?? '',
       limits,
       signal,

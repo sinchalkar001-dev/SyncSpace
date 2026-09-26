@@ -2775,7 +2775,7 @@ export const openapiDocument = {
           executionId: { type: 'string', format: 'uuid', description: 'Names this run for cancellation and history' },
           state: { $ref: '#/components/schemas/ExecutionState' },
           termination: { $ref: '#/components/schemas/Termination' },
-          backend: { type: ['string', 'null'], enum: ['docker', 'process', null], description: 'Which isolation actually ran it' },
+          backend: { type: ['string', 'null'], enum: ['docker', 'vercel', 'process', null], description: 'Which isolation actually ran it' },
           sourceHash: { type: 'string', description: 'SHA-256 of the code that ran' },
         },
       },
@@ -2839,13 +2839,21 @@ export const openapiDocument = {
           'Reported rather than assumed, because it depends on how the server was deployed: with a container runtime a program cannot open a socket or read the filesystem, and without one it certainly can. A client should treat `weak: true` as a reason to warn.',
         ].join('\n'),
         properties: {
-          backend: { type: 'string', enum: ['docker', 'process'], description: 'What actually ran it' },
-          available: { type: 'boolean', description: 'False when SANDBOX_BACKEND=docker and no runtime answered' },
+          backend: {
+            type: 'string',
+            enum: ['docker', 'vercel', 'process'],
+            description: 'What actually ran it. `vercel` is a microVM per run on Vercel Sandbox.',
+          },
+          available: {
+            type: 'boolean',
+            description:
+              'False when SANDBOX_BACKEND asked for docker or vercel and it cannot be had: no runtime answered, or no Vercel credentials',
+          },
           weak: { type: 'boolean', description: 'True when any control is unenforced' },
           unenforced: {
             type: 'array',
             items: { type: 'string' },
-            description: 'The controls this backend cannot impose. Empty under Docker.',
+            description: 'The controls this backend cannot impose. Empty under Docker and Vercel.',
           },
           enforcement: {
             type: 'object',
@@ -2871,9 +2879,20 @@ export const openapiDocument = {
         type: 'object',
         properties: {
           language: { type: 'string' },
-          available: { type: 'boolean', description: 'Probed once at first request' },
+          available: {
+            type: 'boolean',
+            description: 'Probed once at first request — except under Vercel, whose toolchains are built after start',
+          },
           toolchain: { type: 'string' },
           version: { type: 'string' },
+          reason: {
+            type: 'string',
+            description: 'Why it cannot run, when the backend knows better than "not installed". Absent when available.',
+          },
+          pending: {
+            type: 'boolean',
+            description: 'Present and true while the toolchain is still being prepared. Ask again shortly rather than treating it as missing.',
+          },
         },
       },
     },

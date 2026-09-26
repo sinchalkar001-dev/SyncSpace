@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { RECIPES, RUNNABLE_LANGUAGES } from '../src/services/execution/recipes.js'
-import { activeBackendName, resetBackendCache } from '../src/services/execution/backend.js'
+import { activeBackendName, requireBackend, resetBackendCache } from '../src/services/execution/backend.js'
 import * as docker from '../src/services/execution/backends/docker.backend.js'
+import { prepareToolchain, toolchainState } from '../src/services/execution/backends/vercel/toolchain.js'
 import { CONTROL_LABELS, CONTROLS, describeIsolation } from '../src/services/execution/limits.js'
 import { listRunnable } from '../src/services/runner.service.js'
 
@@ -15,7 +16,9 @@ import { listRunnable } from '../src/services/runner.service.js'
  * a language otherwise sits behind a download with no explanation.
  *
  *   node scripts/sandbox-check.js           report
- *   node scripts/sandbox-check.js --pull    fetch anything missing first
+ *   node scripts/sandbox-check.js --pull    fetch anything missing first — images
+ *                                           under Docker, the toolchain snapshot
+ *                                           under Vercel
  *   node scripts/sandbox-check.js --strict  exit non-zero if anything is unenforced
  */
 
@@ -32,10 +35,22 @@ async function main() {
 
   if (!backend) {
     console.error('No execution backend available.')
-    console.error('SANDBOX_BACKEND=docker was asked for and no container runtime answered,')
-    console.error('so this server will refuse to run code rather than run it unsandboxed.')
+    await requireBackend().catch((error) => console.error(error.message + '.'))
+    console.error('This server will refuse to run code rather than run it unsandboxed.')
     process.exitCode = 1
     return
+  }
+
+  if (backend === 'vercel') {
+    if (wantsPull) {
+      console.log('Preparing the sandbox toolchains (a few minutes the first time)\n')
+      await prepareToolchain().catch(() => {})
+    }
+
+    const toolchain = toolchainState()
+    console.log('Toolchains: ' + toolchain.status + (toolchain.snapshotId ? ' (' + toolchain.snapshotId + ')' : ''))
+    if (toolchain.reason) console.log('  ' + toolchain.reason)
+    console.log('')
   }
 
   if (wantsPull && backend === 'docker') {
@@ -92,7 +107,11 @@ async function main() {
   const missing = languages.filter((entry) => !entry.available).map((entry) => entry.language)
   if (missing.length) {
     console.log('Not runnable here: ' + missing.join(', '))
-    console.log('Run with --pull to fetch the images.')
+    console.log(
+      backend === 'vercel'
+        ? 'Run with --pull to wait for the toolchain snapshot to be built.'
+        : 'Run with --pull to fetch the images.'
+    )
   }
 }
 

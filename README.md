@@ -59,6 +59,7 @@ changing it means building again — setting it and redeploying is one step, not
 | Render | `CORS_ORIGIN` | the client's origin, exactly — scheme and host, no trailing slash |
 | Render | `CLIENT_URL` | the same origin; it is where emailed links point |
 | Render | `MONGODB_URI` | an Atlas connection string, including the database name |
+| Render | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | the Vercel account code runs in — see [Running code on Render](#running-code-on-render) |
 
 `CORS_ORIGIN` is checked on the WebSocket handshake as well as on REST, so a room that stays at
 "Connecting" while the rest of the app works usually means it is wrong.
@@ -521,7 +522,7 @@ still be written and shared.
 ```
 Client  →  POST /rooms/:id/run  →  execution job  →  queue  →  isolated runner
                                                                      ↓
-Room broadcast  ←  execution record  ←  result  ←  sandbox (container per run)
+Room broadcast  ←  execution record  ←  result  ←  sandbox (container or microVM per run)
 ```
 
 The queue is the part that is not obvious. Admission is checked before anything becomes a
@@ -574,14 +575,63 @@ execution budget is not a run but a timeout, on every language at once, with not
 message about images. `auto` falls back to the process backend and says why; `docker` refuses and
 names the fix. Either way, run `sandbox:pull` at deploy.
 
-Set **`SANDBOX_BACKEND=docker` in production.** The default is `auto`, which falls back to running
-programs as ordinary child processes when no container runtime answers — right for a laptop, wrong
-for a host anyone else can reach, and quiet about it either way. `docker` refuses to run code at
-all rather than run it unsandboxed. `npm run sandbox:check --strict` exits non-zero when anything
-is unenforced, which makes it a deploy gate.
+Set **`SANDBOX_BACKEND=docker` in production** — or `vercel` on a host with no container runtime,
+below. The default is `auto`, which falls back to running programs as ordinary child processes when
+no container runtime answers — right for a laptop, wrong for a host anyone else can reach, and quiet
+about it either way. `docker` refuses to run code at all rather than run it unsandboxed.
+`npm run sandbox:check --strict` exits non-zero when anything is unenforced, which makes it a deploy
+gate.
 
 The server needs access to the Docker socket, and the working directory is bind-mounted into the
 container — so on Docker-in-Docker or a rootless daemon, check that `SANDBOX_USER` can write to it.
+
+### Running code on Render
+
+Render, like most platforms that run a Node process, has no container runtime to give the Docker
+backend, and the process backend is not something to point at strangers. **`SANDBOX_BACKEND=vercel`
+moves the isolation off the machine**: each run gets a Firecracker microVM of its own on
+[Vercel Sandbox](https://vercel.com/docs/sandbox), and the API only ever sends it source and reads
+back output.
+
+| Control | How |
+| --- | --- |
+| Filesystem | A machine of its own, holding the toolchains and the program's source — nothing of the server |
+| Network | Vercel's `deny-all` network policy, unless `SANDBOX_NETWORK` says otherwise |
+| Environment | None of the server's exists there; the program gets `PATH`, `HOME` and toolchain caches |
+| Memory, CPU | The VM's size: whole vCPUs with 2 GB each, so `SANDBOX_CPUS` rounds up |
+| Processes, disk | `SANDBOX_PIDS` and `SANDBOX_FILE_SIZE_MB`, as rlimits on the program's user |
+| Privileges | `nobody`, no capabilities, `no_new_privs` — `sudo` inside the VM cannot undo it |
+| Timeout, output | `timeout` inside the VM; the output budget stops the run from this side |
+| Cleanup | The VM is deleted after every run, and stops itself shortly after if that fails |
+
+Vercel's images carry Node and Python only, so on its **first start the server builds the rest
+once**: a builder VM installs a JDK, g++, Go and Rust on Vercel's Node 24 image with
+[setup.sh](server/src/services/execution/backends/vercel/setup.sh) and is saved as a snapshot
+every run boots from. That takes a few minutes; the Run button says *Setting up* meanwhile and comes
+on by itself. The snapshot is kept without an expiry and found again by name on every later start,
+so a free-plan service waking from sleep does not rebuild it — and if it is ever deleted, the first
+run to find it missing says so and sets a rebuild going. Changing setup.sh builds a new one, and the
+old one is removed once nothing has used it for a week. What happens inside each VM is
+[run.sh](server/src/services/execution/backends/vercel/run.sh).
+
+To turn it on, [render.yaml](render.yaml) already sets `SANDBOX_BACKEND=vercel` and
+`SANDBOX_REGION=sin1`; three values are left for the dashboard:
+
+| Variable | Where to find it |
+| --- | --- |
+| `VERCEL_TOKEN` | Create one under Account Settings → Tokens, with access to the team. The only secret here |
+| `VERCEL_TEAM_ID` | `team_…`, in the team's Settings → General |
+| `VERCEL_PROJECT_ID` | `prj_…`, in any project's Settings → General — the client's will do; the sandboxes are listed under it |
+
+Until all three are set nothing runs, and the Run button names whichever is missing.
+`GET /api/v1/runners` shows the languages `pending` while the snapshot is built, then available.
+
+What it costs is time and allowance. Every press of Run boots a new VM, which is a few seconds on
+top of the program — the price of nothing surviving from one run to the next. Each run is one
+sandbox creation; at the time of writing the Hobby plan includes 5,000 a month along with CPU and
+memory allowances, and past them Vercel pauses creation rather than billing, so runs fail with that
+reason until the month turns. The boundary is Vercel's hypervisor rather than a shared kernel —
+stronger than a container, and Vercel's to keep.
 
 ### What it does not do
 
@@ -603,7 +653,11 @@ kernel exploit is a way out — `SANDBOX_RUNTIME=runsc` puts gVisor underneath i
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ALLOW_CODE_EXECUTION` | `true` | Turns running off entirely |
-| `SANDBOX_BACKEND` | `auto` | `docker`, `process`, or `auto`. Production wants `docker` |
+| `SANDBOX_BACKEND` | `auto` | `docker`, `vercel`, `process`, or `auto`. Production wants `docker` or `vercel`; `auto` never picks `vercel` |
+| `VERCEL_TOKEN` | — | The `vercel` backend's access token. All three or nothing runs |
+| `VERCEL_TEAM_ID` | — | The team its sandboxes run in |
+| `VERCEL_PROJECT_ID` | — | The project they are listed under |
+| `SANDBOX_REGION` | `iad1` | Where the `vercel` backend's VMs run; next to the server, ideally |
 | `SANDBOX_MEMORY_MB` | `256` | Memory ceiling per run |
 | `SANDBOX_CPUS` | `1` | CPU ceiling per run |
 | `SANDBOX_PIDS` | `64` | Process ceiling per run |

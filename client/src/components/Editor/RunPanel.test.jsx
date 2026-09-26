@@ -129,4 +129,15 @@ describe('what the server admits about isolation', () => {
 
     expect(screen.queryByText(/unsandboxed/)).not.toBeInTheDocument()
   })
+
+  /**
+   * A deployment that asked for a sandbox and cannot have one runs nothing.
+   * The report it sends still describes the process backend's weaknesses,
+   * but warning that programs run unsandboxed would be false.
+   */
+  it('does not warn about a sandbox that is refusing to run anything', () => {
+    renderPanel({ isolation: { backend: 'process', available: false, weak: true, unenforced: ['network'] } })
+
+    expect(screen.queryByText(/unsandboxed/)).not.toBeInTheDocument()
+  })
 })

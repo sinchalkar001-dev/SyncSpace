@@ -205,7 +205,10 @@ export function RunPanel({
           deployed, and "go and read the deployment's environment variables"
           is not an answer available to the person in the room.
         */}
-        {isolation?.weak && !busy && (
+        {/* Not when nothing is available at all: a deployment that refused to
+            run code because its sandbox is missing is not running anything
+            unsandboxed, and saying it is would be both false and alarming. */}
+        {isolation?.weak && isolation.available !== false && !busy && (
           <p className="runpanel__warning">
             <Icon name="alert" size={13} />
             <span>
