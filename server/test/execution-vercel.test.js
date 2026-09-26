@@ -314,6 +314,34 @@ describe('the toolchain snapshot', () => {
   })
 
   /**
+   * A builder cannot be called off — it is a machine somewhere installing
+   * packages. So forgetting the toolchains has to mean not believing it when
+   * it finishes, or an abandoned build lands minutes later and declares a
+   * snapshot ready that nothing is waiting for any more.
+   */
+  it('does not let a build it was told to forget declare a snapshot ready', async () => {
+    let finishSetup
+    server.use(
+      command(/^bash \/tmp\/syncspace-setup\.sh/, async () => {
+        await new Promise((resolve) => {
+          finishSetup = resolve
+        })
+        return { stdout: SETUP_OUTPUT, exitCode: 0 }
+      })
+    )
+
+    const abandoned = prepareToolchain().catch(() => {})
+    await vi.waitFor(() => expect(finishSetup).toBeTypeOf('function'))
+
+    // Forgotten while its builder is still installing.
+    resetToolchain()
+    finishSetup()
+    await abandoned
+
+    expect(toolchainState()).toMatchObject({ status: 'idle', snapshotId: null })
+  })
+
+  /**
    * An account that may not keep a snapshot for ever should get one with
    * Vercel's default expiry, not a build thrown away at its very last step.
    */

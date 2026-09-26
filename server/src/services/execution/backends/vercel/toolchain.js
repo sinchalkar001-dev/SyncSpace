@@ -84,10 +84,24 @@ const quickly = () => AbortSignal.timeout(CONTROL_TIMEOUT_MS)
 let state = { status: 'idle', snapshotId: null, versions: {}, reason: null, failedAt: 0 }
 let inflight = null
 
+/**
+ * Which preparation the state above belongs to.
+ *
+ * A preparation cannot be called off once it is running: it is a machine
+ * somewhere installing packages, and nothing here can reach in and stop it.
+ * What can be done is to stop believing it. Forgetting the toolchains moves
+ * the generation on, and a preparation from an earlier one no longer has
+ * anything to say about the snapshot this process is waiting for — otherwise
+ * an abandoned build can come back minutes later and declare a superseded
+ * snapshot ready, which is how runs end up booting from the wrong image.
+ */
+let generation = 0
+
 export const toolchainState = () => state
 
 /** Test seam, and what the backend's reset calls. */
 export function resetToolchain() {
+  generation += 1
   state = { status: 'idle', snapshotId: null, versions: {}, reason: null, failedAt: 0 }
   inflight = null
 }
@@ -121,17 +135,29 @@ export function prepareToolchain() {
     return Promise.reject(new Error(state.reason))
   }
 
-  inflight = prepare().finally(() => {
-    inflight = null
+  // Cleared only if it is still this preparation's turn. An abandoned one
+  // settling later would otherwise clear the promise its replacement is
+  // deduplicating against, and the next caller would start a third builder.
+  const mine = prepare().finally(() => {
+    if (inflight === mine) inflight = null
   })
-  return inflight
+
+  inflight = mine
+  return mine
 }
 
 async function prepare() {
   const creds = credentials()
   const name = builderName()
+  const mine = generation
 
-  state = { ...state, status: 'checking', reason: null }
+  // Everything this preparation learns is about the world it started in. Once
+  // that world has been forgotten, saying so would overwrite a newer answer.
+  const settle = (next) => {
+    if (generation === mine) state = next
+  }
+
+  settle({ ...state, status: 'checking', reason: null })
 
   try {
     // Without these the SDK would go looking for an OIDC token, which only
@@ -142,30 +168,30 @@ async function prepare() {
 
     const existing = await findSnapshot(sdk, creds, name)
     if (existing) {
-      state = {
+      settle({
         status: 'ready',
         snapshotId: existing.id,
         versions: await recordedVersions(sdk, creds, name),
         reason: null,
         failedAt: 0,
-      }
+      })
       logger.info({ snapshotId: existing.id, builder: name }, 'sandbox toolchains found')
       tidy(sdk, creds, name)
       return existing.id
     }
 
-    state = { ...state, status: 'building' }
+    settle({ ...state, status: 'building' })
     logger.info({ builder: name, image: BASE_IMAGE }, 'building the sandbox toolchains (first start only)')
 
     const built = await build(sdk, creds, name)
-    state = { status: 'ready', snapshotId: built.snapshotId, versions: built.versions, reason: null, failedAt: 0 }
+    settle({ status: 'ready', snapshotId: built.snapshotId, versions: built.versions, reason: null, failedAt: 0 })
     logger.info({ snapshotId: built.snapshotId, versions: built.versions }, 'sandbox toolchains ready')
 
     tidy(sdk, creds, name)
     return built.snapshotId
   } catch (error) {
     const reason = 'the sandbox toolchains could not be prepared: ' + describeError(error)
-    state = { ...state, status: 'failed', reason, failedAt: Date.now() }
+    settle({ ...state, status: 'failed', reason, failedAt: Date.now() })
     logger.error({ err: error, builder: name }, reason)
     throw new Error(reason, { cause: error })
   }
