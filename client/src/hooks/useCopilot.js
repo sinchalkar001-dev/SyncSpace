@@ -24,7 +24,12 @@ const EMPTY = Object.freeze({ state: 'idle', text: '', run: null, error: null, a
 /** Everything still undecided in a change set. */
 const undecided = (run) => (run?.files ?? []).filter((file) => file.status === 'proposed')
 
-export function useCopilot(roomId, { enabled = true, onError } = {}) {
+/**
+ * `viewer` is whoever is asking — a user id, or null for a guest. The server
+ * answers the two differently (a guest is told to sign in), so a change of
+ * viewer asks again rather than keeping the other person's answer.
+ */
+export function useCopilot(roomId, { enabled = true, viewer = null, onError } = {}) {
   const [catalogue, setCatalogue] = useState({ state: 'loading', data: null, error: null })
   const [current, setCurrent] = useState(EMPTY)
   const [history, setHistory] = useState([])
@@ -48,7 +53,7 @@ export function useCopilot(roomId, { enabled = true, onError } = {}) {
   const inflight = useRef(null)
   useEffect(() => () => inflight.current?.abort(), [])
 
-  /** What this deployment can do. Asked once; it does not change underneath. */
+  /** What this deployment can do, for this viewer. It does not change underneath. */
   useEffect(() => {
     if (!enabled || !roomId) return undefined
     const controller = new AbortController()
@@ -64,7 +69,7 @@ export function useCopilot(roomId, { enabled = true, onError } = {}) {
     )
 
     return () => controller.abort()
-  }, [enabled, roomId])
+  }, [enabled, roomId, viewer])
 
   const loadHistory = useCallback(
     async (signal) => {
@@ -85,7 +90,7 @@ export function useCopilot(roomId, { enabled = true, onError } = {}) {
     const controller = new AbortController()
     loadHistory(controller.signal)
     return () => controller.abort()
-  }, [enabled, roomId, loadHistory])
+  }, [enabled, roomId, viewer, loadHistory])
 
   /** Opens an answer for review and ticks everything still undecided. */
   const adopt = useCallback((run) => {

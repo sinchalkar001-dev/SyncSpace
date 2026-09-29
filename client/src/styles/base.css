@@ -80,6 +80,7 @@ a:hover {
 /* Amber against the grey of a sentence is about 2:1, short of the 3:1 that
    lets colour alone mark a link, so a link inside running text is underlined. */
 p a:not(.btn),
+.banner a:not(.btn),
 .auth__footer a:not(.btn) {
   text-decoration: underline;
   text-decoration-thickness: 1px;

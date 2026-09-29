@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { CopilotPanel } from './CopilotPanel.jsx'
 
 /**
@@ -60,20 +61,22 @@ function stubCopilot(overrides = {}) {
 
 const show = ({ copilot = stubCopilot(), ...props } = {}) => {
   render(
-    <CopilotPanel
-      open
-      onOpenChange={() => {}}
-      signedIn
-      paneMode="split"
-      selection={null}
-      replay={{ open: false }}
-      lastRun={null}
-      hasRuns={false}
-      focusedSurface={null}
-      buffer={null}
-      {...props}
-      copilot={copilot}
-    />
+    <MemoryRouter initialEntries={['/room/abc123']}>
+      <CopilotPanel
+        open
+        onOpenChange={() => {}}
+        signedIn
+        paneMode="split"
+        selection={null}
+        replay={{ open: false }}
+        lastRun={null}
+        hasRuns={false}
+        focusedSurface={null}
+        buffer={null}
+        {...props}
+        copilot={copilot}
+      />
+    </MemoryRouter>
   )
   return copilot
 }
@@ -170,6 +173,16 @@ describe('why a button will not run', () => {
     expect(screen.getByRole('button', { name: /Explain architecture/ })).toHaveAccessibleName(
       /Sign in/
     )
+  })
+
+  it('gives a guest a way to sign in', () => {
+    show({ signedIn: false, paneMode: 'board' })
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login')
+  })
+
+  it('offers no sign-in link to someone already signed in', () => {
+    show({ paneMode: 'board' })
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
   })
 
   it('explains a deployment with no model, and offers nothing', () => {

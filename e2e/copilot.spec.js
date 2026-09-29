@@ -244,4 +244,23 @@ test.describe('the engineering copilot', () => {
     await expect(panel(page).getByText('Asked in this room')).toBeVisible()
     await expect(panel(page).getByText(/Answering with/)).toBeVisible()
   })
+
+  /**
+   * A guest used to get a spinner that never stopped: the room never asked the
+   * server, which answers guests perfectly well — with what the copilot does
+   * and a request to sign in.
+   */
+  test('shows a guest what it does and how to be able to ask, rather than a spinner', async ({
+    page,
+  }) => {
+    await enterRoom(page, newRoom())
+    await openCopilot(page)
+
+    await expect(panel(page).getByText(/to ask the copilot/)).toBeVisible()
+    await expect(panel(page).getByText(/Checking what the copilot can do/)).toBeHidden()
+    await expect(panel(page).locator('.copilot__action').first()).toBeDisabled()
+
+    await panel(page).getByRole('link', { name: 'Sign in' }).click()
+    await page.waitForURL('**/login')
+  })
 })

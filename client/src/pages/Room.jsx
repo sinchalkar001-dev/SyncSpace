@@ -208,12 +208,17 @@ export default function Room() {
    * Declared here rather than beside the other panels because the socket
    * handlers below refer to it, and a `const` referenced above its own
    * declaration is a crash rather than an undefined.
+   *
+   * Asked for guests too. The server answers a guest with what the copilot
+   * can do and a request to sign in; not asking left the panel on "Checking"
+   * for ever, since nothing was ever going to answer.
    */
   const [copilotOpen, setCopilotOpen] = useState(false)
   const [selection, setSelection] = useState(null)
   const onCopilotError = useCallback((message) => toast.error(message), [toast])
   const copilot = useCopilot(roomId, {
-    enabled: copilotOpen && isAuthenticated,
+    enabled: copilotOpen,
+    viewer: user?.id ?? null,
     onError: onCopilotError,
   })
 

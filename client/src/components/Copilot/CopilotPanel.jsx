@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Icon } from '../ui/Icon.jsx'
 import { Button } from '../ui/Button.jsx'
 import { Spinner } from '../ui/Spinner.jsx'
@@ -83,6 +84,7 @@ export function CopilotPanel({
   onGoToMoment,
 }) {
   const { catalogue, current, history, selected, busy } = copilot
+  const { pathname } = useLocation()
 
   const [override, setOverride] = useState(null)
   const [note, setNote] = useState('')
@@ -260,6 +262,22 @@ export function CopilotPanel({
 
               {catalogue.state === 'ready' && enabled && !showingAnswer && (
                 <>
+                  {/* Shown, not hidden: a guest can see what it would do, and
+                      is one step from being able to ask. Signing in comes back
+                      to this room. */}
+                  {!signedIn && (
+                    <div className="banner copilot__signin" role="note">
+                      <Icon name="lock" size={15} className="banner__icon" />
+                      <span>
+                        <Link to="/login" state={{ from: pathname }}>
+                          Sign in
+                        </Link>{' '}
+                        to ask the copilot. Each answer uses this server&apos;s AI quota, so asking
+                        is kept to accounts.
+                      </span>
+                    </div>
+                  )}
+
                   <p className="copilot__hint muted">{CONTEXT_HINT[context]}</p>
 
                   <ul className="copilot__actions">

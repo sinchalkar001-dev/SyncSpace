@@ -139,6 +139,11 @@
   font-size: var(--text-xs);
 }
 
+.copilot__signin {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
 /* ---------- the actions ---------- */
 
 .copilot__actions {
