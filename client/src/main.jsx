@@ -6,6 +6,10 @@ import App from './App.jsx'
 import { AuthProvider } from './auth/AuthProvider.jsx'
 import { ToastProvider } from './components/ui/ToastProvider.jsx'
 import { ErrorBoundary } from './components/ErrorBoundary.jsx'
+import { wakeServer } from './api/client.js'
+import { SiteAnalytics } from './components/SiteAnalytics.jsx'
+
+wakeServer()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -19,6 +23,7 @@ createRoot(document.getElementById('root')).render(
             </a>
             <App />
           </AuthProvider>
+          <SiteAnalytics />
         </ToastProvider>
       </BrowserRouter>
     </ErrorBoundary>

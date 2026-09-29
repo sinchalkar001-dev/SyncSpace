@@ -391,9 +391,20 @@
 .route-loading {
   display: grid;
   place-items: center;
+  align-content: center;
   min-height: 60vh;
   gap: var(--space-4);
+  padding-inline: var(--space-5);
   color: var(--text-dim);
+}
+
+.route-loading__hint {
+  max-width: 40ch;
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  animation: fade-in var(--dur-slow) var(--ease-out) both;
 }
 
 /* ---------- skeletons ---------- */

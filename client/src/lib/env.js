@@ -2,6 +2,9 @@
 // In dev these stay relative so vite.config.js proxies them to the backend.
 const origin = import.meta.env.VITE_BACKEND_ORIGIN || ''
 
+/** The API's own address, or '' when it shares the page's (development). */
+export const BACKEND_ORIGIN = origin
+
 function wsFrom(httpUrl, path) {
   if (!httpUrl) {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

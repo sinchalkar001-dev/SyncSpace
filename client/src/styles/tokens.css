@@ -27,7 +27,9 @@
   --ink-5: #273330;
   --ink-6: #32403c;
   --ink-7: #4a5a55;
-  --ink-8: #6b7b75;
+  /* The faint-text step. No lighter than 4.5:1 on --bg and the first two
+     surfaces, WCAG AA for body text; #6b7b75 was 4.4:1 and failed it. */
+  --ink-8: #7c8c86;
   --ink-9: #9daca6;
   --ink-10: #c6d0cb;
   --ink-11: #e7ece8;

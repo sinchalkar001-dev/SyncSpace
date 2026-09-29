@@ -28,11 +28,12 @@ export function Spinner({ label, size = 'md' }) {
  * region and the visible text is its content, so the label is announced once
  * rather than twice.
  */
-export function LoadingBlock({ label = 'Loading' }) {
+export function LoadingBlock({ label = 'Loading', hint }) {
   return (
     <div className="route-loading" role="status">
       <Spinner size="lg" />
       <p className="muted">{label}</p>
+      {hint && <p className="route-loading__hint">{hint}</p>}
     </div>
   )
 }

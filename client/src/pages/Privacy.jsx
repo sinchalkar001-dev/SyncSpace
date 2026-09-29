@@ -76,7 +76,15 @@ export default function Privacy() {
             verification, password reset and invitation messages.
           </li>
         </ul>
-        <p>Nothing is sold, and there is no advertising or third-party analytics.</p>
+        <p>Nothing is sold, and there is no advertising.</p>
+
+        <h2>Counting visits</h2>
+        <p>
+          Page visits are counted with Vercel Web Analytics, which sets no cookies and cannot follow
+          you to other sites. Before a visit is counted, the room code and the token in an email
+          link are removed from the address, so what is recorded is that somebody opened a room,
+          never which one.
+        </p>
 
         <h2>How long it is kept</h2>
         <ul>
@@ -92,8 +100,8 @@ export default function Privacy() {
         <h2>In your browser</h2>
         <p>
           Your sign-in token and a few preferences — pane layout, editor options, whether you share
-          your activity — are kept in your browser&apos;s local storage. There are no tracking
-          cookies.
+          your activity, and that you have closed the note about this — are kept in your
+          browser&apos;s local storage. There are no tracking cookies.
         </p>
 
         <h2>What you control</h2>

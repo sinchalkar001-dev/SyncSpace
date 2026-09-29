@@ -1,0 +1,38 @@
+name: Keep the API awake
+
+# Render's free plan stops the API after 15 minutes without a request, and the
+# next visitor then waits up to a minute for it to start again. A request every
+# ten minutes means it never gets the chance. Scheduled runs cost nothing on a
+# public repository.
+#
+# What it does cost is Render instance hours: an API that never sleeps uses
+# about 730 of the 750 free hours a month, and those hours are shared by every
+# free service in the Render workspace. If a second free service is added
+# there, disable this workflow or both will run out before the month ends.
+#
+# GitHub pauses scheduled workflows in a repository that has had no activity
+# for 60 days; re-enable it from the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    name: Ask the API for its health
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      # Reports the answer but never fails on it: this is here to wake the
+      # server, not to watch it, and a failing schedule sends an email every
+      # ten minutes.
+      - name: GET /health
+        env:
+          HEALTH_URL: ${{ vars.API_HEALTH_URL || 'https://syncspace-api-e6i3.onrender.com/health' }}
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 120 "$HEALTH_URL" || true)
+          echo "$HEALTH_URL answered ${status:-nothing}"

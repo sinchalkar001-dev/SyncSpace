@@ -125,6 +125,19 @@ describe('registration validation', () => {
     expect(res.status).toBe(201)
     expect(res.body.user.name).toBe('customname')
   })
+
+  it('refuses a sign-up that filled in the field the form hides', async () => {
+    const res = await register({ ...ALICE, website: 'https://spam.example' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('automated_signup')
+    expect(await User.countDocuments({ email: ALICE.email })).toBe(0)
+  })
+
+  it('signs up as usual when that field is left empty', async () => {
+    const res = await register({ ...ALICE, website: '' })
+    expect(res.status).toBe(201)
+  })
 })
 
 describe('login validation', () => {

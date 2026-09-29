@@ -9,10 +9,15 @@
       content="A shared whiteboard beside a shared code editor. Sketch the architecture, write the code, run it and replay the session together, in real time."
     />
     <meta name="theme-color" content="#0d1211" />
+    <!-- SVG where it is understood, the .ico where it is not, and a square
+         PNG for a phone's home screen. -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
     <!-- Link previews. Scrapers read this file as served and run no scripts,
-         so these cannot be set from the app. -->
+         so these cannot be set from the app. The image and card type need the
+         site's address and are added by the build (vite.config.js). -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="SyncSpace" />
     <meta property="og:title" content="SyncSpace — Draw and code in the same room" />
@@ -20,7 +25,6 @@
       property="og:description"
       content="A shared whiteboard beside a shared code editor. Sketch the architecture, write the code, run it and replay the session together, in real time."
     />
-    <meta name="twitter:card" content="summary" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -35,10 +39,21 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Fetched without holding up the first paint: the page draws in the
+         fallback fonts and swaps when these arrive, rather than waiting on a
+         second origin before drawing anything. -->
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      media="print"
+      onload="this.media = 'all'"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { INDEXED_PATHS, isIndexed, robotsTxt, siteUrlFrom, sitemapXml } from './seo.js'
+import { INDEXED_PATHS, isIndexed, robotsTxt, siteUrlFrom, sitemapXml, socialTags } from './seo.js'
+
+describe('socialTags', () => {
+  const content = (tags, key) => tags.find((tag) => tag.property === key || tag.name === key)?.content
+
+  it('points link previews at the image by its full address', () => {
+    const tags = socialTags('https://syncspace.example.com')
+    expect(content(tags, 'og:image')).toBe('https://syncspace.example.com/og-image.jpg')
+    expect(content(tags, 'twitter:image')).toBe('https://syncspace.example.com/og-image.jpg')
+    expect(content(tags, 'twitter:card')).toBe('summary_large_image')
+    expect(content(tags, 'og:url')).toBe('https://syncspace.example.com/')
+  })
+
+  it('asks for a text card when there is no address to build an image link on', () => {
+    expect(socialTags(null)).toEqual([{ name: 'twitter:card', content: 'summary' }])
+  })
+})
 
 describe('isIndexed', () => {
-  it('lists the landing page, the ways in, and the privacy notice', () => {
-    for (const path of ['/', '/login', '/register', '/privacy']) expect(isIndexed(path)).toBe(true)
+  it('lists the landing page, the ways in, and the two policies', () => {
+    for (const path of ['/', '/login', '/register', '/privacy', '/terms']) expect(isIndexed(path)).toBe(true)
   })
 
   /** The reason it is opt-in: a room code in a search result is a leak. */

@@ -16,12 +16,23 @@ import { TOKEN_PATTERN } from '../utils/token.js'
 import { User } from '../models/User.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
-import { notFound } from '../errors.js'
+import { badRequest, notFound } from '../errors.js'
 
 const credentials = z.object({
   email: z.string().email().max(160),
   password: z.string().min(8).max(200),
   name: z.string().trim().min(1).max(32).optional(),
+})
+
+/**
+ * Sign-up, plus a field the form hides from people.
+ *
+ * Nobody who can see the form fills `website` in; a script filling every
+ * field it finds does. It is accepted by the schema so that the refusal below
+ * reads as a refusal rather than as a validation error naming the trap.
+ */
+const registration = credentials.extend({
+  website: z.string().max(500).optional(),
 })
 
 const changePasswordSchema = z.object({
@@ -92,9 +103,16 @@ export function createAuthRouter() {
     sessionRevokeLimiter,
   } = createRateLimiters()
 
-  authRouter.post('/register', registerLimiter, validate(credentials), async (req, res, next) => {
+  authRouter.post('/register', registerLimiter, validate(registration), async (req, res, next) => {
     try {
-      const { email, password, name } = req.body
+      const { email, password, name, website } = req.body
+      if (website) {
+        throw badRequest(
+          'The sign-up form was filled in by something other than you, such as a form-filling ' +
+            'extension. Turn it off for this page and try again.',
+          'automated_signup'
+        )
+      }
       const account = { email, password, name: name || email.split('@')[0] }
       res.status(201).json(await register(account, deviceFrom(req)))
     } catch (err) {

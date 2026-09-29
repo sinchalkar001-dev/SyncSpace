@@ -5,7 +5,7 @@ import { useAuth } from '../auth/useAuth.js'
 import { Field } from '../components/ui/Field.jsx'
 import { Button } from '../components/ui/Button.jsx'
 import { Icon } from '../components/ui/Icon.jsx'
-import { LoadingBlock } from '../components/ui/Spinner.jsx'
+import { SessionLoading } from '../components/SessionLoading.jsx'
 import { TopBar, Brand } from '../components/TopBar.jsx'
 import { ProductPreview } from '../components/ProductPreview.jsx'
 import { usePageMeta } from '../hooks/usePageMeta.js'
@@ -50,7 +50,7 @@ export default function Home() {
   // keeps the previous name rather than storing a blank one.
   const [name, setName] = useState(identity.name)
 
-  if (isLoading) return <LoadingBlock label="Loading" />
+  if (isLoading) return <SessionLoading />
   if (isAuthenticated) return <Navigate to="/dashboard" replace />
 
   const onCreate = (event) => {
@@ -77,8 +77,10 @@ export default function Home() {
           <Link className="btn btn--ghost" to="/login">
             Sign in
           </Link>
-          <Link className="btn btn--primary" to="/register">
-            Create an account
+          {/* Not primary: starting a room is the one thing this page asks
+              for, and two amber buttons would be two competing answers. */}
+          <Link className="btn" to="/register">
+            Sign up
           </Link>
         </div>
       </TopBar>
@@ -169,6 +171,7 @@ export default function Home() {
           </span>
           <span className="landing__foot-links">
             <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
             <Link to="/register">Create an account</Link>
           </span>
         </div>

@@ -14,7 +14,7 @@
 
 export const SITE_NAME = 'SyncSpace'
 
-export const INDEXED_PATHS = ['/', '/login', '/register', '/privacy']
+export const INDEXED_PATHS = ['/', '/login', '/register', '/privacy', '/terms']
 
 /** Not crawled at all. Prefixes, matched the way robots.txt matches them. */
 const PRIVATE_PATHS = [
@@ -70,4 +70,34 @@ export function sitemapXml(siteUrl) {
     '</urlset>',
     '',
   ].join('\n')
+}
+
+/** The picture a shared link unfurls into, in client/public/. */
+export const SOCIAL_IMAGE = {
+  path: '/og-image.jpg',
+  width: 1200,
+  height: 630,
+  alt: 'SyncSpace: a shared whiteboard beside a shared code editor',
+}
+
+/**
+ * The link-preview tags that depend on the deployment's address.
+ *
+ * Every scraper wants the image as an absolute address and none of them runs
+ * scripts, so these go into index.html at build time. Without an address
+ * there is no image to point at, and the card falls back to text.
+ */
+export function socialTags(siteUrl) {
+  if (!siteUrl) return [{ name: 'twitter:card', content: 'summary' }]
+
+  const image = siteUrl + SOCIAL_IMAGE.path
+  return [
+    { property: 'og:url', content: siteUrl + '/' },
+    { property: 'og:image', content: image },
+    { property: 'og:image:width', content: String(SOCIAL_IMAGE.width) },
+    { property: 'og:image:height', content: String(SOCIAL_IMAGE.height) },
+    { property: 'og:image:alt', content: SOCIAL_IMAGE.alt },
+    { name: 'twitter:card', content: 'summary_large_image' },
+    { name: 'twitter:image', content: image },
+  ]
 }

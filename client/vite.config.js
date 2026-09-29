@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { createLogger } from 'vite'
 import react from '@vitejs/plugin-react'
-import { robotsTxt, siteUrlFrom, sitemapXml } from './src/lib/seo.js'
+import { robotsTxt, siteUrlFrom, sitemapXml, socialTags } from './src/lib/seo.js'
 
 // The backend (Express + Hocuspocus + Socket.io) is expected on one HTTP server.
 // Dev requests are proxied so the client can use same-origin relative paths.
@@ -81,6 +81,32 @@ function crawlerFiles() {
 }
 
 /**
+ * The parts of <head> only the build knows.
+ *
+ * Link-preview tags need the site's absolute address (src/lib/seo.js). The
+ * preconnect opens the connection to the API while the scripts are still
+ * downloading, so the first request does not pay for DNS and TLS on top.
+ */
+function siteHead() {
+  const site = siteUrlFrom(process.env.SITE_URL)
+  let api = null
+
+  return {
+    name: 'syncspace-site-head',
+    configResolved(config) {
+      const origin = config.env.VITE_BACKEND_ORIGIN
+      if (origin && URL.canParse(origin)) api = new URL(origin).origin
+    },
+    transformIndexHtml() {
+      return [
+        ...(api ? [{ tag: 'link', attrs: { rel: 'preconnect', href: api, crossorigin: '' }, injectTo: 'head' }] : []),
+        ...socialTags(site).map((attrs) => ({ tag: 'meta', attrs, injectTo: 'head' })),
+      ]
+    },
+  }
+}
+
+/**
  * Vendor code in chunks of its own, which change only when a dependency does:
  * a deploy of the app then costs a returning visitor the app's code, not React
  * and the editor over again.
@@ -95,10 +121,15 @@ const VENDOR_CHUNKS = [
   ['konva', /\/node_modules\/(konva|react-konva)\//],
   ['yjs', /\/node_modules\/(yjs|y-monaco|y-protocols|lib0|@hocuspocus)\//],
   ['react', /\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run)\//],
+  // Rollup folds an unassigned helper into the first manual chunk that uses
+  // it. Monaco lazy-loads its grammars, so the helper behind every lazy route
+  // landed in the 3 MB editor chunk, and the landing page downloaded the whole
+  // editor to get it. It goes with React, which every page loads anyway.
+  ['react', /^\0vite\/preload-helper/],
 ]
 
 export default defineConfig({
-  plugins: [react(), crawlerFiles()],
+  plugins: [react(), crawlerFiles(), siteHead()],
   customLogger: quietProxyLogger(),
   server: {
     port: 5173,

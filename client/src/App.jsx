@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from './components/ProtectedRoute.jsx'
+import { StorageNotice } from './components/StorageNotice.jsx'
 import { LoadingBlock } from './components/ui/Spinner.jsx'
 import Home from './pages/Home.jsx'
 import Login from './pages/Login.jsx'
@@ -23,6 +24,7 @@ const VerifyEmail = lazy(() => import('./pages/VerifyEmail.jsx'))
 const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation.jsx'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword.jsx'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword.jsx'))
+const Terms = lazy(() => import('./pages/Terms.jsx'))
 
 export default function App() {
   return (
@@ -34,6 +36,7 @@ export default function App() {
         {/* Reachable without an account, and linked from the foot of every
             page a stranger can land on. */}
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         {/* Where every confirmation email points. Open to signed-out visitors:
             the link is as likely to be opened on a phone that has never signed
             in as in the browser that registered. */}
@@ -64,6 +67,7 @@ export default function App() {
         />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      <StorageNotice />
     </Suspense>
   )
 }

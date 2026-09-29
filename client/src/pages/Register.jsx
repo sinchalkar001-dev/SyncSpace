@@ -19,7 +19,7 @@ export default function Register() {
   const navigate = useNavigate()
   const toast = useToast()
 
-  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', website: '' })
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -47,6 +47,7 @@ export default function Register() {
         name: form.name.trim(),
         email: form.email.trim(),
         password: form.password,
+        website: form.website,
       })
       toast.success('Account created — welcome, ' + user.name)
       navigate('/dashboard', { replace: true })
@@ -115,9 +116,31 @@ export default function Register() {
           <PasswordStrength password={form.password} />
         </Field>
 
+        {/* A spam trap: out of sight and out of the tab order, so only a
+            script filling every field fills this one. The server refuses a
+            sign-up that did. */}
+        <div className="trap" aria-hidden="true">
+          <label>
+            Leave this empty
+            <input
+              type="text"
+              name="website"
+              tabIndex={-1}
+              autoComplete="off"
+              value={form.website}
+              onChange={update('website')}
+            />
+          </label>
+        </div>
+
         <Button type="submit" variant="primary" size="lg" block loading={busy}>
           Create account
         </Button>
+
+        <p className="auth__legal">
+          By creating an account you agree to the <Link to="/terms">terms of use</Link> and
+          the <Link to="/privacy">privacy notice</Link>.
+        </p>
       </form>
     </AuthCard>
   )

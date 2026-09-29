@@ -4,6 +4,45 @@ import { readToken, writeToken } from './storage.js'
 import { api, onAuthExpired, setAuthToken } from '../api/client.js'
 import { identityFromUser, loadIdentity, renameIdentity } from '../lib/identity.js'
 
+/** How long restoring a session may take before the page says why. */
+export const WAKING_AFTER_MS = 3000
+
+/**
+ * How long a server that is not answering at all is waited for.
+ *
+ * A free host stops the API after a quiet spell and takes up to a minute to
+ * start it again, answering nothing, or an error page, in the meantime.
+ */
+export const WAKE_DEADLINE_MS = 90 * 1000
+const WAKE_POLL_MS = 3000
+
+const unreachable = (error) => error?.code === 'network_error' || error?.code === 'server_unreachable'
+
+const pause = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true }
+    )
+  })
+
+async function restoreSession(signal) {
+  const deadline = Date.now() + WAKE_DEADLINE_MS
+  for (;;) {
+    try {
+      return await api.me(signal)
+    } catch (error) {
+      if (!unreachable(error) || Date.now() >= deadline) throw error
+      await pause(WAKE_POLL_MS, signal)
+    }
+  }
+}
+
 /**
  * Holds the session. Three states:
  *   loading       — restoring a stored token
@@ -18,6 +57,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(null)
   const [guest, setGuest] = useState(loadIdentity)
+  const [waking, setWaking] = useState(false)
 
   const logout = useCallback(() => {
     writeToken(null)
@@ -42,9 +82,9 @@ export function AuthProvider({ children }) {
 
     const controller = new AbortController()
     setAuthToken(stored)
+    const slow = setTimeout(() => setWaking(true), WAKING_AFTER_MS)
 
-    api
-      .me(controller.signal)
+    restoreSession(controller.signal)
       .then((payload) => {
         setUser(payload.user)
         setToken(stored)
@@ -52,12 +92,22 @@ export function AuthProvider({ children }) {
       })
       .catch((error) => {
         if (error?.name === 'AbortError') return
-        writeToken(null)
         setAuthToken(null)
         setStatus('guest')
+        // Only an answer about the token is a reason to forget it. A server
+        // that never answered said nothing about it, and dropping it there
+        // signed people out every time the API was asleep.
+        if (!unreachable(error)) writeToken(null)
+      })
+      .finally(() => {
+        clearTimeout(slow)
+        setWaking(false)
       })
 
-    return () => controller.abort()
+    return () => {
+      clearTimeout(slow)
+      controller.abort()
+    }
   }, [])
 
   /**
@@ -110,6 +160,7 @@ export function AuthProvider({ children }) {
       identity,
       isAuthenticated: status === 'authenticated',
       isLoading: status === 'loading',
+      waking,
       login,
       register,
       logout,
@@ -117,7 +168,7 @@ export function AuthProvider({ children }) {
       renameGuest,
       adopt,
     }),
-    [status, user, token, identity, login, register, logout, refresh, renameGuest, adopt]
+    [status, user, token, identity, waking, login, register, logout, refresh, renameGuest, adopt]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

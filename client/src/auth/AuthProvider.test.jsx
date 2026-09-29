@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AuthProvider } from './AuthProvider.jsx'
+import { AuthProvider, WAKE_DEADLINE_MS, WAKING_AFTER_MS } from './AuthProvider.jsx'
 import { useAuth } from './useAuth.js'
 import { setAuthToken } from '../api/client.js'
 
@@ -12,10 +12,11 @@ function jsonResponse(body, status = 200) {
 }
 
 function Probe() {
-  const { status, identity, isAuthenticated, login, logout } = useAuth()
+  const { status, identity, isAuthenticated, waking, login, logout } = useAuth()
   return (
     <div>
       <span data-testid="status">{status}</span>
+      <span data-testid="waking">{String(waking)}</span>
       <span data-testid="name">{identity.name}</span>
       <span data-testid="guest">{String(!isAuthenticated)}</span>
       <button onClick={() => login({ email: USER.email, password: 'passphrase' })}>sign in</button>
@@ -67,6 +68,51 @@ describe('AuthProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('guest'))
     expect(localStorage.getItem('syncspace:token')).toBeNull()
+  })
+
+  describe('while the server is asleep', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      return () => vi.useRealTimers()
+    })
+
+    const settle = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
+
+    it('keeps the stored token when the server never answers', async () => {
+      localStorage.setItem('syncspace:token', 'stored-token')
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+      renderProbe()
+      await settle(WAKE_DEADLINE_MS + 10_000)
+
+      expect(screen.getByTestId('status')).toHaveTextContent('guest')
+      expect(localStorage.getItem('syncspace:token')).toBe('stored-token')
+    })
+
+    it('says it is waiting, then restores the session once the server wakes', async () => {
+      localStorage.setItem('syncspace:token', 'stored-token')
+      let awake = false
+      vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+        awake
+          ? Promise.resolve(jsonResponse({ user: USER }))
+          : Promise.resolve({
+              ok: false,
+              status: 502,
+              json: () => Promise.reject(new SyntaxError()),
+            })
+      )
+
+      renderProbe()
+      await settle(WAKING_AFTER_MS + 100)
+      expect(screen.getByTestId('status')).toHaveTextContent('loading')
+      expect(screen.getByTestId('waking')).toHaveTextContent('true')
+
+      awake = true
+      await settle(10_000)
+
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated')
+      expect(screen.getByTestId('waking')).toHaveTextContent('false')
+    })
   })
 
   it('stores the token and identity after signing in', async () => {

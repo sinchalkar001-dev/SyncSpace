@@ -1,4 +1,4 @@
-import { API_URL } from '../lib/env.js'
+import { API_URL, BACKEND_ORIGIN } from '../lib/env.js'
 import { readEventStream } from '../lib/sse.js'
 
 export class ApiError extends Error {
@@ -20,6 +20,19 @@ export function setAuthToken(next) {
 /** Registered by the auth provider so an expired token logs the user out once. */
 export function onAuthExpired(handler) {
   expiredHandler = handler
+}
+
+/**
+ * Starts a sleeping API waking up while the first page is still being read.
+ *
+ * A free host stops the API after a quiet spell and needs up to a minute to
+ * start it again. Without this, that minute begins when somebody presses
+ * Start or Sign in; with it, it begins when the page opens. The answer is not
+ * needed, only the request.
+ */
+export function wakeServer() {
+  if (!import.meta.env.PROD || !BACKEND_ORIGIN) return
+  fetch(BACKEND_ORIGIN + '/health', { cache: 'no-store' }).catch(() => {})
 }
 
 const UNREACHABLE =
